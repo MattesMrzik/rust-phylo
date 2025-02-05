@@ -6,6 +6,7 @@ use crate::align;
 use crate::alignment::{Alignment, InternalMapping, Mapping, PairwiseAlignment, Sequences};
 use crate::tree::{NodeIdx, NodeIdx::Internal as Int, NodeIdx::Leaf, Tree};
 use crate::Result;
+use super::{AncestralAlignment, LeafMapping};
 
 pub struct AlignmentBuilder<'a> {
     tree: &'a Tree,
@@ -122,4 +123,58 @@ impl<'a> AlignmentBuilder<'a> {
         }
         PairwiseAlignment::new(upd_map_x, upd_map_y)
     }
+}
+
+pub struct AncestralAlignmentBuilder<'a> {
+    tree: &'a Tree,
+    seqs: Sequences,
+}
+
+impl<'a> AncestralAlignmentBuilder<'a> {
+    pub fn new(tree: &'a Tree, seqs: Sequences) -> AncestralAlignmentBuilder<'a> {
+        AncestralAlignmentBuilder { tree, seqs }
+    }
+
+    fn build_from_aligned_seqs_with_ancestors(self) -> Result<AncestralAlignment> {
+        let seqs = self.seqs.without_gaps();
+        let all_maps: LeafMapping  = self
+            .tree
+            .iter()
+            .map(|node| (node.idx, align!(self.seqs.record_by_id(&node.id).seq())))
+            .collect();
+        let leaf_encoding = seqs.generate_leaf_encoding();
+        self.tree.postorder().iter().for_each(|node_idx| {
+            println!(
+                "build_from_aligned_seqs_with_ancestors() : {:?}, children: {:?}, id: {:?}, seq: {:?}, map: {:?}",
+                node_idx,
+                self.tree.children(node_idx),
+                self.tree.node(node_idx).id,
+                self.seqs.record_by_id(&self.tree.node(node_idx).id).seq(),
+                all_maps[&node_idx]
+            );
+        });
+        
+        Ok(AncestralAlignment {
+            seqs,
+            node_map: all_maps,
+            leaf_encoding,
+        })
+    }
+
+    pub fn build(self) -> Result<AncestralAlignment> {
+        if self.seqs.aligned {
+            if self.tree.len() == self.seqs.len() {
+                self.build_from_aligned_seqs_with_ancestors()
+            } else {
+                bail!(
+                    "The number of sequences does not match the number of nodes \
+                    in the tree, which is required for ancestral alignment."
+                )
+            }
+        } else {
+            bail!("Unaligned sequences are not yet supported.")
+        }
+    }
+
+
 }

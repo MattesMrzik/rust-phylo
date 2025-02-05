@@ -10,6 +10,7 @@ pub mod likelihood;
 pub mod optimisers;
 pub mod phylo_info;
 pub mod pip_model;
+pub mod tkf92_model;
 pub mod substitution_models;
 pub mod tree;
 

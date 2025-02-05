@@ -1,6 +1,6 @@
 use bio::io::fasta::Record;
 
-use crate::alignment::Alignment;
+use crate::alignment::{Alignment, AncestralAlignment};
 use crate::substitution_models::FreqVector;
 use crate::tree::{NodeIdx, Tree};
 use crate::Result;
@@ -10,12 +10,12 @@ pub use phyloinfo_builder::*;
 
 /// The PhyloInfo struct contains all the information needed for phylogenetic inference.
 ///
-/// The struct can be built using the PhyloInfoBuilder from at least a fasta sequnce file.
+/// The struct can be built using the PhyloInfoBuilder from at least a fasta sequence file.
 /// At the moment the sequences need to be aligned.
 /// The struct also holds the leaf sequence character encodings.
 ///
 /// # TODO:
-/// * Enure encoding matches model.
+/// * Ensure encoding matches model.
 /// * Add support for unaligned sequences.
 #[derive(Debug, Clone)]
 pub struct PhyloInfo {
@@ -26,7 +26,7 @@ pub struct PhyloInfo {
 }
 
 impl PhyloInfo {
-    /// Compiles a represenataion of the alignment in a vector of fasta records.
+    /// Compiles a representation of the alignment in a vector of fasta records.
     /// The alignment is compiled from the subtree rooted at `subroot`.
     /// If `subroot` is None, the whole alignment is compiled.
     /// Bails if the tree does not contain the subroot or does not match the alignment.
@@ -77,6 +77,12 @@ impl PhyloInfo {
         freqs.scale_mut(1.0 / freqs.sum());
         freqs
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct PhyloInfoAncestors {
+    pub msa: AncestralAlignment,
+    pub tree: Tree,
 }
 
 #[cfg(test)]

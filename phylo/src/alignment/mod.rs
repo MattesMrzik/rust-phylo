@@ -15,6 +15,7 @@ pub use alignment_builder::*;
 pub type Position = Option<usize>;
 pub type Mapping = Vec<Option<usize>>;
 pub type InternalMapping = HashMap<NodeIdx, PairwiseAlignment>;
+// TODO: Maybe rename LeafMapping to NodeMapping since for TKF92 we also need sequences for internal nodes
 pub type LeafMapping = HashMap<NodeIdx, Mapping>;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -171,6 +172,32 @@ impl Alignment {
                 }
             })
             .collect::<Mapping>()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct AncestralAlignment {
+    pub(crate) seqs: Sequences,
+    // the type is called LeafMapping because it was originally only used for leaf nodes
+    node_map: LeafMapping,
+    pub(crate) leaf_encoding: HashMap<String, DMatrix<f64>>,
+    // TODO: Maybe also add the internal mapping here (if realignment is implemented)
+}
+
+impl AncestralAlignment {
+    pub fn len(&self) -> usize {
+        self.node_map
+            .values()
+            .next()
+            .map(|map| map.len())
+            .unwrap_or(0)
+    }
+    pub fn seq_count(&self) -> usize {
+        self.node_map.len()
+    }
+
+    pub fn get_node_map(&self) -> &LeafMapping {
+        &self.node_map
     }
 }
 
