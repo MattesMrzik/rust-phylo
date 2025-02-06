@@ -1,11 +1,7 @@
-use log::debug;
-use nalgebra::{zero, DMatrix};
+use nalgebra::DMatrix;
 
 use crate::{
-    alignment::AncestralAlignment,
-    phylo_info::PhyloInfoAncestors,
-    substitution_models::{QMatrix, SubstMatrix},
-    tree::NodeIdx::{self, Internal, Leaf},
+    alignment::AncestralAlignment, likelihood::TreeSearchCost, phylo_info::PhyloInfoAncestors, substitution_models::{QMatrix, SubstMatrix}, tree::NodeIdx::{self, Internal, Leaf}
 };
 use std::{
     cell::RefCell,
@@ -178,7 +174,25 @@ pub struct TKF92Cost<Q: QMatrix + Display> {
     //maybe refcell was used here to make it mutable in impl fn while keeping the other fields
     // of this struct immutable, i.e. only passing &self and not &mut self
     model_info: RefCell<TKF92ModelInfo<Q>>,
+
 }
+
+impl<Q: QMatrix + Display + Clone + 'static> TreeSearchCost for TKF92Cost<Q>
+{
+    fn cost(&self) -> f64 {
+        self.logl()
+    }
+
+    fn update_tree(&mut self, tree: crate::tree::Tree, dirty_nodes: &[NodeIdx]) {
+        self.phylo.tree = tree;
+        println!("{:?}", dirty_nodes);
+    }
+
+    fn tree(&self) -> &crate::tree::Tree {
+        &self.phylo.tree
+    }
+}
+
 
 impl<Q: QMatrix + Display + Clone> TKF92Cost<Q>
 // where
@@ -494,88 +508,6 @@ impl<Q: QMatrix + Display + Clone> TKF92Cost<Q>
         }
     }
 
-    fn set_root_old(&self) {
-        let model = &self.model;
-        let l = model.lambda();
-        let m = model.mu();
-        let r = model.r();
-        // do i need to drop here like pip did? but i am using a &mut *, so that might not be necessary
-        let model_info = &mut *self.model_info.borrow_mut();
-
-        let blocks = &model_info.blocks;
-        // let x = &mut model_info.aggregated_x;
-        // let prob = &mut model_info.prob;
-        let root_idx = &self.phylo.tree.root;
-        let root_id = usize::from(root_idx);
-
-        for (block_id, block) in blocks.iter().enumerate() {
-            let mut prob = 0.0;
-            let mut x: f64 = 1.0;
-            if self.phylo.msa.get_node_map()[root_idx][block - 1].is_some() {
-                let block_len = if block_id == 0 {
-                    *block
-                } else {
-                    block - blocks[block_id - 1]
-                };
-                if block_id == 0 {
-                    prob += (1.0 - l / m).ln();
-                }
-                // the eq seq at the root has a fragment
-                x *= l / m * (1.0 - r) / r;
-                prob += block_len as f64 * r.ln();
-
-                // felsenstein
-                for site in (block - block_len)..*block {
-                    for current_state in 0..self.model.q.n() {
-                        let mut prod_over_children = 1.0;
-                        for child_idx in &self.phylo.tree.node(root_idx).children {
-                            if self.phylo.msa.get_node_map()[child_idx][block - 1].is_none() {
-                                // before the child loop i could filter the children who actually have a surviving char
-                                // println!(
-                                //     "skipping a child {}\n\n",
-                                //     self.phylo.tree.node(child_idx).id
-                                // );
-                                continue;
-                            }
-                            let mut sum_over_children_states = 0.0;
-                            for child_state in 0..self.model.q.n() {
-                                let prob_of_mutating_to_child = model_info.models
-                                    [usize::from(child_idx)][(current_state, child_state)];
-                                let child_prob = model_info.felsenstein[usize::from(child_idx)]
-                                    [(site, child_state)];
-                                // println!("muration prob to child {:?}, in block {}, state {}, childstate {} = {} ", child_idx, block, current_state, child_state, prob_of_mutating_to_child);
-                                // println!("childprob              {:?}, in block {}, state {}, childstate {} = {} ", child_idx, block, current_state, child_state, child_prob);
-                                sum_over_children_states +=
-                                    (prob_of_mutating_to_child) * (child_prob);
-                            }
-                            prod_over_children *= sum_over_children_states;
-                        }
-                        model_info.felsenstein[root_id][(site, current_state)] = prod_over_children;
-                    }
-
-                    // sum over all off the eq prob
-                    // maybe i dont want to change the felsenstein vars to also include the eq probs of the
-                    // insertion char. but add it straight to the prob. which might make sense
-                    // if i want to reuse the felsenstein vars without the eq probs
-                    let mut sum = 0.0;
-                    for state in 0..self.model.q.n() {
-                        sum += (self.model.q.freqs()[state]
-                            * model_info.felsenstein[root_id][(site, state)]);
-                    }
-                    prob += sum.ln();
-                }
-            }
-            for child in &self.phylo.tree.node(root_idx).children {
-                let child_id = usize::from(child);
-                x *= model_info.aggregated_x[(child_id, block_id)];
-                prob += model_info.prob[(child_id, block_id)];
-            }
-
-            model_info.aggregated_x[(root_id, block_id)] = x;
-            model_info.prob[(root_id, block_id)] = prob;
-        }
-    }
-
     fn is_insertion_at_root(&self, block_id: usize) -> bool {
         self.phylo.msa.get_node_map()[&self.phylo.tree.root][block_id].is_some()
     }
@@ -596,6 +528,11 @@ impl<Q: QMatrix + Display + Clone> TKF92Cost<Q>
         let block_len = self.model_info.borrow().block_lens[block_id];
         let node_id = usize::from(node_idx);
         let mut sum = 0.0;
+
+        // sum over all off the eq prob
+        // maybe i dont want to change the felsenstein vars to also include the eq probs of the
+        // insertion char. but add it straight to the prob. which might make sense
+        // if i want to reuse the felsenstein vars without the eq probs
         for site in (block - block_len)..block {
             let mut sum_for_state = 0.0;
             for state in 0..self.model.q.n() {
