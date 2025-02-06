@@ -36,6 +36,8 @@ impl<Q: QMatrix + Clone> TKF92Model<Q> {
     // pip defined these for the trait EvoModel, but i dont think that i need all of this
     // p should be sufficient to calc this once per edge
     // perhaps for some optimizer it is required that i implement the EvoModel trait for my model
+    // even if i implement the evomodel trait for my model, do i need to put this on every edge or is it
+    // sufficient if i put a substmatrix there
     fn p(&self, time: f64) -> SubstMatrix {
         // if i dont clone here would it take ownership?
         (self.q.q().clone() * time).exp()
@@ -66,6 +68,7 @@ pub struct TKF92ModelInfo<Q: QMatrix> {
     // add the probs for the Immortal link, N, and the block_len * log(r)
     // factor_N: DMatrix<f64>,
     blocks: Vec<usize>,
+    block_lens: Vec<usize>,
 
     //a vector for every edge storing if the edge is time reversed or not,
 
@@ -82,6 +85,11 @@ pub struct TKF92ModelInfo<Q: QMatrix> {
     // do i really want string here. cant i also use the usize::from(NodeIdx) as key
     // i think this is because in pip we dont have a seq for every node
     leaf_sequence_info: HashMap<String, DMatrix<f64>>,
+
+    // last action: i may only need one if I don't compute nodes in parallel
+    // if i want to compute them in parallel i need to have one bool per edge
+    // if i am only using one then i have to reset it for every node
+    last_action: bool,
 }
 
 impl<Q: QMatrix + Clone> TKF92ModelInfo<Q> {
@@ -91,6 +99,7 @@ impl<Q: QMatrix + Clone> TKF92ModelInfo<Q> {
 
     pub fn new(phylo: &PhyloInfoAncestors, model: &TKF92Model<Q>) -> TKF92ModelInfo<Q> {
         let blocks = Self::get_blocks(&phylo.msa);
+        let block_lens = Self::get_block_lens(&blocks);
         let number_of_blocks = blocks.len();
         let n_states_q = model.q.n();
         TKF92ModelInfo::<Q> {
@@ -99,11 +108,13 @@ impl<Q: QMatrix + Clone> TKF92ModelInfo<Q> {
             prob: DMatrix::<f64>::zeros(phylo.tree.len(), number_of_blocks),
             // factor_N: DMatrix::<f64>::zeros(phylo.tree.len(), number_of_blocks),
             blocks,
+            block_lens,
             valid: false,
             models: vec![SubstMatrix::zeros(n_states_q, n_states_q); phylo.tree.len()],
             // node x site x state
             felsenstein: vec![DMatrix::zeros(phylo.msa.len(), n_states_q); phylo.tree.len()],
             leaf_sequence_info: Self::get_leaf_seq_info(&phylo, &model.q),
+            last_action: false,
         }
     }
 
@@ -122,12 +133,24 @@ impl<Q: QMatrix + Clone> TKF92ModelInfo<Q> {
                 if let Some(c) = alignment_map[i] {
                     let encoding = &leaf_encoding.column(c);
                     site_info.copy_from(encoding);
-                    site_info.scale_mut((1.0) / site_info.sum());
+                    // site_info.scale_mut((1.0) / site_info.sum());
                 }
             }
             leaf_seq_info.insert(node.id.clone(), leaf_seq_w_gaps);
         }
         leaf_seq_info
+    }
+
+    fn get_block_lens(blocks: &Vec<usize>) -> Vec<usize> {
+        let mut block_lens = vec![0, blocks.len()];
+        for (i, block) in blocks.iter().enumerate() {
+            block_lens[i] = if i == 0 {
+                *block
+            } else {
+                block - blocks[i - 1]
+            };
+        }
+        block_lens
     }
 
     fn get_blocks(msa: &AncestralAlignment) -> Vec<usize> {
@@ -200,30 +223,30 @@ impl<Q: QMatrix + Display + Clone> TKF92Cost<Q>
                 let time = tree.node(node_idx).blen;
                 let parent_id = &tree.node(node_idx).parent.unwrap();
                 let parent_is_gap = node_map[parent_id][i].is_none();
-                let child_is_gap = node_map[node_idx][i].is_none();
+                let current_is_gap = node_map[node_idx][i].is_none();
 
                 let b = Self::b(l, m, time);
                 // not using time reversed attr since we are not doing any rerooting yet
                 if i == 0 {
                     prob += Self::log_i1(l, b);
                 }
-                if parent_is_gap && child_is_gap {
+                if parent_is_gap && current_is_gap {
                     continue;
                 }
-                if !parent_is_gap && !child_is_gap {
+                if !parent_is_gap && !current_is_gap {
                     // homolog block
                     x *= Self::h1(l, m, b, time);
                     last_action[node_id_value] = false;
                 }
-                if !parent_is_gap && child_is_gap {
+                if !parent_is_gap && current_is_gap {
                     // deletion
                     x *= Self::n0(m, b);
                     last_action[node_id_value] = true;
                 }
-                if parent_is_gap && !child_is_gap {
+                if parent_is_gap && !current_is_gap {
                     // insertion
                     if last_action[node_id_value] {
-                        prob += Self::n1(l, m, b, time).ln();
+                        prob += Self::log_n1(l, m, b, time);
                         prob -= (l * b).ln();
                         prob -= Self::n0(m, b).ln();
                     }
@@ -238,16 +261,29 @@ impl<Q: QMatrix + Display + Clone> TKF92Cost<Q>
         prob
     }
 
-    fn reset_and_set_all_nodes(&self) {
-        // reset
-        // other than resetting i can change the implementation for the leaf and other internal leafs
-        // since then if i am at a leaf i can reset the values
-        // self.model_info.borrow_mut().aggregated_x.fill(1.0);
-        // for node in (0..self.phylo.tree.len()) {
-        //     self.model_info.borrow_mut().felsenstein[node].fill(0.0);
-        // }
-        // i dont need to reset the models per edge since they simply get overwritten
-        // set again
+    fn logl(&self) -> f64 {
+        if !self.model_info.borrow().valid {
+            self.reset_all_nodes();
+        }
+        // println!("x = {:?}", self.model_info.borrow().aggregated_x);
+        // println!("prob = {:?}", self.model_info.borrow().prob);
+        let mut logl = 0.0;
+        let root_id = usize::from(self.phylo.tree.root);
+        for i in 0..self.model_info.borrow().blocks.len() {
+            let block_len = self.model_info.borrow().block_lens[i];
+            logl += self.model_info.borrow().prob[(root_id, i)];
+            // TODO: maybe i also want to move the felsenstein root insertion calculation to here
+            // and not have it in set root
+            let x = self.model_info.borrow().aggregated_x[(root_id, i)];
+            if x != 1.0 {
+                logl += x.ln();
+                logl += (block_len as f64 - 1.0) * (1.0 + x).ln();
+            }
+        }
+        logl
+    }
+
+    fn reset_all_nodes(&self) {
         for node_idx in self.phylo.tree.postorder() {
             match node_idx {
                 Internal(_) => {
@@ -265,157 +301,200 @@ impl<Q: QMatrix + Display + Clone> TKF92Cost<Q>
         self.model_info.borrow_mut().valid = true;
     }
 
-    fn logl(&self) -> f64 {
-        if !self.model_info.borrow().valid {
-            self.reset_and_set_all_nodes();
-        }
-        println!("x = {:?}", self.model_info.borrow().aggregated_x);
-        println!("prob = {:?}", self.model_info.borrow().prob);
-        let mut logl = 0.0;
-        let root_id = usize::from(self.phylo.tree.root);
-        for (i, block) in self.model_info.borrow().blocks.iter().enumerate() {
-            // TODO: also get precalc these fragment lens
-            let fragment_len = if i == 0 {
-                *block
-            } else {
-                block - self.model_info.borrow().blocks[i - 1]
-            };
-            logl += self.model_info.borrow().prob[(root_id, i)];
-            let x = self.model_info.borrow().aggregated_x[(root_id, i)];
-            if x != 1.0 {
-                logl += x.ln();
-                logl += (fragment_len as f64 - 1.0) * (1.0 + x).ln();
+    fn set_root(&self) {
+        self.model_info.borrow_mut().last_action = false;
+        let root_idx = &self.phylo.tree.root;
+        let root_id = usize::from(root_idx);
+        let len = self.model_info.borrow().blocks.len();
+        for block_id in 0..len {
+            self.set_felsenstein_for_internal(root_idx, block_id);
+            self.set_indel_x_and_prob_for_root(block_id);
+            if self.is_insertion_at_root(block_id) {
+                // println!("trying to add felsenstein prob at the root");
+                self.model_info.borrow_mut().prob[(root_id, block_id)] +=
+                    self.felsenstein_to_prob(root_idx, block_id);
             }
         }
-        logl
     }
 
-    fn set_not_root(&self, node_idx: &NodeIdx) {
-        // even though self is not mutable here. since the field RefCell can be borrowed_mut
-        // it cant still be changed
-        // when i read this i assume that self is not changed, but id does change indeed
-        // do we want the &self with RefCell to keep model and phylo_info const?
+    fn set_internal(&self, node_idx: &NodeIdx) {
+        // self.set_not_root(node_idx);
+        self.model_info.borrow_mut().last_action = false;
         let node_id = usize::from(node_idx);
-        let node_name = &self.phylo.tree.node(node_idx).id;
-        let time = self.phylo.tree.node(node_idx).blen;
-        self.model_info.borrow_mut().models[node_id] = self.model.p(time);
-        let parent_id = &self.phylo.tree.node(node_idx).parent.unwrap();
+        self.model_info.borrow_mut().models[node_id] = self.model.p(self.phylo.tree.node(node_idx).blen);
+        let len = self.model_info.borrow().blocks.len();
+        for block_id in 0..len {
+            self.set_felsenstein_for_internal(node_idx, block_id);
+            self.set_indel_x_and_prob_for_not_root(node_idx, block_id);
+            if self.is_insertion_at_non_root(node_idx, block_id) {
+                self.model_info.borrow_mut().prob[(node_id, block_id)] +=
+                    self.felsenstein_to_prob(node_idx, block_id);
+            }
+        }
+    }
 
-        let mut last_action = false;
+    fn set_leaf(&self, node_idx: &NodeIdx) {
+        // self.set_not_root(node_idx);
+        self.model_info.borrow_mut().last_action = false;
+        let node_id = usize::from(node_idx);
+        let len = self.model_info.borrow().blocks.len();
+        self.model_info.borrow_mut().models[node_id] = self.model.p(self.phylo.tree.node(node_idx).blen);
+        for block_id in 0..len {
+            self.set_felsenstein_for_leaf(node_idx, block_id);
+            self.set_indel_x_and_prob_for_not_root(node_idx, block_id);
+            if self.is_insertion_at_non_root(node_idx, block_id) {
+                self.model_info.borrow_mut().prob[(node_id, block_id)] +=
+                    self.felsenstein_to_prob(node_idx, block_id);
+            }
+        }
+    }
+
+    fn set_indel_x_and_prob_for_root(&self, block_id: usize) {
+        let block_len = self.model_info.borrow().block_lens[block_id];
+
+        let l = self.model.lambda();
+        let m = self.model.mu();
+        let r = self.model.r();
+        let mut x = 1.0;
+        let mut prob = 0.0;
+        if block_id == 0 {
+            prob += (1.0 - l / m).ln();
+        }
+
+        let root_idx = &self.phylo.tree.root;
+        if self.phylo.msa.get_node_map()[root_idx][self.model_info.borrow().blocks[block_id] - 1]
+            .is_some()
+        {
+            x *= l / m * (1.0 - r) / r;
+            prob += block_len as f64 * r.ln();
+        }
+
+        // this is the same as in set_indel_x_and_prob_for_not_root
+        let node_id = usize::from(root_idx);
+        for child in &self.phylo.tree.node(root_idx).children {
+            let child_id = usize::from(child);
+            x *= self.model_info.borrow().aggregated_x[(child_id, block_id)];
+            prob += self.model_info.borrow().prob[(child_id, block_id)];
+        }
+        self.model_info.borrow_mut().prob[(node_id, block_id)] = prob;
+        self.model_info.borrow_mut().aggregated_x[(node_id, block_id)] = x;
+    }
+
+    fn set_indel_x_and_prob_for_not_root(&self, node_idx: &NodeIdx, block_id: usize) {
+        // or do i want to set the prob and x and not return it
+        // for the felsenstein prob i need to add it to the prob
+        // so i always have to set it with this method first and then
+        // add the felsenstein prob to it
+        let parent_id = &self.phylo.tree.node(node_idx).parent.unwrap();
+        let mut prob = 0.0;
+        let mut x: f64 = 1.0;
+        let block_len = self.model_info.borrow().block_lens[block_id];
+        let parent_is_gap = self.phylo.msa.get_node_map()[parent_id][block_id].is_none();
+        let current_is_gap = self.phylo.msa.get_node_map()[node_idx][block_id].is_none();
+
+        let time = self.phylo.tree.node(node_idx).blen;
 
         let l = self.model.lambda();
         let m = self.model.mu();
         let r = self.model.r();
         let b = Self::b(l, m, time);
 
-        // i could pre calc the values for the h d i factors here
-        // since in a continuous case the probability that another edge has the same len is zero
-        // https://stackoverflow.com/questions/77552217/how-to-borrow-mutable-reference-to-different-fields-of-a-struct-using-refcellb
-        let model_info = &mut *self.model_info.borrow_mut();
-        // since i want to access two fields. and i cant do model_info.borrow() for the blocks and
-        // then iterate through them and again access model_info.borrow_mut() to change the x and prob values
-        // let blocks = &model_info.blocks;
+        // not using time reversed attr since we are not doing any rerooting yet
+        if block_id == 0 {
+            prob += Self::log_i1(l, b);
+        }
+        if !parent_is_gap && current_is_gap {
+            // deletion
+            x *= Self::n0(m, b);
+            self.model_info.borrow_mut().last_action = true;
+        }
+        if !parent_is_gap && !current_is_gap {
+            // homolog block
+            x *= Self::h1(l, m, b, time);
+            self.model_info.borrow_mut().last_action = false;
+        }
+        if parent_is_gap && !current_is_gap {
+            // insertion
+            if self.model_info.borrow().last_action {
+                prob += Self::log_n1(l, m, b, time);
+                prob -= (l * b).ln();
+                prob -= Self::n0(m, b).ln();
+            }
+            x *= l * b * (1.0 - r) / r;
+            prob += block_len as f64 * r.ln();
+            self.model_info.borrow_mut().last_action = false;
+        }
 
-        for (block_id, block) in model_info.blocks.iter().enumerate() {
-            let mut prob = 0.0;
-            let mut x: f64 = 1.0;
-            let block_len = if block_id == 0 {
-                *block
-            } else {
-                block - model_info.blocks[block_id - 1]
-            };
-            let parent_is_gap = self.phylo.msa.get_node_map()[parent_id][block_id].is_none();
-            let child_is_gap = self.phylo.msa.get_node_map()[node_idx][block_id].is_none();
+        // this is the same as in set_indel_x_and_prob_for_root
+        for child in &self.phylo.tree.node(node_idx).children {
+            let child_id = usize::from(child);
+            x *= self.model_info.borrow().aggregated_x[(child_id, block_id)];
+            prob += self.model_info.borrow().prob[(child_id, block_id)];
+        }
+        let node_id = usize::from(node_idx);
+        self.model_info.borrow_mut().prob[(node_id, block_id)] = prob;
+        self.model_info.borrow_mut().aggregated_x[(node_id, block_id)] = x;
+    }
 
-            // not using time reversed attr since we are not doing any rerooting yet
-            if block_id == 0 {
-                prob += Self::log_i1(l, b);
-            }
-            if parent_is_gap && child_is_gap {
-                continue;
-            }
-            if !parent_is_gap && child_is_gap {
-                // deletion
-                x *= Self::n0(m, b);
-                last_action = true;
-            }
-            if !parent_is_gap && !child_is_gap {
-                // homolog block
-                x *= Self::h1(l, m, b, time);
-                last_action = false;
-            }
-            if parent_is_gap && !child_is_gap {
-                // insertion
-                if last_action {
-                    prob += Self::n1(l, m, b, time).ln();
-                    prob -= (l * b).ln();
-                    prob -= Self::n0(m, b).ln();
-                }
-                x *= l * b * (1.0 - r) / r;
-                prob += block_len as f64 * r.ln();
-                last_action = false
-            }
-
-            // felsenstein substitution
-            for site in (block - block_len)..*block {
-                println!("looking at site {site} for felsenstein");
-                if !child_is_gap {
-                    match node_idx {
-                        Leaf(_) => {
-                            for current_state in 0..self.model.q.n() {
-                                model_info.felsenstein[node_id][(site, current_state)] = model_info
-                                    .leaf_sequence_info[node_name][(current_state, block - 1)]
-                            }
-                        }
-                        Internal(_) => {
-                            for current_state in 0..self.model.q.n() {
-                                let mut prod_over_children = 1.0;
-                                for child_idx in &self.phylo.tree.node(node_idx).children {
-                                    let mut sum_over_children_states = 0.0;
-                                    for child_state in 0..self.model.q.n() {
-                                        let prob_of_mutating_to_child = model_info.models
-                                            [usize::from(child_idx)][(current_state, child_state)];
-                                        let child_prob = model_info.felsenstein
-                                            [usize::from(child_idx)][(site, child_state)];
-                                        sum_over_children_states +=
-                                            (prob_of_mutating_to_child) * (child_prob);
-                                    }
-                                    prod_over_children *= sum_over_children_states;
-                                }
-                                model_info.felsenstein[node_id][(site, current_state)] =
-                                    prod_over_children;
-                            }
-                        }
-                    };
-                    if parent_is_gap {
-                        // sum over all off the eq prob
-                        // maybe i dont want to change the felsenstein vars to also include the eq probs of the
-                        // insertion char. but add it straight to the prob. which might make sense
-                        // if i want to reuse the felsenstein vars without the eq probs
-                        let mut sum = 0.0;
-                        for state in 0..self.model.q.n() {
-                            sum += (self.model.q.freqs()[state]
-                                * model_info.felsenstein[node_id][(site, state)]);
-                        }
-                        prob += sum.ln();
+    fn set_felsenstein_for_internal(&self, node_idx: &NodeIdx, block_id: usize) {
+        let current_node_is_gap = self.phylo.msa.get_node_map()[node_idx][block_id].is_none();
+        if current_node_is_gap {
+            return;
+        }
+        let block = self.model_info.borrow().blocks[block_id];
+        let block_len = self.model_info.borrow().block_lens[block_id];
+        let node_id = usize::from(node_idx);
+        // TODO: can this also be written with matrix operations?
+        // println!("blocklens {:?}", self.model_info.borrow(s).block_lens);
+        for site in (block - block_len)..block {
+            for current_state in 0..self.model.q.n() {
+                let mut prod_over_children = 1.0;
+                for child_idx in &self.phylo.tree.node(node_idx).children {
+                    if self.phylo.msa.get_node_map()[child_idx][block - 1].is_none() {
+                        // println!("skipping node {} child {} block {} site {}", node_id, usize::from(child_idx), block, site);
+                        continue;
                     }
-                }
-            }
-            // now I need to look at the leaf encoding, which i may betrachten als kind sodass der alg
-            // ignorant ist ob wir gerade bei einem blatt sind oder bei einem internal node
+                    let mut sum_over_children_states = 0.0;
+                    for child_state in 0..self.model.q.n() {
+                        let prob_of_mutating_to_child = self.model_info.borrow().models
+                            [usize::from(child_idx)][(current_state, child_state)];
+                        let child_prob = self.model_info.borrow().felsenstein
+                            [usize::from(child_idx)][(site, child_state)];
 
-            // adding the children
-            for child in &self.phylo.tree.node(node_idx).children {
-                let child_id = usize::from(child);
-                x *= model_info.aggregated_x[(child_id, block_id)];
-                prob += model_info.prob[(child_id, block_id)];
+                        // println!("mutation prob {}, child_prob {}", prob_of_mutating_to_child, child_prob);
+                        sum_over_children_states += (prob_of_mutating_to_child) * (child_prob);
+                    }
+                    prod_over_children *= sum_over_children_states;
+                }
+                // println!("set felsenstein for internal, prod over children = {}", prod_over_children);
+                self.model_info.borrow_mut().felsenstein[node_id][(site, current_state)] =
+                    prod_over_children;
             }
-            model_info.prob[(node_id, block_id)] = prob;
-            model_info.aggregated_x[(node_id, block_id)] = x;
         }
     }
 
-    fn set_root(&self) {
+    fn set_felsenstein_for_leaf(&self, node_idx: &NodeIdx, block_id: usize) {
+        let current_node_is_gap = self.phylo.msa.get_node_map()[node_idx][block_id].is_none();
+        if current_node_is_gap {
+            return;
+        }
+        let block = self.model_info.borrow().blocks[block_id];
+        let block_len = self.model_info.borrow().block_lens[block_id];
+        let node_name = &self.phylo.tree.node(node_idx).id;
+        let node_id = usize::from(node_idx);
+
+        // TODO: can this also be written with matrix operations?
+        for site in (block - block_len)..block {
+            for current_state in 0..self.model.q.n() {
+                let leaf_prob = self.model_info.borrow().leaf_sequence_info[node_name]
+                [(current_state, block - 1)];
+                self.model_info.borrow_mut().felsenstein[node_id][(site, current_state)] = leaf_prob;
+                    
+            }
+        }
+    }
+
+    fn set_root_old(&self) {
         let model = &self.model;
         let l = model.lambda();
         let m = model.mu();
@@ -431,7 +510,7 @@ impl<Q: QMatrix + Display + Clone> TKF92Cost<Q>
 
         for (block_id, block) in blocks.iter().enumerate() {
             let mut prob = 0.0;
-            let mut x = 1.0;
+            let mut x: f64 = 1.0;
             if self.phylo.msa.get_node_map()[root_idx][block - 1].is_some() {
                 let block_len = if block_id == 0 {
                     *block
@@ -447,17 +526,15 @@ impl<Q: QMatrix + Display + Clone> TKF92Cost<Q>
 
                 // felsenstein
                 for site in (block - block_len)..*block {
-                    println!("looking at site {site} for felsenstein");
-
                     for current_state in 0..self.model.q.n() {
                         let mut prod_over_children = 1.0;
                         for child_idx in &self.phylo.tree.node(root_idx).children {
                             if self.phylo.msa.get_node_map()[child_idx][block - 1].is_none() {
                                 // before the child loop i could filter the children who actually have a surviving char
-                                println!(
-                                    "skipping a child {}\n\n",
-                                    self.phylo.tree.node(child_idx).id
-                                );
+                                // println!(
+                                //     "skipping a child {}\n\n",
+                                //     self.phylo.tree.node(child_idx).id
+                                // );
                                 continue;
                             }
                             let mut sum_over_children_states = 0.0;
@@ -466,8 +543,8 @@ impl<Q: QMatrix + Display + Clone> TKF92Cost<Q>
                                     [usize::from(child_idx)][(current_state, child_state)];
                                 let child_prob = model_info.felsenstein[usize::from(child_idx)]
                                     [(site, child_state)];
-                                println!("muration prob to child {:?}, in block {}, state {}, childstate {} = {} ", child_idx, block, current_state, child_state, prob_of_mutating_to_child);
-                                println!("childprob              {:?}, in block {}, state {}, childstate {} = {} ", child_idx, block, current_state, child_state, child_prob);
+                                // println!("muration prob to child {:?}, in block {}, state {}, childstate {} = {} ", child_idx, block, current_state, child_state, prob_of_mutating_to_child);
+                                // println!("childprob              {:?}, in block {}, state {}, childstate {} = {} ", child_idx, block, current_state, child_state, child_prob);
                                 sum_over_children_states +=
                                     (prob_of_mutating_to_child) * (child_prob);
                             }
@@ -499,12 +576,35 @@ impl<Q: QMatrix + Display + Clone> TKF92Cost<Q>
         }
     }
 
-    fn set_internal(&self, node_idx: &NodeIdx) {
-        self.set_not_root(node_idx);
+    fn is_insertion_at_root(&self, block_id: usize) -> bool {
+        self.phylo.msa.get_node_map()[&self.phylo.tree.root][block_id].is_some()
     }
 
-    fn set_leaf(&self, node_idx: &NodeIdx) {
-        self.set_not_root(node_idx);
+    fn is_insertion_at_non_root(&self, node_idx: &NodeIdx, block_id: usize) -> bool {
+        let parent_id = &self.phylo.tree.node(node_idx).parent.unwrap();
+        let parent_is_gap = self.phylo.msa.get_node_map()[parent_id][block_id].is_none();
+        let current_is_not_gap = self.phylo.msa.get_node_map()[node_idx][block_id].is_some();
+        parent_is_gap && current_is_not_gap
+    }
+
+    fn felsenstein_to_prob(&self, node_idx: &NodeIdx, block_id: usize) -> f64 {
+        let current_node_is_gap = self.phylo.msa.get_node_map()[node_idx][block_id].is_none();
+        if current_node_is_gap {
+            return 0.0;
+        }
+        let block = self.model_info.borrow().blocks[block_id];
+        let block_len = self.model_info.borrow().block_lens[block_id];
+        let node_id = usize::from(node_idx);
+        let mut sum = 0.0;
+        for site in (block - block_len)..block {
+            let mut sum_for_state = 0.0;
+            for state in 0..self.model.q.n() {
+                sum_for_state += self.model.q.freqs()[state]
+                    * self.model_info.borrow().felsenstein[node_id][(site, state)];
+            }
+            sum += sum_for_state.ln();
+        }
+        sum
     }
 
     // create a hash table such that for every node and therefore branch len we have this values precomputed
@@ -524,8 +624,8 @@ impl<Q: QMatrix + Display + Clone> TKF92Cost<Q>
         m * b
     }
 
-    fn n1(l: f64, m: f64, b: f64, t: f64) -> f64 {
-        (1.0 - (-m * t).exp() - m * b) * (1.0 - l * b)
+    fn log_n1(l: f64, m: f64, b: f64, t: f64) -> f64 {
+        ((1.0 - (-m * t).exp() - m * b) * (1.0 - l * b)).ln()
     }
 }
 
