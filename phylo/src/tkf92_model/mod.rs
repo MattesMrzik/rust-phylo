@@ -138,7 +138,7 @@ impl<Q: QMatrix + Clone> TKF92ModelInfo<Q> {
     }
 
     fn get_block_lens(blocks: &Vec<usize>) -> Vec<usize> {
-        let mut block_lens = vec![0, blocks.len()];
+        let mut block_lens = vec![0; blocks.len()];
         for (i, block) in blocks.iter().enumerate() {
             block_lens[i] = if i == 0 {
                 *block
