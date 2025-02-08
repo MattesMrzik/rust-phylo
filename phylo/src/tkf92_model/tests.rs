@@ -15,7 +15,7 @@ fn mytest_logl_all_n() {
     let newick_string = "(((A0:1.0,B1:1.0)I1:1.0,C2:1.0)I2:1.0);";
     let tree = from_newick(newick_string).unwrap().pop().unwrap();
     let seqs = Sequences::new(vec![
-        Record::with_attrs("A0", Some("A0 sequence"), b"NNN"),
+        Record::with_attrs("A0", Some("A0 sequence"), b"NN-"),
         Record::with_attrs("B1", Some("B1 sequence"), b"N--"),
         Record::with_attrs("I1", Some("I1 sequence"), b"NNN"),
         Record::with_attrs("C2", Some("C2 sequence"), b"-NN"),

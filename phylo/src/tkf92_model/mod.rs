@@ -80,6 +80,10 @@ pub struct TKF92ModelInfo<Q: QMatrix> {
 
     // do i really want string here. cant i also use the usize::from(NodeIdx) as key
     // i think this is because in pip we dont have a seq for every node
+    // TODO: since i no longer div by the sum i dont actually need to compute
+    // sth here, i cant simply use the leaf_mapping to access the correct
+    // site of the sequence
+    // node x site x state
     leaf_sequence_info: HashMap<String, DMatrix<f64>>,
 
     // last action: i may only need one if I don't compute nodes in parallel
@@ -130,6 +134,9 @@ impl<Q: QMatrix + Clone> TKF92ModelInfo<Q> {
                     let encoding = &leaf_encoding.column(c);
                     site_info.copy_from(encoding);
                     // site_info.scale_mut((1.0) / site_info.sum());
+                } else {
+                    site_info.fill(1.0);
+                    // println!("site info gap {}", site_info);
                 }
             }
             leaf_seq_info.insert(node.id.clone(), leaf_seq_w_gaps);
@@ -464,10 +471,10 @@ impl<Q: QMatrix + Display + Clone> TKF92Cost<Q>
             for current_state in 0..self.model.q.n() {
                 let mut prod_over_children = 1.0;
                 for child_idx in &self.phylo.tree.node(node_idx).children {
-                    if self.phylo.msa.get_node_map()[child_idx][block - 1].is_none() {
-                        // println!("skipping node {} child {} block {} site {}", node_id, usize::from(child_idx), block, site);
-                        continue;
-                    }
+                    // if self.phylo.msa.get_node_map()[child_idx][block - 1].is_none() {
+                    //     // println!("skipping node {} child {} block {} site {}", node_id, usize::from(child_idx), block, site);
+                    //     continue;
+                    // }
                     let mut sum_over_children_states = 0.0;
                     for child_state in 0..self.model.q.n() {
                         let prob_of_mutating_to_child = self.model_info.borrow().models
@@ -488,10 +495,10 @@ impl<Q: QMatrix + Display + Clone> TKF92Cost<Q>
     }
 
     fn set_felsenstein_for_leaf(&self, node_idx: &NodeIdx, block_id: usize) {
-        let current_node_is_gap = self.phylo.msa.get_node_map()[node_idx][block_id].is_none();
-        if current_node_is_gap {
-            return;
-        }
+        // let current_node_is_gap = self.phylo.msa.get_node_map()[node_idx][block_id].is_none();
+        // if current_node_is_gap {
+        //     return;
+        // }
         let block = self.model_info.borrow().blocks[block_id];
         let block_len = self.model_info.borrow().block_lens[block_id];
         let node_name = &self.phylo.tree.node(node_idx).id;
