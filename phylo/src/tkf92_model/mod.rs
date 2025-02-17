@@ -61,19 +61,19 @@ pub struct TKF92ModelInfo<Q: QMatrix> {
 
     // TODO: the aggregated nature of x and factor_n is not really needed now,
     //       maybe later for realignment
-    // aggregated_x[block, node] = the product of the xs of all the edges in the subtree
+    // aggregated_x[node, block] = the product of the xs of all the edges in the subtree
     aggregated_x: DMatrix<f64>,
 
-    // factor_n[block, node] = n1/ (n0 * lambda * beta(node.blen)) if there is an edge in the subtree
+    // factor_n[node, block] = n1/ (n0 * lambda * beta(node.blen)) if there is an edge in the subtree
     // where the current event is an insertion and the last one was a deletion
     factor_ns: DMatrix<f64>,
 
-    // felsenstein_prob[block, node] = contains the felsenstein prob of that column, i
+    // felsenstein_prob[node, block] = contains the felsenstein prob of that column, i
     // if there is an insertion in the subtree
     // TODO: this could be merged with factor_n
     felsenstein_prob: DMatrix<f64>,
 
-    // felsenstein[block][node, state]
+    // felsenstein[node][site, state]
     felsenstein: Vec<DMatrix<f64>>,
 
     // n0[node] = n0(node.blen), I might not need this for every node
@@ -169,7 +169,7 @@ impl<Q: QMatrix> TKF92ModelInfo<Q> {
 
         for node in phylo.tree.leaf_ids() {
             // println!("looking at node {}", node);
-            println!("{}", leaf_seq_info[&node]);
+            // println!("{}", leaf_seq_info[&node]);
         }
 
         leaf_seq_info
@@ -323,7 +323,7 @@ impl<Q: QMatrix + Display> TKF92Cost<Q>
         for block_id in 0..self.model_info.borrow().blocks.len() {
             let block_len = self.model_info.borrow().block_lens[block_id];
             logl += self.model_info.borrow().factor_ns[(root_id, block_id)];
-            logl += self.model_info.borrow().felsenstein_prob[block_id];
+            logl += self.model_info.borrow().felsenstein_prob[(root_id, block_id)];
             let x = self.model_info.borrow().aggregated_x[(root_id, block_id)];
             if x != 1.0 {
                 logl += x.ln();
