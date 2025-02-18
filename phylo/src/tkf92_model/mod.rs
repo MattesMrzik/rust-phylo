@@ -60,7 +60,7 @@ pub struct TKF92ModelInfo<Q: QMatrix> {
     phantom: PhantomData<Q>,
 
     // TODO: the aggregated nature of x and factor_n is not really needed now,
-    //       maybe later for realignment
+    //       maybe later for realignment.
     // aggregated_x[node, block] = the product of the xs of all the edges in the subtree
     aggregated_x: DMatrix<f64>,
 
@@ -71,6 +71,7 @@ pub struct TKF92ModelInfo<Q: QMatrix> {
     // felsenstein_prob[node, block] = contains the felsenstein prob of that column, i
     // if there is an insertion in the subtree
     // TODO: this could be merged with factor_n
+    // TODO: can i even decouple the substitution cost from indel probabilities?
     felsenstein_prob: DMatrix<f64>,
 
     // felsenstein[node][site, state]
