@@ -6,7 +6,8 @@ use crate::{
     likelihood::ModelSearchCost,
     phylo_info::{PhyloInfo, PhyloInfoAncestors},
     substitution_models::{
-        dna_models::JC69, QMatrix, SubstModel, SubstModelInfo, SubstitutionCostBuilder,
+        dna_models::{GTR, JC69, TN93},
+        QMatrix, SubstModel, SubstitutionCostBuilder,
     },
     tkf92_model::{TKF92Cost, TKF92Model, TKF92ModelInfo},
     tree::{tree_parser::from_newick, Tree},
@@ -73,99 +74,50 @@ fn mytest_subst() {
 
 #[test]
 fn mytest_logl_felsenstein() {
+    // arrange
     let newick_string = "(((A0:1.0,B1:1.0)I1:1.0,C2:1.0)I2:1.0);";
     let tree = from_newick(newick_string).unwrap().pop().unwrap();
-    let subtree_i1 = from_newick("((A0:1.0,B1:1.0)I1:1.0);")
-        .unwrap()
-        .pop()
-        .unwrap();
-    let subtree_a0 = from_newick("(A0:1.0);").unwrap().pop().unwrap();
-    let mut trees: HashMap<&str, Tree> = HashMap::new();
-    trees.insert("I2", tree.clone());
-    trees.insert("I1", subtree_i1);
-    trees.insert("A0", subtree_a0);
     let records = vec![
-        // Record::with_attrs("A0", Some("A0 sequence"), b"AA"),
-        // Record::with_attrs("B1", Some("B1 sequence"), b"AG"),
-        // Record::with_attrs("I1", Some("I1 sequence"), b"TA"),
-        // Record::with_attrs("C2", Some("C2 sequence"), b"-A"),
-        // Record::with_attrs("I2", Some("I2 sequence"), b"-A"),
-        Record::with_attrs("A0", Some("A0 sequence"), b"AC---"),
-        Record::with_attrs("B1", Some("B1 sequence"), b"A----"),
-        Record::with_attrs("I1", Some("I1 sequence"), b"TCCAG"),
-        Record::with_attrs("C2", Some("C2 sequence"), b"-CCAT"),
-        Record::with_attrs("I2", Some("I2 sequence"), b"-CCTA"),
+        Record::with_attrs("A0", Some("A0 sequence"), b"CC--"),
+        Record::with_attrs("B1", Some("B1 sequence"), b"A---"),
+        Record::with_attrs("I1", Some("I1 sequence"), b"TCCA"),
+        Record::with_attrs("C2", Some("C2 sequence"), b"-CCA"),
+        Record::with_attrs("I2", Some("I2 sequence"), b"-CCT"),
     ];
-    let seqs = Sequences::new(records.clone());
+    let seqs = Sequences::new(records);
 
-    let builder = AncestralAlignmentBuilder::new(&tree, seqs);
-    let msa: crate::alignment::AncestralAlignment = builder.build().unwrap();
-
+    let msa = AncestralAlignmentBuilder::new(&tree, seqs.clone())
+        .build()
+        .unwrap();
+    let msa_without_ancestors = AlignmentBuilder::new(&tree, seqs).build().unwrap();
     let phylo = PhyloInfoAncestors {
         msa,
         tree: tree.clone(),
     };
-    let jc = JC69::new(&[0.25, 0.25, 0.25, 0.25], &[0.3]);
+    let phylo_without_ancestors = PhyloInfo {
+        msa: msa_without_ancestors,
+        tree,
+    };
+    let freqs = &[0.1, 0.2, 0.3, 0.4];
+    let params = &[0.1, 0.2, 0.3, 0.4, 0.5];
+    let gtr = GTR::new(freqs, params);
     let tkf_model = TKF92Model {
-        q: jc,
+        q: gtr.clone(),
         params: vec![0.3, 0.4, 0.5],
     };
     let model_info = RefCell::new(TKF92ModelInfo::new(&phylo, &tkf_model));
-    println!("leaf seq info {:?}", model_info.borrow().leaf_sequence_info);
     let tkf_cost = TKF92Cost {
         model: tkf_model,
-        phylo,
+        phylo: phylo.clone(),
         model_info,
     };
 
-    let tkf_cost_with_out_felsenstein = tkf_cost.logl_old();
-    let mut felsenstein_cost = 0.0;
-    let n_blocks = tkf_cost.model_info.borrow().blocks.len();
-    for block_id in 0..n_blocks {
-        let block = tkf_cost.model_info.borrow().blocks[block_id];
-        let block_len = tkf_cost.model_info.borrow().block_lens[block_id];
-        let mut insertion_node = &tkf_cost.phylo.tree.root;
-        for node in tkf_cost.phylo.tree.postorder() {
-            let is_insertion = if node == &tkf_cost.phylo.tree.root {
-                tkf_cost.is_insertion_at_root(block_id)
-            } else {
-                tkf_cost.is_insertion_at_non_root(node, block_id)
-            };
-            if is_insertion {
-                insertion_node = node;
-                break;
-            }
-        }
-        // extract subtree and submsa for this insertion
-
-        let sub_tree = trees
-            .get(&tkf_cost.phylo.tree.node(insertion_node).id[..])
-            .unwrap();
-        let sub_msa = AlignmentBuilder::new(
-            &sub_tree,
-            Sequences::new(
-                records
-                    .iter()
-                    .filter(|x| !x.id().starts_with("I"))
-                    .map(|x| {
-                        Record::with_attrs(x.id(), x.desc(), &x.seq()[(block - block_len)..block])
-                    })
-                    .collect(),
-            ),
-        )
+    let subst = SubstModel::<GTR>::new(freqs, params).unwrap();
+    let cost = SubstitutionCostBuilder::<GTR>::new(subst, phylo_without_ancestors)
         .build()
         .unwrap();
-        let subst_phylo = PhyloInfo {
-            msa: sub_msa,
-            tree: sub_tree.clone(),
-        };
-        let sub_model = SubstModel::<JC69>::new(&[0.25, 0.25, 0.25, 0.25], &[0.3]).unwrap();
-        let cost = SubstitutionCostBuilder::<JC69>::new(sub_model, subst_phylo)
-            .build()
-            .unwrap();
-        let curret_cost = cost.cost();
-        felsenstein_cost += curret_cost;
-    }
+    let felsenstein_cost = cost.cost();
+    let tkf_cost_with_out_felsenstein = tkf_cost.logl_old();
     assert_relative_eq!(
         tkf_cost_with_out_felsenstein + felsenstein_cost,
         tkf_cost.logl()

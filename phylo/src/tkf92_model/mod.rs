@@ -167,10 +167,10 @@ impl<Q: QMatrix> TKF92ModelInfo<Q> {
             // println!("insert at node {}", node.id);
         }
 
-        for node in phylo.tree.leaf_ids() {
-            // println!("looking at node {}", node);
-            // println!("{}", leaf_seq_info[&node]);
-        }
+        // for node in phylo.tree.leaf_ids() {
+        //     println!("looking at node {}", node);
+        //     println!("{}", leaf_seq_info[&node]);
+        // }
 
         leaf_seq_info
     }
@@ -593,8 +593,8 @@ impl<Q: QMatrix + Display> TKF92Cost<Q>
         // TODO: can this also be written with matrix operations?
         for site in (block - block_len)..block {
             for current_state in 0..self.model.q.n() {
-                let leaf_prob = self.model_info.borrow().leaf_sequence_info[node_name]
-                    [(current_state, block - 1)];
+                let leaf_prob =
+                    self.model_info.borrow().leaf_sequence_info[node_name][(current_state, site)];
                 self.model_info.borrow_mut().felsenstein[node_id][(site, current_state)] =
                     leaf_prob;
             }
