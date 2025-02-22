@@ -111,10 +111,8 @@ pub struct TKF92ModelInfo<Q: QMatrix> {
     // leaf_sequence_info[node.id][site, state] = the prob of observing this state
     leaf_sequence_info: HashMap<String, DMatrix<f64>>,
 
-    // true if the last event was a deletion
-    // TODO: if computation in parallel, then a vector is needed
-    // needs to be reset for every node
-    last_action: bool,
+    // last_action[usize::from(node)] = true if the last event was a deletion for a that node
+    last_action: Vec<bool>,
 
     // true if the all the intermediate values are correctly set
     valid: bool,
@@ -142,7 +140,7 @@ impl<Q: QMatrix> TKF92ModelInfo<Q> {
             block_lens,
             models: vec![SubstMatrix::zeros(n_states, n_states); n_nodes],
             leaf_sequence_info: Self::get_leaf_seq_info(&phylo, &model.q),
-            last_action: false,
+            last_action: vec![false; n_nodes],
             valid: false,
         }
     }
@@ -321,11 +319,20 @@ impl<Q: QMatrix + Display> TKF92Cost<Q>
             }
             logl += Self::log_i1(l, self.model_info.borrow_mut().beta[usize::from(node)]);
         }
+        println!("calculatin loglike, and the const part is {}", logl);
         for block_id in 0..self.model_info.borrow().blocks.len() {
+            println!("block = {}", block_id);
             let block_len = self.model_info.borrow().block_lens[block_id];
             logl += self.model_info.borrow().factor_ns[(root_id, block_id)];
             logl += self.model_info.borrow().felsenstein_prob[(root_id, block_id)];
+
+            println!(
+                "factor n {}, felsensteinprob {}",
+                self.model_info.borrow().factor_ns[(root_id, block_id)],
+                self.model_info.borrow().felsenstein_prob[(root_id, block_id)]
+            );
             let x = self.model_info.borrow().aggregated_x[(root_id, block_id)];
+            println!("x = {}", x);
             if x != 1.0 {
                 logl += x.ln();
                 logl += (block_len as f64 - 1.0) * (1.0 + x).ln();
@@ -361,7 +368,6 @@ impl<Q: QMatrix + Display> TKF92Cost<Q>
     }
 
     fn set_root(&self) {
-        self.model_info.borrow_mut().last_action = false;
         let root_idx = &self.phylo.tree.root;
         let len = self.model_info.borrow().blocks.len();
         for block_id in 0..len {
@@ -372,7 +378,6 @@ impl<Q: QMatrix + Display> TKF92Cost<Q>
     }
 
     fn set_internal(&self, node_idx: &NodeIdx) {
-        self.model_info.borrow_mut().last_action = false;
         let node_id = usize::from(node_idx);
         self.model_info.borrow_mut().models[node_id] =
             self.model.p(self.phylo.tree.node(node_idx).blen);
@@ -385,7 +390,6 @@ impl<Q: QMatrix + Display> TKF92Cost<Q>
     }
 
     fn set_leaf(&self, node_idx: &NodeIdx) {
-        self.model_info.borrow_mut().last_action = false;
         let node_id = usize::from(node_idx);
         let len = self.model_info.borrow().blocks.len();
         self.model_info.borrow_mut().models[node_id] =
@@ -486,6 +490,10 @@ impl<Q: QMatrix + Display> TKF92Cost<Q>
 
         let time = self.phylo.tree.node(node_idx).blen;
 
+        if block_id == 0 {
+            self.model_info.borrow_mut().last_action[node_id] = false;
+        }
+
         let l = self.model.lambda();
         let m = self.model.mu();
         let r = self.model.r();
@@ -501,7 +509,7 @@ impl<Q: QMatrix + Display> TKF92Cost<Q>
                     x *= n0;
                 }
             }
-            self.model_info.borrow_mut().last_action = true;
+            self.model_info.borrow_mut().last_action[node_id] = true;
         }
         if !parent_is_gap && !current_is_gap {
             // homolog
@@ -514,11 +522,11 @@ impl<Q: QMatrix + Display> TKF92Cost<Q>
                     x *= h1;
                 }
             }
-            self.model_info.borrow_mut().last_action = false;
+            self.model_info.borrow_mut().last_action[node_id] = false;
         }
         if parent_is_gap && !current_is_gap {
             // insertion
-            if self.model_info.borrow().last_action {
+            if self.model_info.borrow().last_action[node_id] {
                 let n_option = self.model_info.borrow().factor_n[node_id];
                 match n_option {
                     Some(n) => x *= n,
@@ -527,7 +535,15 @@ impl<Q: QMatrix + Display> TKF92Cost<Q>
                         let mut n = Self::log_n1(l, m, b, time);
                         n -= (l * b).ln();
                         // since the last event is an deletion the n0 for this node_idx is definitely not None
-                        n -= self.model_info.borrow().n0[node_id].unwrap();
+                        let n0_option = self.model_info.borrow().n0[node_id];
+                        match n0_option {
+                            Some(n0) => n -= n0,
+                            None => {
+                                let n0 = Self::n0(m, self.model_info.borrow().beta[node_id]);
+                                self.model_info.borrow_mut().n0[node_id] = Some(n0);
+                                n -= n0
+                            }
+                        }
                         self.model_info.borrow_mut().factor_n[node_id] = Some(n);
                         factor_n += n;
                     }
@@ -542,17 +558,19 @@ impl<Q: QMatrix + Display> TKF92Cost<Q>
                     x *= insertion;
                 }
             }
-            self.model_info.borrow_mut().last_action = false;
+            self.model_info.borrow_mut().last_action[node_id] = false;
         }
         (x, factor_n)
     }
 
     fn set_felsenstein_for_internal(&self, node_idx: &NodeIdx, block_id: usize) {
-        let site = self.model_info.borrow().blocks[block_id] - 1;
-        let current_node_is_gap = self.phylo.msa.get_node_map()[node_idx][site].is_none();
-        if current_node_is_gap {
-            return;
-        }
+        // TODO: this avoids unnecessary computation but breaks reassignment,
+        //       since there the get_node_map might disagree with the NNI node assignment
+        // let site = self.model_info.borrow().blocks[block_id] - 1;
+        // let current_node_is_gap = self.phylo.msa.get_node_map()[node_idx][site].is_none();
+        // if current_node_is_gap {
+        //     return;
+        // }
         let block = self.model_info.borrow().blocks[block_id];
         let block_len = self.model_info.borrow().block_lens[block_id];
         let node_id = usize::from(node_idx);
@@ -616,11 +634,6 @@ impl<Q: QMatrix + Display> TKF92Cost<Q>
     }
 
     fn felsenstein_to_prob(&self, node_idx: &NodeIdx, block_id: usize) -> f64 {
-        let site = self.model_info.borrow().blocks[block_id] - 1;
-        let current_node_is_gap = self.phylo.msa.get_node_map()[node_idx][site].is_none();
-        if current_node_is_gap {
-            return 0.0;
-        }
         let block = self.model_info.borrow().blocks[block_id];
         let block_len = self.model_info.borrow().block_lens[block_id];
         let node_id = usize::from(node_idx);
@@ -628,11 +641,19 @@ impl<Q: QMatrix + Display> TKF92Cost<Q>
         for site in (block - block_len)..block {
             let mut sum_for_state = 0.0;
             for state in 0..self.model.q.n() {
+                // println!(
+                //     "for site ({}), state ({}), the freq is ({}), and felsenstein is ({})",
+                //     site,
+                //     state,
+                //     self.model.q.freqs()[state],
+                //     self.model_info.borrow().felsenstein[node_id][(site, state)]
+                // );
                 sum_for_state += self.model.q.freqs()[state]
                     * self.model_info.borrow().felsenstein[node_id][(site, state)];
             }
             sum += sum_for_state.ln();
         }
+        println!("sum in felsenstein to prob is {}", sum);
         sum
     }
 
