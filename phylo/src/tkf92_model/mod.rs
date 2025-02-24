@@ -304,6 +304,7 @@ impl<Q: QMatrix + Display> TKF92Cost<Q>
     }
 
     fn logl(&self) -> f64 {
+        println!("logl");
         if !self.model_info.borrow().valid {
             self.reset_all_nodes();
         }
@@ -319,20 +320,21 @@ impl<Q: QMatrix + Display> TKF92Cost<Q>
             }
             logl += Self::log_i1(l, self.model_info.borrow_mut().beta[usize::from(node)]);
         }
-        println!("calculatin loglike, and the const part is {}", logl);
+        println!("calculating loglike, and the const part is {}", logl);
         for block_id in 0..self.model_info.borrow().blocks.len() {
-            println!("block = {}", block_id);
             let block_len = self.model_info.borrow().block_lens[block_id];
             logl += self.model_info.borrow().factor_ns[(root_id, block_id)];
             logl += self.model_info.borrow().felsenstein_prob[(root_id, block_id)];
 
+            let x = self.model_info.borrow().aggregated_x[(root_id, block_id)];
             println!(
-                "factor n {}, felsensteinprob {}",
+                "block = {}, x = {:.11}, factor_n = {:.11}, felsensteinprob = {:.11}",
+                block_id,
+                x,
                 self.model_info.borrow().factor_ns[(root_id, block_id)],
                 self.model_info.borrow().felsenstein_prob[(root_id, block_id)]
             );
-            let x = self.model_info.borrow().aggregated_x[(root_id, block_id)];
-            println!("x = {}", x);
+
             if x != 1.0 {
                 logl += x.ln();
                 logl += (block_len as f64 - 1.0) * (1.0 + x).ln();
@@ -341,10 +343,12 @@ impl<Q: QMatrix + Display> TKF92Cost<Q>
                 std::process::exit(1);
             }
         }
+        println!("\n\n");
         logl
     }
 
     fn reset_all_nodes(&self) {
+        println!("restting all nides");
         for node_idx in self.phylo.tree.postorder() {
             let time = self.phylo.tree.node(node_idx).blen;
             let l = self.model.lambda();
@@ -560,6 +564,16 @@ impl<Q: QMatrix + Display> TKF92Cost<Q>
             }
             self.model_info.borrow_mut().last_action[node_id] = false;
         }
+        // if block_id == 4 {
+        //     println!(
+        //         "block = {}, node = {:?}, x = {}, type = {}{}",
+        //         block_id,
+        //         self.phylo.tree.node(node_idx).id,
+        //         x,
+        //         parent_is_gap,
+        //         current_is_gap
+        //     );
+        // }
         (x, factor_n)
     }
 
@@ -653,7 +667,7 @@ impl<Q: QMatrix + Display> TKF92Cost<Q>
             }
             sum += sum_for_state.ln();
         }
-        println!("sum in felsenstein to prob is {}", sum);
+        // println!("sum in felsenstein to prob is {}", sum);
         sum
     }
 
