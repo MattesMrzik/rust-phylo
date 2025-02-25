@@ -676,11 +676,12 @@ impl<Q: QMatrix + Display> ReassignEdge<Q> {
         for block_id in 0..len {
             // starts with v1
             let mut current = self.cost.phylo.tree.node(v2_idx).parent.unwrap();
+            let site = self.cost.model_info.borrow().blocks[block_id] - 1;
             let mut parent_is_char = if current == self.cost.phylo.tree.root {
                 false
             } else {
-                let parent_id = &self.cost.phylo.tree.node(&current).parent.unwrap();
-                self.cost.phylo.msa.get_node_map()[parent_id][block_id].is_some()
+                let parent_idx = &self.cost.phylo.tree.node(&current).parent.unwrap();
+                self.cost.phylo.msa.get_node_map()[parent_idx][site].is_some()
             };
             let mut count = 0;
             while current != self.cost.phylo.tree.root && parent_is_char {
@@ -701,7 +702,7 @@ impl<Q: QMatrix + Display> ReassignEdge<Q> {
                     false
                 } else {
                     let parent_id = &self.cost.phylo.tree.node(&current).parent.unwrap();
-                    self.cost.phylo.msa.get_node_map()[parent_id][block_id].is_some()
+                    self.cost.phylo.msa.get_node_map()[parent_id][site].is_some()
                 };
             }
             which_model.push(count);
