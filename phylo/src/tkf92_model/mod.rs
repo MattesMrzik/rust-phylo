@@ -533,7 +533,7 @@ impl<Q: QMatrix + Display> TKF92Cost<Q>
             if self.model_info.borrow().last_action[node_id] {
                 let n_option = self.model_info.borrow().factor_n[node_id];
                 match n_option {
-                    Some(n) => x *= n,
+                    Some(n) => factor_n += n,
                     None => {
                         let b = self.model_info.borrow().beta[node_id];
                         let mut n = Self::log_n1(l, m, b, time);
