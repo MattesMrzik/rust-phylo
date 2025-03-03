@@ -541,11 +541,11 @@ impl<Q: QMatrix + Display> TKF92Cost<Q>
                         // since the last event is an deletion the n0 for this node_idx is definitely not None
                         let n0_option = self.model_info.borrow().n0[node_id];
                         match n0_option {
-                            Some(n0) => n -= n0,
+                            Some(n0) => n -= n0.ln(),
                             None => {
                                 let n0 = Self::n0(m, self.model_info.borrow().beta[node_id]);
                                 self.model_info.borrow_mut().n0[node_id] = Some(n0);
-                                n -= n0
+                                n -= n0.ln();
                             }
                         }
                         self.model_info.borrow_mut().factor_n[node_id] = Some(n);
