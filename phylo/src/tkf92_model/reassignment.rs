@@ -1,13 +1,12 @@
 use itertools::Itertools;
 use nalgebra::DMatrix;
+use std::process::exit;
 use std::{collections::HashMap, fmt::Display};
 
+use crate::alignment::LeafMapping;
 use crate::substitution_models::{dna_models::JC69, QMatrix, SubstMatrix};
 use crate::tkf92_model::TKF92Cost;
 use crate::tree::NodeIdx;
-
-static ASSIGNMENT_COMBINATIONS: [[bool; 2]; 4] =
-    [[false, false], [false, true], [true, false], [true, true]];
 
 const DP_ASSIGNMENT_AND_EVENTS_SIZE: usize = 128;
 
@@ -30,8 +29,9 @@ enum Action {
 }
 
 pub struct ReassignEdge<Q: QMatrix + Display> {
-    dp_table: Vec<[f64; DP_ASSIGNMENT_AND_EVENTS_SIZE]>, // maybe also put this in a refcell such that, pass non mutable
-    //                     self in the fill_dp
+    // TODO: maybe also put this in a refcell such that, pass non mutable
+    //       self in the fill_dp
+    dp_table: Vec<[f64; DP_ASSIGNMENT_AND_EVENTS_SIZE]>,
     backtracking_table: Vec<[usize; DP_ASSIGNMENT_AND_EVENTS_SIZE]>, // pointers to prev gamma argmax,
     pub cost: TKF92Cost<Q>,
 }
@@ -48,8 +48,10 @@ impl<Q: QMatrix + Display> ReassignEdge<Q> {
 
     // TODO: to get the actual logl we still need to add the immortal links, ...
     //       see tkf_model::logl()
+    // TODO: i dont really need the x from the root, removing the old dirty tree and
+    //       adding the new one, since the rest of the tree stays the same,
     pub fn fill_dp(&mut self, v2_idx: &NodeIdx) {
-        println!("fill dp");
+        println!("filling dp");
         if !self.cost.model_info.borrow().valid {
             self.cost.reset_all_nodes();
         }
@@ -59,7 +61,7 @@ impl<Q: QMatrix + Display> ReassignEdge<Q> {
         if v2_idx == root {
             return;
         }
-        let number_of_blocks = self.cost.model_info.borrow().blocks.len();
+        let n_blocks = self.cost.model_info.borrow().blocks.len();
         let (models, which_model, which_node) =
             self.get_felsenstein_substitution_models_up_to_insertion_point(v2_idx);
 
@@ -75,29 +77,17 @@ impl<Q: QMatrix + Display> ReassignEdge<Q> {
         let dirty_edges = self.get_dirty_edges(v2_idx);
 
         let v1_idx = &self.cost.phylo.tree.node(v2_idx).parent.unwrap();
-        for block_id in 0..number_of_blocks {
+        for block_id in 0..n_blocks {
             let block_len = self.cost.model_info.borrow().block_lens[block_id];
-            for assignment in ASSIGNMENT_COMBINATIONS {
-                if !self.assignment_follows_dollo(&assignment, block_id, v2_idx) {
-                    // TODO: instead of going over all possibilities for the assignments
-                    // and continuing if it follows dollos principle
-                    // I could iterate only over the possibilities that
-                    // are even possible under dollo
-                    continue;
-                }
-                // if block_id == 0 && assignment != [true, true] {
-                //     continue;
-                // }
-                // if block_id == 1 && assignment != [true, true] {
-                //     continue;
-                // }
-                // if block_id == 2 && assignment != [true, false] {
-                //     continue;
-                // }
-
+            let (t1, t2, t3, t4) = self.are_chars_at_leafs(v2_idx, block_id);
+            for assignment in Self::get_allowed_assignments(t1, t2, t3, t4) {
+                let block = self.cost.model_info.borrow().blocks[block_id];
                 println!(
-                    "block_id {}, assignment {:?} follows dollo",
-                    block_id, assignment
+                    "\nblock_id {} = ({},{}), assignment {:?} follows dollo",
+                    block_id,
+                    block - block_len,
+                    block,
+                    assignment
                 );
                 let actions = self.get_actions(block_id, &dirty_edges, &assignment);
                 // indel x
@@ -119,6 +109,17 @@ impl<Q: QMatrix + Display> ReassignEdge<Q> {
                 self.cost.set_felsenstein_for_internal(v2_idx, block_id);
                 self.cost.set_felsenstein_for_internal(v1_idx, block_id);
 
+                // if block_id == 0 {
+                //     println!(
+                //         "v2 felsenstein {}",
+                //         self.cost.model_info.borrow().felsenstein[usize::from(v2_idx)].row(0)
+                //     );
+                //     println!(
+                //         "v1 felsenstein {}",
+                //         self.cost.model_info.borrow().felsenstein[usize::from(v1_idx)].row(0)
+                //     );
+                // }
+
                 // if insertion happened on the dirty tree, then the prob is captured here
                 let felsenstein_prob = self.get_felsenstein_prob_for_insertion_on_dirty_tree(
                     &dirty_edges,
@@ -129,7 +130,6 @@ impl<Q: QMatrix + Display> ReassignEdge<Q> {
                 // if insertion happened further up the tree, then the prob is captured here
                 let felsenstein_prob_for_up_the_tree = self
                     .get_felsenstein_prob_for_insertion_higher_than_on_dirty_tree(
-                        &actions,
                         v1_idx,
                         block_id,
                         &models,
@@ -151,10 +151,12 @@ impl<Q: QMatrix + Display> ReassignEdge<Q> {
                     felsenstein_prob_in_different_subtree
                 );
 
+                let mut was_in_loop = false;
                 for events in
                     self.get_possible_events_for_assignment(&actions, &dirty_edges, block_id)
                 {
-                    // println!("calc events {:?}", events);
+                    println!("current events in fill_dp() = {:?}", events);
+                    was_in_loop = true;
                     let dp_index = Self::bools_to_index(&assignment, &events);
                     // TODO: in case v1 is the root, then i dont need to consider the event on that edge since
                     //       there cant have been a deletion, does my implementation care?
@@ -177,9 +179,11 @@ impl<Q: QMatrix + Display> ReassignEdge<Q> {
                     let root_factor_n =
                         self.cost.model_info.borrow().factor_ns[(usize::from(root), block_id)];
 
-                    if max == f64::NEG_INFINITY {
-                        println!("got neg_inf");
-                    }
+                    // if max == f64::NEG_INFINITY {
+                    //     println!("got neg_inf");
+                    // }
+
+                    // println!("max = {}, root_factor_n = {}", max, root_factor_n);
 
                     self.dp_table[block_id][dp_index] = integrated_x_prop
                         + felsenstein_prob
@@ -187,6 +191,9 @@ impl<Q: QMatrix + Display> ReassignEdge<Q> {
                         + felsenstein_prob_in_different_subtree
                         + max
                         + root_factor_n;
+                }
+                if !was_in_loop {
+                    println!("wasnt in loop");
                 }
             }
             println!("\n");
@@ -211,14 +218,14 @@ impl<Q: QMatrix + Display> ReassignEdge<Q> {
         }
         let last_argmax = max_index.unwrap();
 
-        println!("last argmax {:?}", Self::index_to_bools(last_argmax));
+        // println!("last argmax {:?}", Self::index_to_bools(last_argmax));
         let (assignment, _) = Self::index_to_bools(last_argmax);
         let mut came_from = self.backtracking_table[n_blocks - 1][last_argmax];
-        println!("came from {:?}", Self::index_to_bools(came_from));
+        // println!("came from {:?}", Self::index_to_bools(came_from));
         assignments[n_blocks - 1] = assignment;
         // go back the path
         for block_id in (0..(n_blocks - 1)).rev() {
-            println!("backtracing block {}", block_id);
+            // println!("backtracing block {}", block_id);
             let (assignment, _) = Self::index_to_bools(came_from);
             assignments[block_id] = assignment;
             if block_id > 0 {
@@ -228,6 +235,66 @@ impl<Q: QMatrix + Display> ReassignEdge<Q> {
         assignments
     }
 
+    pub fn print_backtracking_assignment(&self, v2_idx: &NodeIdx) {
+        let v1_idx = self.cost.phylo.tree.node(&v2_idx).parent.unwrap();
+        for (i, assignment) in self.backtracking().iter().enumerate() {
+            let original = vec![
+                self.cost.phylo.msa.get_node_map()[&v1_idx]
+                    [self.cost.model_info.borrow().blocks[i] - 1]
+                    .is_some(),
+                self.cost.phylo.msa.get_node_map()[&v2_idx]
+                    [self.cost.model_info.borrow().blocks[i] - 1]
+                    .is_some(),
+            ];
+            let are_equal = assignment[0] == original[0] && assignment[1] == original[1];
+            println!(
+                "backtracking = {:?},\t original = {:?}{}",
+                assignment,
+                original,
+                if are_equal { "" } else { " are not the same" }
+            );
+        }
+    }
+
+    pub fn get_mapping_from_vec(
+        &self,
+        v2_idx: &NodeIdx,
+        assignments: &Vec<[bool; 2]>,
+    ) -> LeafMapping {
+        let mut mappings = vec![vec![]; 2];
+        let mut counts = [0; 2];
+        let v1_idx = &self.cost.phylo.tree.node(v2_idx).parent.unwrap();
+        for i in 0..self.cost.model_info.borrow().blocks.len() {
+            // update mapping for id in the ancestral alignment
+            // or a method that copies and sets the new mappings for also the id and mappings
+            // that i pass
+            for node in 0..2 {
+                if assignments[i][node] {
+                    for _ in 0..self.cost.model_info.borrow().block_lens[i] {
+                        mappings[node].push(Some(counts[node]));
+                        counts[node] += 1;
+                    }
+                } else {
+                    for _ in 0..self.cost.model_info.borrow().block_lens[i] {
+                        mappings[node].push(None);
+                    }
+                }
+            }
+        }
+        LeafMapping::from([
+            (v1_idx.clone(), mappings.remove(0)),
+            (v2_idx.clone(), mappings.remove(0)),
+        ])
+    }
+
+    pub fn get_mapping_from_backtracking(&self, v2_idx: &NodeIdx) -> LeafMapping {
+        // TODO: or do i also want to update the felsenstein / felsenstein prob / indel x
+        // TODO: only update the node_mapping is sufficient for likelihood calculation
+        //       but leaves the seqs in a broken state
+        let backtrack = self.backtracking();
+        self.get_mapping_from_vec(v2_idx, &backtrack)
+    }
+
     fn get_max(
         &self,
         events: &Vec<bool>,
@@ -235,24 +302,37 @@ impl<Q: QMatrix + Display> ReassignEdge<Q> {
         dirty_edges: &HashMap<DirtyTreeEdge, (NodeIdx, usize)>,
         block_id: usize,
     ) -> (f64, usize) {
+        // TODO: if some prevmax are tied, then make a random choice
         let mut max: Option<f64> = None;
         let mut argmax: Option<usize> = None;
         let l = self.cost.model.lambda();
         let m = self.cost.model.mu();
-        let mut factor_n_from_max = -1.11111;
-        for previous_event in self.get_previous_allowed_events(events, actions, dirty_edges) {
-            for previous_assignment in ASSIGNMENT_COMBINATIONS {
-                if !self.assignment_follows_dollo(
-                    &previous_assignment,
-                    block_id - 1,
-                    &dirty_edges.get(&DirtyTreeEdge::V2).unwrap().0,
-                ) {
-                    continue;
-                }
+        let mut factor_n_from_max = -1.1111;
+        let (t1, t2, t3, t4) = self.are_chars_at_leafs(
+            &dirty_edges.get(&DirtyTreeEdge::V2).unwrap().0,
+            block_id - 1,
+        );
+        for previous_assignment in Self::get_allowed_assignments(t1, t2, t3, t4) {
+            // println!("prev assignment {:?}", previous_assignment);
+            for previous_event in self.get_previous_allowed_events(events, actions, dirty_edges) {
                 // TODO: checking if the previous assignment matches the previous events.
-                //       for now i think this can be skipped since if they dont match then this previous gamma is -inf
+                //       for now i think this can be skipped since if they dont match then this previous gamma is -inf.
+                //       but it might be slightly faster to get only the events that match both the current events
+                //       as well as the previous assignment
                 let dp_index = Self::bools_to_index(&previous_assignment, &previous_event);
                 let last_gamma = self.dp_table[block_id - 1][dp_index];
+                if last_gamma == f64::NEG_INFINITY {
+                    // TODO: this seems to happen quite of, check if this can be avoided
+                    // println!(
+                    //     "last_gamma is neg infinity for prev events {:?}, continuing",
+                    //     previous_event
+                    // );
+                    continue;
+                }
+                println!(
+                    "using last entry {:?}{:?} = {}",
+                    previous_assignment, previous_event, last_gamma
+                );
                 // depending on the previous events and the actions now
                 // return the prob of gamma and factor Ns
                 let mut factor_n = 0.0;
@@ -263,33 +343,52 @@ impl<Q: QMatrix + Display> ReassignEdge<Q> {
                     if actions.get(typ).unwrap() == &Action::Insertion && previous_event[*edge_id] {
                         let time = self.cost.phylo.tree.node(edge).blen;
                         let b = TKF92Cost::<JC69>::b(l, m, time);
+                        // println!(
+                        //     "factor n added: edge = {}, time = {}, beta = {}",
+                        //     self.cost.phylo.tree.node(edge).id,
+                        //     time,
+                        //     b
+                        // );
+                        // TODO: can i already update the saved values for these terms and reuse them
+                        //       at upcoming sites?
                         factor_n += TKF92Cost::<JC69>::log_n1(l, m, b, time);
+                        // println!("log_n1 = {}", TKF92Cost::<JC69>::log_n1(l, m, b, time));
                         factor_n -= (l * b).ln();
+                        // println!("lb = {}", (l * b).ln());
                         factor_n -= TKF92Cost::<JC69>::n0(m, b).ln();
+                        // println!("n0 = {}", TKF92Cost::<JC69>::n0(m, b).ln());
                     }
                 }
+                // println!(
+                //     "prev assignment = {:?}, prev event = {:?}, last gamma = {}, factor_n = {}",
+                //     previous_assignment, previous_event, last_gamma, factor_n
+                // );
                 let current = last_gamma + factor_n;
                 if let Some(ref mut maximum) = max {
                     if current > *maximum {
+                        // println!("updating max to {}", current);
                         *maximum = current;
                         argmax = Some(dp_index);
                         factor_n_from_max = factor_n;
                     }
                 } else {
+                    // println!("init max to {}", current);
                     max = Some(current);
                     argmax = Some(dp_index);
                     factor_n_from_max = factor_n;
                 }
             }
         }
-        println!(
-            "factor_n from max for block {block_id} = {}",
-            factor_n_from_max
-        );
         if max.is_none() {
-            println!("this should never happen");
-            (0.0, 0)
+            (f64::NEG_INFINITY, 0)
         } else {
+            if max.unwrap().is_nan() {
+                println!("max is NaN    : this should never happen");
+                self.print_dp_table();
+                (0.0, 0);
+                exit(1);
+            }
+            println!("factor_n from max = {}", factor_n_from_max);
             (max.unwrap(), argmax.unwrap())
         }
     }
@@ -309,6 +408,7 @@ impl<Q: QMatrix + Display> ReassignEdge<Q> {
                 _ => choices[*edge_id] = vec![false, true],
             };
         }
+        // println!("previous allowed events = {:?}", choices);
         choices.into_iter().multi_cartesian_product().collect()
     }
 
@@ -319,6 +419,7 @@ impl<Q: QMatrix + Display> ReassignEdge<Q> {
         dirty_edges: &HashMap<DirtyTreeEdge, (NodeIdx, usize)>,
         block_id: usize,
     ) -> Vec<Vec<bool>> {
+        // println!("in get_possible_events_for_assignment");
         let mut choices: Vec<Vec<bool>> = vec![vec![]; 5];
         for (typ, (edge, edge_id)) in dirty_edges {
             match actions.get(typ).unwrap() {
@@ -337,6 +438,9 @@ impl<Q: QMatrix + Display> ReassignEdge<Q> {
                 _ => choices[*edge_id] = vec![false],
             };
         }
+
+        println!("choises for events = {:?}", choices);
+
         choices.into_iter().multi_cartesian_product().collect()
     }
 
@@ -345,7 +449,6 @@ impl<Q: QMatrix + Display> ReassignEdge<Q> {
     /// from v_1 to the insertion point
     fn get_felsenstein_prob_for_insertion_higher_than_on_dirty_tree(
         &self,
-        actions: &HashMap<DirtyTreeEdge, Action>,
         v1_idx: &NodeIdx,
         block_id: usize,
         models: &HashMap<usize, SubstMatrix>,
@@ -358,9 +461,9 @@ impl<Q: QMatrix + Display> ReassignEdge<Q> {
         //       no rerooting, then the most insertions are at the root anyways.
         //       but this might make the code easier
         // only if v1 - t1 is homolog
-        if actions.get(&DirtyTreeEdge::V1).unwrap() != &Action::Homolog {
-            return 0.0;
-        }
+        // if actions.get(&DirtyTreeEdge::V1).unwrap() != &Action::Homolog {
+        //     return 0.0;
+        // }
         // If insertion happened anywhere but the current dirty tree.
         // Then then it either happened below, up, or in a different subtree
         // if it happened below, then
@@ -370,9 +473,19 @@ impl<Q: QMatrix + Display> ReassignEdge<Q> {
         let block = self.cost.model_info.borrow().blocks[block_id];
         let block_len = self.cost.model_info.borrow().block_lens[block_id];
         let insertion_node = which_node[block_id];
+        // if block_id == 8 {
+        //     println!(
+        //         "insertion node = {}",
+        //         self.cost.phylo.tree.node(&insertion_node).id
+        //     );
+        // }
         let number_of_states = self.cost.model.q.n();
         let p = &models[&which_model[block_id]];
 
+        // TODO: this modifies the felsenstein of the insertion node
+        //       and this again has to be undone like it was in remove_edges.
+        //       instead i could modify the felsenstein to prob to not take a node
+        //       but a felsenstein vector.
         for site in (block - block_len)..block {
             let felsenstein_of_v1: Vec<f64> = self.cost.model_info.borrow().felsenstein
                 [usize::from(v1_idx)]
@@ -389,14 +502,31 @@ impl<Q: QMatrix + Display> ReassignEdge<Q> {
                     [(site, state_i)] *= sum_over_j;
             }
         }
-        if block_id == 0 {
-            println!(
-                "felsenstien up, p {:?}, return {}",
-                p,
-                self.cost.felsenstein_to_prob(&insertion_node, block_id)
-            )
+        // if block_id == 0 {
+        //     println!(
+        //         "felsenstein up, p {:?}, return {}",
+        //         p,
+        //         self.cost.felsenstein_to_prob(&insertion_node, block_id)
+        //     )
+        // }
+        let prob = self.cost.felsenstein_to_prob(&insertion_node, block_id);
+        for site in (block - block_len)..block {
+            let felsenstein_of_v1: Vec<f64> = self.cost.model_info.borrow().felsenstein
+                [usize::from(v1_idx)]
+            .row(site)
+            .iter()
+            .copied()
+            .collect();
+            for state_i in 0..number_of_states {
+                let mut sum_over_j = 0.0;
+                for state_j in 0..number_of_states {
+                    sum_over_j += p[(state_i, state_j)] * felsenstein_of_v1[state_j];
+                }
+                self.cost.model_info.borrow_mut().felsenstein[usize::from(insertion_node)]
+                    [(site, state_i)] /= sum_over_j;
+            }
         }
-        self.cost.felsenstein_to_prob(&insertion_node, block_id)
+        prob
     }
 
     fn get_felsenstein_prob_for_insertion_on_dirty_tree(
@@ -406,16 +536,10 @@ impl<Q: QMatrix + Display> ReassignEdge<Q> {
         block_id: usize,
     ) -> f64 {
         for (typ, (node, _)) in dirty_edges {
-            if node == &self.cost.phylo.tree.root {
-                println!("action for root {:?}", actions.get(typ).unwrap());
-            }
+            // if node == &self.cost.phylo.tree.root {
+            //     println!("action for root {:?}", actions.get(typ).unwrap());
+            // }
             if actions.get(typ).unwrap() == &Action::Insertion {
-                if block_id == 0 {
-                    println!(
-                        "      felsenstein for block 0, return {}",
-                        self.cost.felsenstein_to_prob(&node, block_id)
-                    )
-                }
                 return self.cost.felsenstein_to_prob(node, block_id);
             }
         }
@@ -439,19 +563,20 @@ impl<Q: QMatrix + Display> ReassignEdge<Q> {
                 if actions.get(typ).unwrap() == &Action::Insertion {
                     x *= l / m * (1.0 - r) / r;
                 }
-                continue;
-            }
-            let b = TKF92Cost::<JC69>::b(l, m, time);
-            x *= match actions.get(typ).unwrap() {
-                Action::Insertion => l * b * (1.0 - r) / r,
-                Action::Deletion => TKF92Cost::<JC69>::n0(m, b),
-                Action::Homolog => TKF92Cost::<JC69>::h1(l, m, b, time),
-                _ => 1.0,
+            } else {
+                let b = TKF92Cost::<JC69>::b(l, m, time);
+                x *= match actions.get(typ).unwrap() {
+                    Action::Insertion => l * b * (1.0 - r) / r,
+                    Action::Deletion => TKF92Cost::<JC69>::n0(m, b),
+                    Action::Homolog => TKF92Cost::<JC69>::h1(l, m, b, time),
+                    _ => 1.0,
+                }
             }
         }
         x
     }
 
+    // TODO: i could reuse are_chars_at_leafs or rework this to have the ordering of the dirty edges hardcoded
     fn get_actions(
         &self,
         block_id: usize,
@@ -599,6 +724,7 @@ impl<Q: QMatrix + Display> ReassignEdge<Q> {
                     //     self.cost.is_insertion_at_non_root(&edge, block_id),
                     // );
                     if self.cost.is_insertion_at_non_root(&edge, block_id) {
+                        // TODO: this is the same code as above
                         self.cost.model_info.borrow_mut().felsenstein_prob[(root_id, block_id)] -=
                             self.cost.felsenstein_to_prob(&old_tree.root, block_id);
                         total_removed_felsenstein_prob +=
@@ -641,10 +767,10 @@ impl<Q: QMatrix + Display> ReassignEdge<Q> {
                     }
                 }
             }
-            println!(
-                "removing: block = {block_id}, x = {:.11}, factor_n = {:.11}, felsensteinprob = {:.11}",
-                total_removed_x, total_removed_factor_n, total_removed_felsenstein_prob
-            );
+            // println!(
+            //     "removing: block = {block_id}, x = {:.11}, factor_n = {:.11}, felsensteinprob = {:.11}",
+            //     total_removed_x, total_removed_factor_n, total_removed_felsenstein_prob
+            // );
         }
     }
 
@@ -711,61 +837,86 @@ impl<Q: QMatrix + Display> ReassignEdge<Q> {
         (models, which_model, which_node)
     }
 
-    // checking if the assignment follows dollo's principle
-    fn assignment_follows_dollo(
-        &self,
-        assignment: &[bool; 2],
-        block_id: usize,
-        v2_idx: &NodeIdx,
-    ) -> bool {
-        let v1_assignment = assignment[0];
-        let v2_assignment = assignment[1];
-        // TODO: this only needs to be recomputed per block and not every time this
-        //       fn is called
-        let (t1_is_char, t2_is_char, t3_is_char, t4_is_char) =
-            self.are_chars_at_leafs(v2_idx, block_id);
+    pub fn get_allowed_assignments(
+        t1_is_char: bool,
+        t2_is_char: bool,
+        t3_is_char: bool,
+        t4_is_char: bool,
+    ) -> Vec<[bool; 2]> {
         let left_is_some = t1_is_char || t2_is_char;
         let right_is_some = t3_is_char || t4_is_char;
-
-        if v1_assignment && !v2_assignment && block_id == 2 {
-            // TODO: this is run quite often
-            // println!(
-            //     "dollo?? {:?}",
-            //     (t1_is_char, t2_is_char, t3_is_char, t4_is_char)
-            // );
+        let both_left_are_some = t1_is_char && t2_is_char;
+        let both_right_are_some = t3_is_char && t4_is_char;
+        if left_is_some && !right_is_some {
+            if both_left_are_some {
+                vec![[true, true], [true, false]]
+            } else {
+                vec![[true, true], [true, false], [false, false]]
+            }
+        } else if !left_is_some && right_is_some {
+            if both_right_are_some {
+                vec![[true, true], [false, true]]
+            } else {
+                vec![[true, true], [false, true], [false, false]]
+            }
+        } else if !left_is_some && !right_is_some {
+            vec![[false, false]]
+        } else {
+            vec![[true, true]]
         }
-
-        // this if must come first
-        if left_is_some && right_is_some {
-            return v1_assignment && v2_assignment;
-        }
-        if left_is_some && v2_assignment {
-            return v1_assignment;
-        }
-        if right_is_some && v1_assignment {
-            return v2_assignment;
-        }
-        if t1_is_char && t2_is_char {
-            return v1_assignment;
-        }
-        if t3_is_char && t4_is_char {
-            return v2_assignment;
-        }
-        // TODO: i should also test if there is a insertion in one of the subtrees
-        //       bc it could also have been that the old edge contained the only char
-        //       or does an internal char exist without any leaf also containing a char?
-        //       so is it even possible that all chars in a col are removed if
-        //       an internal node char is removed?
-        //       But if there is no char anywhere else, then it is i think always suboptimal
-        //       to have and insertion and subsequent deletion all on the tree.
-        if !t1_is_char && !t2_is_char && !t3_is_char && !t4_is_char {
-            return !v1_assignment && !v2_assignment;
-        }
-        true
     }
 
+    // checking if the assignment follows dollo's principle
+    // pub fn assignment_follows_dollo(
+    //     &self,
+    //     assignment: &[bool; 2],
+    //     block_id: usize,
+    //     v2_idx: &NodeIdx,
+    // ) -> bool {
+    //     let v1_assignment = assignment[0];
+    //     let v2_assignment = assignment[1];
+    //     // TODO: this only needs to be recomputed per block and not every time this
+    //     //       fn is called
+    //     let (t1_is_char, t2_is_char, t3_is_char, t4_is_char) =
+    //         self.are_chars_at_leafs(v2_idx, block_id);
+    //     let left_is_some = t1_is_char || t2_is_char;
+    //     let right_is_some = t3_is_char || t4_is_char;
+
+    //     // this if must come first
+    //     if left_is_some && right_is_some {
+    //         return v1_assignment && v2_assignment;
+    //     }
+    //     if left_is_some && v2_assignment {
+    //         return v1_assignment;
+    //     }
+    //     if right_is_some && v1_assignment {
+    //         return v2_assignment;
+    //     }
+    //     if t1_is_char && t2_is_char {
+    //         return v1_assignment;
+    //     }
+    //     if t3_is_char && t4_is_char {
+    //         return v2_assignment;
+    //     }
+    //     // TODO: i should also test if there is a insertion in one of the subtrees
+    //     //       bc it could also have been that the old edge contained the only char
+    //     //       or does an internal char exist without any leaf also containing a char?
+    //     //       so is it even possible that all chars in a col are removed if
+    //     //       an internal node char is removed?
+    //     //       But if there is no char anywhere else, then it is i think always suboptimal
+    //     //       to have and insertion and subsequent deletion all on the tree.
+    //     if !t1_is_char && !t2_is_char && !t3_is_char && !t4_is_char {
+    //         return !v1_assignment && !v2_assignment;
+    //     }
+    //     true
+    // }
+
     // not actually at the leafs but also at the red subtree
-    fn are_chars_at_leafs(&self, v2_idx: &NodeIdx, block_id: usize) -> (bool, bool, bool, bool) {
+    pub fn are_chars_at_leafs(
+        &self,
+        v2_idx: &NodeIdx,
+        block_id: usize,
+    ) -> (bool, bool, bool, bool) {
         let v1_idx = &self.cost.phylo.tree.node(v2_idx).parent.unwrap();
         let v1_is_root = *v1_idx == self.cost.phylo.tree.root;
         let site = self.cost.model_info.borrow().blocks[block_id] - 1;
@@ -790,7 +941,7 @@ impl<Q: QMatrix + Display> ReassignEdge<Q> {
         (t1_is_char, t2_is_char, t3_is_char, t4_is_char)
     }
 
-    fn print_dp_table(&self) {
+    pub fn print_dp_table(&self) {
         println!("dp table");
         for block_id in 0..self.cost.model_info.borrow().blocks.len() {
             for (index, &value) in self.dp_table[block_id].iter().enumerate() {
