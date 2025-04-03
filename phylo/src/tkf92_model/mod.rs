@@ -1,3 +1,4 @@
+use inc_stats::DerefCopy;
 use nalgebra::DMatrix;
 
 pub mod reassignment;
@@ -7,7 +8,10 @@ use crate::{
     likelihood::TreeSearchCost,
     phylo_info::PhyloInfoAncestors,
     substitution_models::{QMatrix, SubstMatrix},
-    tree::NodeIdx::{self, Internal, Leaf},
+    tree::{
+        NodeIdx::{self, Internal, Leaf},
+        Tree,
+    },
 };
 use std::{
     cell::RefCell,
@@ -16,11 +20,13 @@ use std::{
     marker::PhantomData,
 };
 
+#[derive(Clone)]
 pub struct TKF92Model<Q: QMatrix> {
     q: Q,
     params: Vec<f64>,
 }
 
+// TODO: pip_model has also Clone as trait bound for Q, is this also needed here?
 impl<Q: QMatrix> TKF92Model<Q> {
     fn lambda(&self) -> f64 {
         self.params[0]
@@ -74,7 +80,7 @@ pub struct TKF92ModelInfo<Q: QMatrix> {
     // TODO: can i even decouple the substitution cost from indel probabilities?
     felsenstein_prob: DMatrix<f64>,
 
-    // felsenstein[node][site, state]
+    /// felsenstein\[node\]\[site, state\]
     felsenstein: Vec<DMatrix<f64>>,
 
     // n0[node] = n0(node.blen), I might not need this for every node
@@ -111,8 +117,17 @@ pub struct TKF92ModelInfo<Q: QMatrix> {
     // leaf_sequence_info[node.id][site, state] = the prob of observing this state
     leaf_sequence_info: HashMap<String, DMatrix<f64>>,
 
-    // last_action[usize::from(node)] = true if the last event was a deletion for a that node
-    last_action: Vec<bool>,
+    // usize::from(node), this is not the root of the tree but a virtual root for computational ease
+    virtual_root: NodeIdx,
+
+    // edge_is_time_reversed[usize::from(node)] = true if the edge is time reversed
+    edge_is_time_reversed: Vec<bool>,
+
+    // last_event_deletion[usize::from(node)] = true if the last event was a deletion for a that node
+    last_event_deletion: Vec<bool>,
+
+    // last_event_insertion[usize::from(node)] = true if the last event was an insertion for a that node
+    last_event_insertion: Vec<bool>,
 
     // true if the all the intermediate values are correctly set
     valid: bool,
@@ -140,7 +155,10 @@ impl<Q: QMatrix> TKF92ModelInfo<Q> {
             block_lens,
             models: vec![SubstMatrix::zeros(n_states, n_states); n_nodes],
             leaf_sequence_info: Self::get_leaf_seq_info(&phylo, &model.q),
-            last_action: vec![false; n_nodes],
+            virtual_root: phylo.tree.root,
+            edge_is_time_reversed: vec![false; n_nodes],
+            last_event_deletion: vec![false; n_nodes],
+            last_event_insertion: vec![false; n_nodes],
             valid: false,
         }
     }
@@ -220,7 +238,24 @@ impl<Q: QMatrix + Display + Clone + 'static> TreeSearchCost for TKF92Cost<Q> {
 
     fn update_tree(&mut self, tree: crate::tree::Tree, dirty_nodes: &[NodeIdx]) {
         self.phylo.tree = tree;
+        // the update tree can either be a single edge len
+
+        // do i have to update all the nodes up to the root?
+        // perhaps i only need to this once before realignment
+
+        // so if i only want to update the root node i cannot use the set_node method
+
+        // if i do NNI without fixing up the tree, i can still to realignment
+        // at that node, and then fix the tree values after realignment
+        // so either I reroot before, then i dont have to fix the tree afterwards
+        // or fix the tree. only considering this one change the two are both O(n)
+        // rerooting only might be better if we expect to have multiple changes (NNI & realignment)
+        // in similar locations
+
+        // or after an NNI move
         println!("{:?}", dirty_nodes);
+
+        if dirty_nodes.len() == 1 {}
     }
 
     fn tree(&self) -> &crate::tree::Tree {
@@ -244,7 +279,8 @@ impl<Q: QMatrix + Display> TKF92Cost<Q>
         // for the root
         let mut prob: f64 = (1.0 - l / m).ln();
 
-        let mut last_action = vec![false; tree.len()];
+        let mut last_event_deletion = vec![false; tree.len()];
+        let mut last_event_insertion = vec![false; tree.len()];
         for (i, fragment) in blocks.iter().enumerate() {
             let mut x = 1.0;
             let fragment_len = if i == 0 {
@@ -252,7 +288,7 @@ impl<Q: QMatrix + Display> TKF92Cost<Q>
             } else {
                 fragment - blocks[i - 1]
             };
-            if node_map[&tree.root][fragment - 1].is_some() {
+            if node_map[&self.model_info.borrow().virtual_root][fragment - 1].is_some() {
                 // the eq seq at the root has a fragment
                 x *= l / m * (1.0 - r) / r;
                 prob += fragment_len as f64 * r.ln();
@@ -265,8 +301,15 @@ impl<Q: QMatrix + Display> TKF92Cost<Q>
                 }
                 let time = tree.node(node_idx).blen;
                 let parent_id = &tree.node(node_idx).parent.unwrap();
-                let parent_is_gap = node_map[parent_id][fragment - 1].is_none();
-                let current_is_gap = node_map[node_idx][fragment - 1].is_none();
+                let mut parent_is_gap = node_map[parent_id][fragment - 1].is_none();
+                let mut current_is_gap = node_map[node_idx][fragment - 1].is_none();
+
+                if self.model_info.borrow().edge_is_time_reversed[usize::from(node_idx)] {
+                    println!("this edge is time reversed {}", node_idx);
+                    let h = parent_is_gap;
+                    parent_is_gap = current_is_gap;
+                    current_is_gap = h;
+                }
 
                 let b = Self::b(l, m, time);
                 if i == 0 {
@@ -278,23 +321,35 @@ impl<Q: QMatrix + Display> TKF92Cost<Q>
                 if !parent_is_gap && !current_is_gap {
                     // homolog block
                     x *= Self::h1(l, m, b, time);
-                    last_action[node_id_value] = false;
+                    last_event_deletion[node_id_value] = false;
+                    last_event_insertion[node_id_value] = false;
                 }
                 if !parent_is_gap && current_is_gap {
                     // deletion
                     x *= Self::n0(m, b);
-                    last_action[node_id_value] = true;
+                    if last_event_insertion[node_id_value]
+                        && self.model_info.borrow().edge_is_time_reversed[node_id_value]
+                    {
+                        prob += Self::log_n1(l, m, b, time);
+                        prob -= (l * b).ln();
+                        prob -= Self::n0(m, b).ln();
+                    }
+                    last_event_deletion[node_id_value] = true;
+                    last_event_insertion[node_id_value] = false;
                 }
                 if parent_is_gap && !current_is_gap {
                     // insertion
-                    if last_action[node_id_value] {
+                    if last_event_deletion[node_id_value]
+                        && !self.model_info.borrow().edge_is_time_reversed[node_id_value]
+                    {
                         prob += Self::log_n1(l, m, b, time);
                         prob -= (l * b).ln();
                         prob -= Self::n0(m, b).ln();
                     }
                     x *= l * b * (1.0 - r) / r;
                     prob += fragment_len as f64 * r.ln();
-                    last_action[node_id_value] = false
+                    last_event_deletion[node_id_value] = false;
+                    last_event_insertion[node_id_value] = true;
                 }
             }
             prob += x.ln();
@@ -304,66 +359,161 @@ impl<Q: QMatrix + Display> TKF92Cost<Q>
     }
 
     fn logl(&self) -> f64 {
-        println!("logl");
-        if !self.model_info.borrow().valid {
+        self.logl_strip(10000, false)
+    }
+
+    fn logl_strip(&self, only_until_block: usize, exclude_const: bool) -> f64 {
+        // println!("logl");
+        let not_valid = !self.model_info.borrow().valid;
+        if not_valid {
             self.reset_all_nodes();
         }
-        let l = self.model.lambda();
+        let l: f64 = self.model.lambda();
         let m = self.model.mu();
         let r = self.model.r();
-        let mut logl = (1.0 - l / m).ln();
-        logl += self.phylo.msa.len() as f64 * r.ln();
-        let root_id = usize::from(self.phylo.tree.root);
-        for node in self.phylo.tree.postorder() {
-            if node == &self.phylo.tree.root {
-                continue;
+        let root_id = usize::from(self.model_info.borrow().virtual_root);
+        let mut logl = 0.0;
+        if !exclude_const {
+            logl += (1.0 - l / m).ln();
+            logl += self.phylo.msa.len() as f64 * r.ln();
+            for node in self.phylo.tree.postorder() {
+                if node == &self.phylo.tree.root {
+                    continue;
+                }
+                logl += Self::log_i1(l, self.model_info.borrow_mut().beta[usize::from(node)]);
             }
-            logl += Self::log_i1(l, self.model_info.borrow_mut().beta[usize::from(node)]);
         }
-        println!("calculating loglike, and the const part is {}", logl);
+        // println!("calculating loglike, and the const part is {}", logl);
         for block_id in 0..self.model_info.borrow().blocks.len() {
+            if block_id == only_until_block {
+                break;
+            }
             let block_len = self.model_info.borrow().block_lens[block_id];
             logl += self.model_info.borrow().factor_ns[(root_id, block_id)];
             logl += self.model_info.borrow().felsenstein_prob[(root_id, block_id)];
 
             let x = self.model_info.borrow().aggregated_x[(root_id, block_id)];
-            println!(
-                "block = {}, x = {:.11}, factor_n = {:.11}, felsensteinprob = {:.11}",
-                block_id,
-                x,
-                self.model_info.borrow().factor_ns[(root_id, block_id)],
-                self.model_info.borrow().felsenstein_prob[(root_id, block_id)]
-            );
+            // println!(
+            //     "block = {}, x = {:.11}, integrated x = {:.11}, factor_n = {:.11}, felsensteinprob = {:.11}",
+            //     block_id,
+            //     x,
+            //     x.ln() + (block_len as f64 - 1.0) * (1.0 + x).ln(),
+            //     self.model_info.borrow().factor_ns[(root_id, block_id)],
+            //     self.model_info.borrow().felsenstein_prob[(root_id, block_id)]
+            // );
 
             if x != 1.0 {
+                // if x < 0.0 {
+                //     let block = self.model_info.borrow().blocks[block_id];
+                //     println!(
+                //         "x is less than 0.0: x = {}, for block {} = ({}, {})",
+                //         x,
+                //         block_id,
+                //         block - block_len,
+                //         block
+                //     );
+                //     exit(1);
+                // }
                 logl += x.ln();
                 logl += (block_len as f64 - 1.0) * (1.0 + x).ln();
             } else {
-                println!("an x is 1.0 for block {}, this means there is to action which should not happen", block_id);
-                std::process::exit(1);
+                let block = self.model_info.borrow().blocks[block_id];
+                let block_len = self.model_info.borrow().block_lens[block_id];
+                // println!("an x is 1.0 for block {} = ({},{}), this means there is to action which should not happen", block_id, block-block_len, block);
+                // std::process::exit(1);
             }
         }
-        println!("\n\n");
+        // println!("\n\n");
         logl
     }
 
+    fn virtual_reroot_with_id(&self, tree: &Tree, neighbor_node_id: &str) {
+        // TODO: this should only be a warning
+        println!(
+            "rerooting from {} to {}",
+            tree.node(&self.model_info.borrow().virtual_root).id,
+            neighbor_node_id
+        );
+
+        assert!(
+            *neighbor_node_id != tree.node(&self.model_info.borrow().virtual_root).id,
+            "The new root location is the same as the old"
+        );
+        let parent_option = tree.node(&self.model_info.borrow().virtual_root).parent;
+        match parent_option {
+            // reroot to tree parent
+            Some(parent) => {
+                if tree.node(&parent).id == *neighbor_node_id {
+                    let old_root = self.model_info.borrow().virtual_root;
+                    self.model_info.borrow_mut().edge_is_time_reversed[usize::from(old_root)] =
+                        false;
+                    if parent == self.phylo.tree.root {
+                        self.model_info.borrow_mut().edge_is_time_reversed[usize::from(parent)] =
+                            false;
+                    }
+                    self.model_info.borrow_mut().virtual_root = parent;
+                    self.set_internal(&old_root);
+                    self.set_root();
+                    return;
+                }
+            }
+            _ => (),
+        }
+
+        let children = tree
+            .node(&self.model_info.borrow().virtual_root)
+            .children
+            .clone();
+
+        for child in children {
+            // reroot to tree child
+            if tree.node(&child).id == *neighbor_node_id {
+                assert!(
+                    tree.node(&child).children.len() > 0,
+                    "you cannot change to a leaf node"
+                );
+
+                let old_root = self.model_info.borrow().virtual_root;
+
+                self.model_info.borrow_mut().virtual_root = child;
+                self.model_info.borrow_mut().edge_is_time_reversed[usize::from(child)] = true;
+                if old_root == self.phylo.tree.root {
+                    self.model_info.borrow_mut().edge_is_time_reversed[usize::from(old_root)] =
+                        true;
+                }
+
+                self.set_internal(&old_root);
+
+                self.set_root();
+                return;
+            }
+        }
+        // TODO: this should be a warning
+        assert!(false, "no neighbor found with this node_idx")
+    }
+
+    // TODO: should this setting not be part of the model info instead of cost?
     fn reset_all_nodes(&self) {
-        println!("restting all nides");
+        // println!("resetting all nodes");
         for node_idx in self.phylo.tree.postorder() {
             let time = self.phylo.tree.node(node_idx).blen;
             let l = self.model.lambda();
             let m = self.model.mu();
             let beta = Self::b(l, m, time);
             self.model_info.borrow_mut().beta[usize::from(node_idx)] = beta;
+            let virtual_root = self.model_info.borrow().virtual_root;
             match node_idx {
                 Internal(_) => {
-                    if self.phylo.tree.root == *node_idx {
+                    if virtual_root == *node_idx {
+                        println!("root");
                         self.set_root();
                     } else {
+                        println!("internal");
                         self.set_internal(node_idx);
                     }
                 }
                 Leaf(_) => {
+                    println!("leaf");
                     self.set_leaf(node_idx);
                 }
             };
@@ -409,60 +559,84 @@ impl<Q: QMatrix + Display> TKF92Cost<Q>
     //       only differ in the call to is_insertion_at_root and is_insertion_at_non_root.
     //       To avoid duplication the correct of these fn could be passed as argument.
     fn set_felsenstein_prob_for_root(&self, block_id: usize) {
-        let root_idx = &self.phylo.tree.root;
+        let root_idx = self.model_info.borrow().virtual_root;
         let root_id = usize::from(root_idx);
-        let mut prob = 0.0;
+        let mut f_prob = 0.0;
         if self.is_insertion_at_root(block_id) {
-            prob += self.felsenstein_to_prob(root_idx, block_id);
+            f_prob += self.felsenstein_to_prob(&root_idx, block_id);
         } else {
-            for child in &self.phylo.tree.node(root_idx).children {
+            for child in self.get_childs_in_time_reversed_tree(&root_idx) {
                 let child_id = usize::from(child);
-                prob += self.model_info.borrow().felsenstein_prob[(child_id, block_id)];
+                f_prob += self.model_info.borrow().felsenstein_prob[(child_id, block_id)];
             }
         }
-        self.model_info.borrow_mut().felsenstein_prob[(root_id, block_id)] = prob;
+        self.model_info.borrow_mut().felsenstein_prob[(root_id, block_id)] = f_prob;
     }
 
     fn set_felsenstein_prob_for_non_root(&self, node_idx: &NodeIdx, block_id: usize) {
         let node_id = usize::from(node_idx);
-        let mut prob = 0.0;
+        let mut f_prob = 0.0;
         if self.is_insertion_at_non_root(node_idx, block_id) {
-            prob += self.felsenstein_to_prob(node_idx, block_id);
+            f_prob += self.felsenstein_to_prob(node_idx, block_id);
         } else {
-            for child in &self.phylo.tree.node(node_idx).children {
+            for child in self.get_childs_in_time_reversed_tree(node_idx) {
                 let child_id = usize::from(child);
-                prob += self.model_info.borrow().felsenstein_prob[(child_id, block_id)];
+                f_prob += self.model_info.borrow().felsenstein_prob[(child_id, block_id)];
             }
         }
-        self.model_info.borrow_mut().felsenstein_prob[(node_id, block_id)] = prob;
+        self.model_info.borrow_mut().felsenstein_prob[(node_id, block_id)] = f_prob;
     }
 
     fn set_indel_x_and_factor_n_for_root(&self, block_id: usize) {
         let mut x = self.get_indel_x_for_root(block_id);
-        let mut prob = 0.0;
+        let mut factor_n = 0.0;
         // this is the same as in set_indel_x_and_prob_for_not_root
-        let root_idx = &self.phylo.tree.root;
-        let node_id = usize::from(root_idx);
-        for child in &self.phylo.tree.node(root_idx).children {
+        let root_idx = self.model_info.borrow().virtual_root;
+        let root_id = usize::from(root_idx);
+        for child in self.get_childs_in_time_reversed_tree(&root_idx) {
             let child_id = usize::from(child);
             x *= self.model_info.borrow().aggregated_x[(child_id, block_id)];
-            prob += self.model_info.borrow().factor_ns[(child_id, block_id)];
+            factor_n += self.model_info.borrow().factor_ns[(child_id, block_id)];
         }
-        self.model_info.borrow_mut().factor_ns[(node_id, block_id)] = prob;
-        self.model_info.borrow_mut().aggregated_x[(node_id, block_id)] = x;
+        self.model_info.borrow_mut().factor_ns[(root_id, block_id)] = factor_n;
+        self.model_info.borrow_mut().aggregated_x[(root_id, block_id)] = x;
     }
 
     fn set_indel_x_and_factor_n_for_not_root(&self, node_idx: &NodeIdx, block_id: usize) {
-        let (mut x, mut prob) = self.get_indel_x_and_factor_n_for_not_root(node_idx, block_id);
+        let (mut x, mut factor_n) = self.get_indel_x_and_factor_n_for_not_root(node_idx, block_id);
         // this is the same as in set_indel_x_and_prob_for_root
-        for child in &self.phylo.tree.node(node_idx).children {
+        let node_id = usize::from(node_idx);
+        for child in self.get_childs_in_time_reversed_tree(node_idx) {
             let child_id = usize::from(child);
             x *= self.model_info.borrow().aggregated_x[(child_id, block_id)];
-            prob += self.model_info.borrow().factor_ns[(child_id, block_id)];
+            factor_n += self.model_info.borrow().factor_ns[(child_id, block_id)];
         }
-        let node_id = usize::from(node_idx);
-        self.model_info.borrow_mut().factor_ns[(node_id, block_id)] = prob;
+        if x < 0.0 {
+            println!(
+                "x is smaller than 0 for node {}",
+                self.phylo.tree.node(node_idx).id
+            );
+        }
+        self.model_info.borrow_mut().factor_ns[(node_id, block_id)] = factor_n;
         self.model_info.borrow_mut().aggregated_x[(node_id, block_id)] = x;
+    }
+
+    fn get_childs_in_time_reversed_tree(&self, node_idx: &NodeIdx) -> Vec<&NodeIdx> {
+        // since we are in a binary tree, but at some virtual root location it has 3 children
+        let mut childs = Vec::<&NodeIdx>::with_capacity(3);
+        let node_id = usize::from(node_idx);
+        if self.model_info.borrow().edge_is_time_reversed[node_id] {
+            match &self.phylo.tree.node(node_idx).parent {
+                Some(parent_idx) => childs.push(parent_idx),
+                _ => (),
+            }
+        }
+        for actual_child in &self.phylo.tree.node(node_idx).children {
+            if !self.model_info.borrow().edge_is_time_reversed[usize::from(actual_child)] {
+                childs.push(actual_child);
+            }
+        }
+        childs
     }
 
     fn get_indel_x_for_root(&self, block_id: usize) -> f64 {
@@ -470,7 +644,7 @@ impl<Q: QMatrix + Display> TKF92Cost<Q>
         let m = self.model.mu();
         let r = self.model.r();
 
-        let root_idx = &self.phylo.tree.root;
+        let root_idx = &self.model_info.borrow().virtual_root;
         if self.phylo.msa.get_node_map()[root_idx][self.model_info.borrow().blocks[block_id] - 1]
             .is_some()
         {
@@ -479,31 +653,61 @@ impl<Q: QMatrix + Display> TKF92Cost<Q>
         1.0
     }
 
+    // ie every node that is not the virtual node, (this may include the actual node)
     fn get_indel_x_and_factor_n_for_not_root(
         &self,
         node_idx: &NodeIdx,
         block_id: usize,
     ) -> (f64, f64) {
-        let parent_idx = &self.phylo.tree.node(node_idx).parent.unwrap();
+        // this assumes that in the case of that the node_idx that also this infinite edge of the true root is reversed
+        let parent_idx = self.get_parent_in_time_reversed_tree_for_not_virtual_root(node_idx);
         let node_id = usize::from(node_idx);
         let mut factor_n = 0.0;
         let mut x: f64 = 1.0;
         let site = self.model_info.borrow().blocks[block_id] - 1;
-        let parent_is_gap = self.phylo.msa.get_node_map()[parent_idx][site].is_none();
+        let parent_is_gap = self.phylo.msa.get_node_map()[&parent_idx][site].is_none();
         let current_is_gap = self.phylo.msa.get_node_map()[node_idx][site].is_none();
 
         let time = self.phylo.tree.node(node_idx).blen;
 
         if block_id == 0 {
-            self.model_info.borrow_mut().last_action[node_id] = false;
+            self.model_info.borrow_mut().last_event_deletion[node_id] = false;
         }
 
         let l = self.model.lambda();
         let m = self.model.mu();
         let r = self.model.r();
 
+        let mut action = "";
         if !parent_is_gap && current_is_gap {
             // deletion
+            action = "deletion";
+
+            if self.model_info.borrow().last_event_insertion[node_id]
+                && self.model_info.borrow().edge_is_time_reversed[node_id]
+            {
+                let n_option = self.model_info.borrow().factor_n[node_id];
+                match n_option {
+                    Some(n) => factor_n += n,
+                    None => {
+                        let b = self.model_info.borrow().beta[node_id];
+                        let mut n = Self::log_n1(l, m, b, time);
+                        n -= (l * b).ln();
+                        let n0_option = self.model_info.borrow().n0[node_id];
+                        match n0_option {
+                            Some(n0) => n -= n0.ln(),
+                            None => {
+                                let n0 = Self::n0(m, self.model_info.borrow().beta[node_id]);
+                                self.model_info.borrow_mut().n0[node_id] = Some(n0);
+                                n -= n0.ln();
+                            }
+                        }
+                        self.model_info.borrow_mut().factor_n[node_id] = Some(n);
+                        factor_n += n;
+                    }
+                }
+            }
+
             let n0_option = self.model_info.borrow().n0[node_id];
             match n0_option {
                 Some(n0) => x *= n0,
@@ -513,9 +717,11 @@ impl<Q: QMatrix + Display> TKF92Cost<Q>
                     x *= n0;
                 }
             }
-            self.model_info.borrow_mut().last_action[node_id] = true;
+            self.model_info.borrow_mut().last_event_deletion[node_id] = true;
+            self.model_info.borrow_mut().last_event_insertion[node_id] = false;
         }
         if !parent_is_gap && !current_is_gap {
+            action = "homolog";
             // homolog
             let h1_option = self.model_info.borrow().h1[node_id];
             match h1_option {
@@ -526,11 +732,15 @@ impl<Q: QMatrix + Display> TKF92Cost<Q>
                     x *= h1;
                 }
             }
-            self.model_info.borrow_mut().last_action[node_id] = false;
+            self.model_info.borrow_mut().last_event_deletion[node_id] = false;
+            self.model_info.borrow_mut().last_event_deletion[node_id] = false;
         }
         if parent_is_gap && !current_is_gap {
             // insertion
-            if self.model_info.borrow().last_action[node_id] {
+            action = "insertion";
+            if self.model_info.borrow().last_event_deletion[node_id]
+                && !self.model_info.borrow().edge_is_time_reversed[node_id]
+            {
                 let n_option = self.model_info.borrow().factor_n[node_id];
                 match n_option {
                     Some(n) => factor_n += n,
@@ -538,7 +748,6 @@ impl<Q: QMatrix + Display> TKF92Cost<Q>
                         let b = self.model_info.borrow().beta[node_id];
                         let mut n = Self::log_n1(l, m, b, time);
                         n -= (l * b).ln();
-                        // since the last event is an deletion the n0 for this node_idx is definitely not None
                         let n0_option = self.model_info.borrow().n0[node_id];
                         match n0_option {
                             Some(n0) => n -= n0.ln(),
@@ -562,7 +771,8 @@ impl<Q: QMatrix + Display> TKF92Cost<Q>
                     x *= insertion;
                 }
             }
-            self.model_info.borrow_mut().last_action[node_id] = false;
+            self.model_info.borrow_mut().last_event_deletion[node_id] = false;
+            self.model_info.borrow_mut().last_event_insertion[node_id] = true;
         }
         // if block_id == 4 {
         //     println!(
@@ -574,7 +784,47 @@ impl<Q: QMatrix + Display> TKF92Cost<Q>
         //         current_is_gap
         //     );
         // }
+        if x < 0.0 {
+            println!(
+                "x is less than 0, node = {}, action = {}",
+                self.phylo.tree.node(&node_idx).id,
+                action
+            )
+        }
         (x, factor_n)
+    }
+
+    fn get_parent_in_time_reversed_tree_for_not_virtual_root(&self, node_idx: &NodeIdx) -> NodeIdx {
+        println!(
+            "in get_parent_in_time_reversed_tree_for_not_virtual_root the vroot is {}",
+            self.phylo.tree.node(node_idx).id
+        );
+        assert!(*node_idx != self.model_info.borrow().virtual_root);
+        let is_time_reversed =
+            self.model_info.borrow().edge_is_time_reversed[usize::from(node_idx)];
+
+        if is_time_reversed {
+            // the edge is time reversed to one if its children is also time reversed,
+            // also we are not at the virtual root
+            // so i can safely call unwrap
+            let parent = self
+                .phylo
+                .tree
+                .node(node_idx)
+                .children
+                .iter()
+                .find(|child| self.model_info.borrow().edge_is_time_reversed[usize::from(*child)])
+                .unwrap()
+                .deref_copy();
+
+            parent
+        } else {
+            println!(
+                "node in get_parent_in_time_reversed_tree_for_not_virtual_root {}",
+                self.phylo.tree.node(node_idx).id
+            );
+            self.phylo.tree.node(node_idx).parent.unwrap()
+        }
     }
 
     fn set_felsenstein_for_internal(&self, node_idx: &NodeIdx, block_id: usize) {
@@ -592,7 +842,7 @@ impl<Q: QMatrix + Display> TKF92Cost<Q>
         for site in (block - block_len)..block {
             for current_state in 0..self.model.q.n() {
                 let mut prod_over_children = 1.0;
-                for child_idx in &self.phylo.tree.node(node_idx).children {
+                for child_idx in self.get_childs_in_time_reversed_tree(node_idx) {
                     if self.phylo.msa.get_node_map()[child_idx][site].is_none() {
                         continue;
                     }
@@ -613,6 +863,8 @@ impl<Q: QMatrix + Display> TKF92Cost<Q>
     }
 
     fn set_felsenstein_for_leaf(&self, node_idx: &NodeIdx, block_id: usize) {
+        // this assumes that the edge is note time reversed
+        // which would mean that the leaf is the virtual root
         let site = self.model_info.borrow().blocks[block_id] - 1;
         let current_node_is_gap = self.phylo.msa.get_node_map()[node_idx][site].is_none();
         if current_node_is_gap {
@@ -636,13 +888,13 @@ impl<Q: QMatrix + Display> TKF92Cost<Q>
 
     fn is_insertion_at_root(&self, block_id: usize) -> bool {
         let site = self.model_info.borrow().blocks[block_id] - 1;
-        self.phylo.msa.get_node_map()[&self.phylo.tree.root][site].is_some()
+        self.phylo.msa.get_node_map()[&self.model_info.borrow().virtual_root][site].is_some()
     }
 
     fn is_insertion_at_non_root(&self, node_idx: &NodeIdx, block_id: usize) -> bool {
         let site = self.model_info.borrow().blocks[block_id] - 1;
-        let parent_id = &self.phylo.tree.node(node_idx).parent.unwrap();
-        let parent_is_gap = self.phylo.msa.get_node_map()[parent_id][site].is_none();
+        let parent_id = self.get_parent_in_time_reversed_tree_for_not_virtual_root(node_idx);
+        let parent_is_gap = self.phylo.msa.get_node_map()[&parent_id][site].is_none();
         let current_is_not_gap = self.phylo.msa.get_node_map()[node_idx][site].is_some();
         parent_is_gap && current_is_not_gap
     }
