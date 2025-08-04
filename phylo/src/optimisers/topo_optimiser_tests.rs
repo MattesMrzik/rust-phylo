@@ -267,7 +267,7 @@ fn k80_sim_data_vs_phyml_wrong_start() {
 #[cfg_attr(feature = "ci_coverage", ignore)]
 fn wag_no_gaps_vs_phyml_nj_tree_start_nni() {
     // TODO: this test only passes because the NNI moves dont run into a local optimum and therefore
-    // find the same best tree as the SprOptimiser. So, if the data chances the test may fail.
+    // find the same best tree as the SprOptimiser. So, if the data changes the test may fail.
 
     // Check that optimisation on protein data under WAG produces similar tree to PhyML with matching likelihoods
     // on sequences without gaps starting from an NJ tree
@@ -320,7 +320,7 @@ fn wag_no_gaps_vs_phyml_nj_tree_start_spr() {
 #[cfg_attr(feature = "ci_coverage", ignore)]
 fn test_nni_and_spr_find_same_tree() {
     // TODO: this test only passes because the NNI moves dont run into a local optimum and therefore
-    // find the same best tree as the SprOptimiser. So, if the data chances the test may fail.
+    // find the same best tree as the SprOptimiser. So, if the data changes the test may fail.
     let fldr = Path::new("./data/phyml_protein_example/");
     let seq_file = fldr.join("nogap_seqs.fasta");
     let tree_file = fldr.join("jati_wag_nogap_nj_start.newick");

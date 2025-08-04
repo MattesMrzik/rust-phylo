@@ -19,9 +19,9 @@ use helpers::{
 fn single_spr_cycle<C: TreeSearchCost + Clone + Display + Send + Compatible<SprOptimiser>>(
     mut cost_fn: C,
     prune_locations: &[&NodeIdx],
-    move_opti: SprOptimiser,
+    spr_optimiser: SprOptimiser,
 ) -> anyhow::Result<f64> {
-    TopologyOptimiser::fold_improving_moves(&mut cost_fn, &move_opti, f64::MIN, prune_locations)
+    TopologyOptimiser::fold_improving_moves(&mut cost_fn, &spr_optimiser, f64::MIN, prune_locations)
 }
 
 fn find_best_regraft_for_single_spr_move<C: TreeSearchCost + Clone + Display + Send>(
@@ -53,10 +53,13 @@ fn run_single_spr_cycle_for_sizes<Q: QMatrix + QMatrixMaker + Send>(
             );
         });
     };
-    let move_opti = SprOptimiser {};
+    let spr_optimiser = SprOptimiser {};
     for (key, path) in paths {
         let cost_fn = black_box_pip_cost::<Q>(path, FrequencyOptimisation::Empirical);
-        let prune_locations = move_opti.move_locations(&cost_fn).copied().collect_vec();
+        let prune_locations = spr_optimiser
+            .move_locations(&cost_fn)
+            .copied()
+            .collect_vec();
         let prune_locations_ref = prune_locations.iter().collect_vec();
         bench(key, (cost_fn, &prune_locations_ref));
     }
