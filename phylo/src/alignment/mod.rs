@@ -17,11 +17,17 @@ pub use sequences::*;
 pub mod aligner;
 pub use aligner::*;
 
+/// Represents an aligned position in a sequence. Used in [`Mapping`].
 pub type Position = Option<usize>;
-pub type Mapping = Vec<Option<usize>>;
+/// Represents aligned positions of a sequence.
+/// E.g. The `Mapping` for the sequence `A--T-` is `[Some(0), None, None, Some(1), None]`.
+pub type Mapping = Vec<Position>;
+/// For an internal node of the tree, represents the pairwise alignment of the two sub MSAs that
+/// correspond to the two children of that node.
 pub type InternalAlignments = HashMap<NodeIdx, PairwiseAlignment>;
 pub type SeqMaps = HashMap<NodeIdx, Mapping>;
 
+/// Represents a pairwise alignment of two sequences or MSAs. Used in [`InternalAlignments`].
 #[derive(Clone, Debug, PartialEq)]
 pub struct PairwiseAlignment {
     pub map_x: Mapping,
@@ -34,41 +40,72 @@ impl PairwiseAlignment {
         PairwiseAlignment { map_x, map_y }
     }
 }
+
+/// Represents an alignment of sequences that are associated with the leaves of a phylogenetic tree.
+/// See also [`AncestralAlignment`].
 #[allow(clippy::len_without_is_empty)]
 pub trait Alignment: Display + Clone + Debug {
+    /// Returns the alphabet of the sequences in the alignment.
     fn alphabet(&self) -> &Alphabet;
     /// Returns the sequences without gaps
     fn seqs(&self) -> &Sequences;
     /// Returns the length of the sequences in the alignment
     fn len(&self) -> usize;
+    /// Returns the number of sequences in the alignment. Should be equal to the number of leaves
+    /// in the tree.
     fn seq_count(&self) -> usize;
     fn leaf_map(&self, node: &NodeIdx) -> &Mapping;
     fn leaf_maps(&self) -> &SeqMaps;
     fn internal_alignments(&self) -> &InternalAlignments;
+    /// Does compatibility checks and calls [`Self::from_aligned_unchecked`].  
+    /// Checks:
+    /// - if sequences are aligned
+    /// - if sequence IDs are unique ([`Sequences::ids_are_unique`])
+    /// - if sequence IDs match the taxa IDs in the tree ([`validate_taxa_ids`])
+    /// - removes columns with only gaps ([`Sequences::remove_gap_cols`])
     fn from_aligned(mut sequences: Sequences, tree: &Tree) -> Result<Self> {
         if !sequences.aligned {
-            bail!("Sequences are not aligned.")
+            bail!("Sequences are not aligned")
         }
         sequences.ids_are_unique()?;
         validate_taxa_ids(tree, &sequences)?;
         sequences.remove_gap_cols();
         Ok(Self::from_aligned_unchecked(sequences, tree))
     }
+    /// Constructs an alignment instance from aligned sequences and a phylogenetic tree. Is called
+    /// by [`Self::from_aligned`].
     fn from_aligned_unchecked(sequences: Sequences, tree: &Tree) -> Self;
 }
 
+/// Represents an alignment of sequences that are associated with all nodes of a phylogenetic tree,
+/// i.e. both leaves (modern sequences) and internal nodes (ancestral sequences).
+///
+/// The default implementation of [`Alignment::from_aligned`] only ensures
+/// prerequisites to build an alignment, not an ancestral alignment. Please overwrite this default
+/// implementation and make sure to call [`Tree::node_ids_are_unique`] in addition to checks
+/// your implementation requires.
+// TODO: instead of having this tip here, we could refine the default implementation of
+// Alignment::from_aligned to ensure prerequisites for alignment as well as ancestral alignment.
 pub trait AncestralAlignment: Alignment {
     fn ancestral_seqs(&self) -> &Sequences;
     fn ancestral_map(&self, node_idx: &NodeIdx) -> &Mapping;
+    /// Does compatibility checks and calls [`Self::from_aligned_with_ancestral_unchecked`].  
+    /// Checks:
+    /// - if sequences are aligned
+    /// - if sequence IDs are unique ([`Sequences::ids_are_unique`])
+    /// - if sequence IDs match the node IDs in the tree ([`validate_ids_with_ancestors`])
+    /// - removes columns with only gaps ([`Sequences::remove_gap_cols`])
     fn from_aligned_with_ancestral(mut all_seqs: Sequences, tree: &Tree) -> Result<Self> {
         if !all_seqs.aligned {
-            bail!("Sequences are not aligned.")
+            bail!("Sequences are not aligned")
         }
         all_seqs.ids_are_unique()?;
         validate_ids_with_ancestors(tree, &all_seqs)?;
         all_seqs.remove_gap_cols();
         Ok(Self::from_aligned_with_ancestral_unchecked(all_seqs, tree))
     }
+    /// Constructs an ancestral alignment instance from aligned sequences and a phylogenetic tree. Is called
+    /// by [`Self::from_aligned_with_ancestral`].
     fn from_aligned_with_ancestral_unchecked(all_seqs: Sequences, tree: &Tree) -> Self;
 }
 
@@ -302,6 +339,7 @@ impl Alignment for MASA {
     fn seqs(&self) -> &Sequences {
         &self.leaf_seqs
     }
+
     #[allow(clippy::len_without_is_empty)]
     fn len(&self) -> usize {
         self.leaf_maps
@@ -332,13 +370,17 @@ impl Alignment for MASA {
         let msa = MSA::from_aligned(sequences, tree)?;
         // TODO: do the internal alignments, build in the above line, conform with adding ancestral seqs?
         //       see also from_aligned_with_ancestral
+        // If the user wants to use a different ASR method to build the MASA, they can call
+        // MSA::from_aligned and then call their desired ASR method on the MSA.
         let asr = ParsimonyPresenceAbsence {};
         asr.reconstruct_ancestral_seqs(&msa, tree)
     }
     fn from_aligned_unchecked(sequences: Sequences, tree: &Tree) -> Self {
         let msa = MSA::from_aligned_unchecked(sequences, tree);
-        // TODO: do the internal alignments, build in the above line, conform with adding ancestral seqs?
+        // TODO: do the internal alignments, built in the above line, conform with adding ancestral seqs?
         //       see also from_aligned_with_ancestral
+        // If the user wants to use a different ASR method to build the MASA, they can call
+        // MSA::from_aligned and then call their desired ASR method on the MSA.
         let asr = ParsimonyPresenceAbsence {};
         asr.reconstruct_ancestral_seqs_unchecked(&msa, tree)
     }

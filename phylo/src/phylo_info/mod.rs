@@ -1,12 +1,15 @@
+use bio::io::fasta::Record;
+use hashbrown::HashMap;
+
 use crate::alignment::{Alignment, InternalAlignments, Mapping, SeqMaps, Sequences};
 use crate::substitution_models::FreqVector;
-use crate::tree::NodeIdx::{Internal, Leaf};
-use crate::tree::{NodeIdx, Tree};
+use crate::tree::{
+    NodeIdx::{self, Internal, Leaf},
+    Tree,
+};
 use crate::{aligned_seq, Result};
-use bio::io::fasta::Record;
 
 mod phyloinfo_builder;
-use hashbrown::HashMap;
 pub use phyloinfo_builder::*;
 
 /// The PhyloInfo struct contains all the information needed for phylogenetic inference.

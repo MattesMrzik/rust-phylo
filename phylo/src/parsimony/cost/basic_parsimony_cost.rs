@@ -21,7 +21,7 @@ pub struct BasicParsimonyCost<A: Alignment> {
 
 impl<A: Alignment> Display for BasicParsimonyCost<A> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Basic parsimony cost, match = 0.0, mismatch = 1.0.")
+        write!(f, "Basic parsimony cost, match = 0.0, mismatch = 1.0")
     }
 }
 

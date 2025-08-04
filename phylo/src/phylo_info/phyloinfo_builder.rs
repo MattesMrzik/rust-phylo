@@ -139,10 +139,10 @@ impl<A: Alignment, AA: AncestralAlignment> PhyloInfoBuilder<A, AA> {
             }
         };
         let msa = if sequences.aligned {
-            info!("Sequences are aligned.");
+            info!("Sequences are aligned");
             A::from_aligned(sequences, &tree)?
         } else {
-            info!("Sequences are not aligned, aligning.");
+            info!("Sequences are not aligned, aligning");
             self.aligner
                 .unwrap_or(Box::new(ParsimonyAligner::default()))
                 .align(&sequences, &tree)?
@@ -163,22 +163,22 @@ impl<A: Alignment, AA: AncestralAlignment> PhyloInfoBuilder<A, AA> {
             tree = set_missing_tree_node_ids(&tree)?;
             if sequences.aligned {
                 info!(
-                    "Aligned sequences without ancestral sequences. Inferring ancestral sequences."
+                    "Aligned sequences without ancestral sequences. Inferring ancestral sequences"
                 );
                 AA::from_aligned(sequences, &tree)
             } else {
-                info!("Sequences are not aligned, aligning.");
+                info!("Sequences are not aligned, aligning");
                 let leaf_msa = self
                     .aligner
                     .unwrap_or(Box::new(ParsimonyAligner::default()))
                     .align(&sequences, &tree)?;
-                info!("Ancestral sequences are not provided, inferring them.");
+                info!("Ancestral sequences are not provided, inferring them");
                 let asr = self.asr.unwrap_or(Box::new(ParsimonyPresenceAbsence {}));
                 asr.reconstruct_ancestral_seqs(&leaf_msa, &tree)
             }
         } else if sequences.len() == tree.len() {
             if sequences.aligned {
-                info!("Aligned sequences including ancestral sequences.");
+                info!("Aligned sequences including ancestral sequences");
                 AA::from_aligned_with_ancestral(sequences, &tree)
             } else {
                 bail!("Building an ancestral alignment from unaligned sequences (including ancestral_sequencess) is not supported");
@@ -254,18 +254,18 @@ pub(crate) fn set_missing_tree_node_ids(tree: &Tree) -> Result<Tree> {
             }
             tree_with_all_ids.nodes[usize::from(node_idx)].id = new_id;
         } else if !seen_user_set_ids.insert(id.to_string()) {
-            bail!("Duplicate id ({id}) found in the leaves of the tree.");
+            bail!("Duplicate id ({id}) found in the leaves of the tree");
         }
     }
     Ok(tree_with_all_ids)
 }
 
-/// Checks that the ids of the tree leaves and the sequences match, bails with an error otherwise.
-pub(crate) fn validate_taxa_ids(tree: &Tree, sequences: &Sequences) -> Result<()> {
+/// Checks that the IDs of the tree leaves and the sequences match, bails with an error otherwise.
+pub fn validate_taxa_ids(tree: &Tree, sequences: &Sequences) -> Result<()> {
     let tip_ids: HashSet<String> = HashSet::from_iter(tree.leaf_ids());
     let sequence_ids: HashSet<String> =
         HashSet::from_iter(sequences.iter().map(|rec| rec.id().to_string()));
-    info!("Checking that tree tip and sequence IDs match.");
+    info!("Checking that tree tip and sequence IDs match");
     let mut missing_tips = sequence_ids.difference(&tip_ids).collect::<Vec<_>>();
     if !missing_tips.is_empty() {
         missing_tips.sort();
@@ -283,9 +283,9 @@ pub(crate) fn validate_taxa_ids(tree: &Tree, sequences: &Sequences) -> Result<()
     Ok(())
 }
 
-/// Checks that the ids of the tree nodes and the sequences match, bails with an error
+/// Checks that the IDs of the tree nodes and the sequences match, bails with an error
 /// otherwise.
-pub(crate) fn validate_ids_with_ancestors(tree: &Tree, sequences: &Sequences) -> Result<()> {
+pub fn validate_ids_with_ancestors(tree: &Tree, sequences: &Sequences) -> Result<()> {
     let tree_ids: HashSet<String> = HashSet::from_iter(
         tree.preorder()
             .iter()
@@ -293,7 +293,7 @@ pub(crate) fn validate_ids_with_ancestors(tree: &Tree, sequences: &Sequences) ->
     );
     let sequence_ids: HashSet<String> =
         HashSet::from_iter(sequences.iter().map(|rec| rec.id().to_string()));
-    info!("Checking that tree and sequence IDs match.");
+    info!("Checking that tree and sequence IDs match");
     let mut missing_nodes = sequence_ids.difference(&tree_ids).collect::<Vec<_>>();
     if !missing_nodes.is_empty() {
         missing_nodes.sort();
@@ -370,7 +370,7 @@ pub mod private_tests {
         // assert
         assert!(error
             .to_string()
-            .contains("Duplicate id (A1) found in the leaves of the tree."))
+            .contains("Duplicate id (A1) found in the leaves of the tree"))
     }
 
     #[test]

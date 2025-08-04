@@ -84,7 +84,7 @@ impl Tree {
     pub(crate) fn new(sequences: &Sequences) -> Result<Self> {
         let n = sequences.len();
         if n == 0 {
-            bail!("No sequences provided, aborting.");
+            bail!("No sequences provided, aborting");
         }
         if n == 1 {
             Ok(Self {
@@ -198,28 +198,28 @@ impl Tree {
     pub fn rooted_spr(&self, prune_idx: &NodeIdx, regraft_idx: &NodeIdx) -> Result<Tree> {
         // Prune and regraft nodes must be different
         if prune_idx == regraft_idx {
-            bail!("Prune and regraft nodes must be different.");
+            bail!("Prune and regraft nodes must be different");
         }
         if self.is_subtree(regraft_idx, prune_idx) {
-            bail!("Prune node cannot be a subtree of the regraft node.");
+            bail!("Prune node cannot be a subtree of the regraft node");
         }
 
         let prune = self.node(prune_idx);
         // Pruned node must have a parent, it is the one being reattached
         if prune.parent.is_none() {
-            bail!("Cannot prune the root node.");
+            bail!("Cannot prune the root node");
         }
         // Cannot prune direct child of the root node, otherwise branch lengths are undefined
         if self.node(&prune.parent.unwrap()).parent.is_none() {
-            bail!("Cannot prune direct child of the root node.");
+            bail!("Cannot prune direct child of the root node");
         }
         let regraft = self.node(regraft_idx);
         // Regrafted node must have a parent, the prune parent is attached to that branch
         if regraft.parent.is_none() {
-            bail!("Cannot regraft to root node.");
+            bail!("Cannot regraft to root node");
         }
         if regraft.parent == prune.parent {
-            bail!("Prune and regraft nodes must have different parents.");
+            bail!("Prune and regraft nodes must have different parents");
         }
 
         Ok(self.rooted_spr_unchecked(prune_idx, regraft_idx))
@@ -471,12 +471,12 @@ impl Tree {
             .collect()
     }
 
-    pub(crate) fn node_ids_are_unique(&self) -> Result<()> {
+    pub fn node_ids_are_unique(&self) -> Result<()> {
         let mut seen = HashSet::new();
         for node_idx in self.postorder() {
             if !seen.insert(self.node_id(node_idx)) {
                 bail!(
-                    "Node ID '{}' is not unique in the tree.",
+                    "Node ID '{}' is not unique in the tree",
                     self.node_id(node_idx)
                 );
             }
@@ -505,10 +505,10 @@ pub fn percentiles_rounded(lengths: &[f64], categories: u32, rounding: &Rounding
 }
 
 fn argmin_wo_diagonal(q: Mat) -> (usize, usize) {
-    debug_assert!(!q.is_empty(), "The input matrix must not be empty.");
+    debug_assert!(!q.is_empty(), "The input matrix must not be empty");
     debug_assert!(
         q.ncols() > 1 && q.nrows() > 1,
-        "The input matrix should have more than 1 element."
+        "The input matrix should have more than 1 element"
     );
     let mut arg_min = vec![];
     let mut val_min = &f64::MAX;

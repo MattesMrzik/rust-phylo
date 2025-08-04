@@ -87,6 +87,10 @@ impl Sequences {
         &self.s[idx]
     }
 
+    pub fn record_mut(&mut self, idx: usize) -> &mut Record {
+        &mut self.s[idx]
+    }
+
     pub fn record_by_id(&self, id: &str) -> &Record {
         self.s
             .iter()
@@ -98,7 +102,7 @@ impl Sequences {
         let rec = self.s.iter().find(|r| r.id() == id);
         match rec {
             Some(r) => Ok(r),
-            None => bail!("Sequence with id {} not found", id),
+            None => bail!("Sequence with id {id} not found"),
         }
     }
 
@@ -154,12 +158,12 @@ impl Sequences {
         self.s = new_seqs.collect();
     }
 
-    pub(crate) fn ids_are_unique(&self) -> Result<()> {
+    pub fn ids_are_unique(&self) -> Result<()> {
         let mut seen = HashSet::new();
         for record in self.iter() {
             let id = record.id();
             if !seen.insert(id) {
-                bail!("Duplicate record id ({}) found in the sequences.", id);
+                bail!("Duplicate record id ({}) found in the sequences", id);
             }
         }
         Ok(())
@@ -229,6 +233,6 @@ mod private_tests {
         assert!(result
             .unwrap_err()
             .to_string()
-            .contains("Duplicate record id (on) found in the sequences."));
+            .contains("Duplicate record id (on) found in the sequences"));
     }
 }

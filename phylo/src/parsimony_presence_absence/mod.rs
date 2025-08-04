@@ -1,13 +1,25 @@
-use crate::alignment::{Alignment, AncestralAlignment, Sequences};
-
-use crate::alphabets::GAP;
-use crate::asr::AncestralSequenceReconstruction;
-use crate::tree::NodeIdx::{Internal, Leaf};
-use crate::tree::{NodeIdx, Tree};
-use crate::{aligned_seq, record};
 use bio::io::fasta::Record;
 use hashbrown::HashMap;
 
+use crate::alignment::{Alignment, AncestralAlignment, Sequences};
+use crate::alphabets::GAP;
+use crate::asr::AncestralSequenceReconstruction;
+use crate::tree::{
+    NodeIdx::{self, Internal, Leaf},
+    Tree,
+};
+use crate::{aligned_seq, record};
+
+/// Reconstructs ancestral wild card sequences, i.e. instead of the usual reconstruction that
+/// returns sequences with characters of the alphabet, this just returns the presence or absence of
+/// any character at a site. These are represented in an [`AncestralAlignment`] as sequences of
+/// [AMB_CHAR](`crate::alphabets::AMB_CHAR`) for presence and [GAP](`GAP`)
+/// for absence together with the leaf sequences.
+///
+/// It infers per column insertions sites to be the latest common ancestor of leaves that have a
+/// character in that column, and deletion sites as nodes where there is a character
+/// at the node's parent and all leaves in the subtree are gaps. The presences and absences
+/// are inferred according to these indel sites.
 pub struct ParsimonyPresenceAbsence {}
 
 impl<A: Alignment, AA: AncestralAlignment> AncestralSequenceReconstruction<A, AA>
@@ -30,10 +42,10 @@ impl<A: Alignment, AA: AncestralAlignment> AncestralSequenceReconstruction<A, AA
     }
 }
 
-/// Infers ancestral sequences for every site independently:
-/// - insertion location is latest common ancestors of all non-gap characters
-/// - deletion location is node n such that every leaf in the subtree rooted in n
-///   is a gap and the parent of n is not a deletion location
+// Infers ancestral sequences for every site independently:
+// - insertion location is latest common ancestors of all non-gap characters
+// - deletion location is node n such that every leaf in the subtree rooted in n
+//   is a gap and the parent of n is not a deletion location
 fn get_ancestral_records<A: Alignment>(tree: &Tree, alignment: &A) -> Vec<Record> {
     // counter[node] keeps track of the sequence index during the procedural generated mapping for the node
     let mut ancestral_seqs = HashMap::new();

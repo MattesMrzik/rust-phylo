@@ -1,8 +1,10 @@
 use rand::seq::IteratorRandom;
 use rand::thread_rng;
 
-use crate::alignment::{Alignment, AncestralAlignment, MASA, MSA};
-use crate::alignment::{InternalAlignments, PairwiseAlignment as PA, SeqMaps, Sequences};
+use crate::alignment::{
+    Alignment, AncestralAlignment, InternalAlignments, PairwiseAlignment as PA, SeqMaps, Sequences,
+    MASA, MSA,
+};
 use crate::alphabets::{dna_alphabet, protein_alphabet, AMINOACIDS, NUCLEOTIDES};
 use crate::io::read_sequences;
 use crate::phylo_info::PhyloInfo;
