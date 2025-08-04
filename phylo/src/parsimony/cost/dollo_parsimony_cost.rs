@@ -39,7 +39,6 @@ impl DolloParsimonyCost<SimpleScoring> {
         }
     }
 }
-
 impl<S: ParsimonyScoring> DolloParsimonyCost<S> {
     pub fn with_scoring(info: PhyloInfo, scoring: S) -> Self {
         let tmp = RefCell::new(DolloParsimonyInfo::new(&info));
