@@ -112,7 +112,7 @@ fn calc_best_regraft_cost<C: TreeSearchCost + Clone + Display + Send>(
         .map(move |(regraft, cost_fn)| {
             calc_spr_cost_with_blen_opt(prune_location, regraft, base_cost, cost_fn.clone())
         })
-        .try_reduce_with(|left, right| Ok(if left.cost() > right.cost() {left} else {right})).expect("at least one regraft location")
+        .try_reduce_with(|left, right| Ok(if left.cost > right.cost {left} else {right})).expect("at least one regraft location")
 }
 } else if #[cfg(feature="par-regraft-chunk")] {
 /// NOTE: seems to be faster than full on parallel for few taxa
@@ -137,8 +137,8 @@ fn calc_best_regraft_cost<C: TreeSearchCost + Clone + Display + Send>(
                 calc_spr_cost_with_blen_opt(prune_location, *regraft, base_cost, cost_func.clone())
             }) {
                 match result {
-                    Ok(regraft_info) if regraft_info.cost() > max_cost => {
-                        max_cost = regraft_info.cost();
+                    Ok(regraft_info) if regraft_info.cost > max_cost => {
+                        max_cost = regraft_info.cost;
                         max = Some(regraft_info);
                     },
                     Ok(_) => {}
@@ -147,7 +147,7 @@ fn calc_best_regraft_cost<C: TreeSearchCost + Clone + Display + Send>(
             }
             Ok(max.expect("at least one regraft location"))
         })
-        .try_reduce_with(|left, right| Ok(if left.cost() > right.cost() {left} else {right})).expect("at least one regraft location")
+        .try_reduce_with(|left, right| Ok(if left.cost > right.cost {left} else {right})).expect("at least one regraft location")
 }
 } else if #[cfg(feature="par-regraft-manual")] {
 fn calc_best_regraft_cost<C: TreeSearchCost + Clone + Display + Send>(
@@ -172,7 +172,7 @@ fn calc_best_regraft_cost<C: TreeSearchCost + Clone + Display + Send>(
         let (left_locations, right_locations) = regraft_locations.split_at(regraft_locations.len() / 2);
         let r2 = state.clone();
         match rayon::join(move || regraft_recursive(state, left_locations), move ||regraft_recursive(r2, right_locations)) {
-            (Ok(left), Ok(right)) => Ok(if left.cost() > right.cost() {left} else {right}) ,
+            (Ok(left), Ok(right)) => Ok(if left.cost > right.cost {left} else {right}) ,
             (Err(error), _) | (_, Err(error))   => Err(error),
         }
     }
