@@ -9,8 +9,11 @@ use crate::aligned_seq;
 use crate::alignment::{Aligner, Alignment, InternalAlignments, PairwiseAlignment, Sequences};
 use crate::alphabets::ParsimonySet;
 use crate::evolutionary_models::EvoModel;
-use crate::phylo_info::PhyloInfo;
-use crate::tree::{NodeIdx::Internal as Int, NodeIdx::Leaf, Tree};
+use crate::tree::{
+    NodeIdx::{Internal as Int, Leaf},
+    Tree,
+};
+use crate::Result;
 
 pub mod cost;
 pub use cost::*;

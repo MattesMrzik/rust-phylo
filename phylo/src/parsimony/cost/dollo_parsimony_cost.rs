@@ -7,8 +7,10 @@ use hashbrown::HashSet;
 use crate::alignment::Alignment;
 use crate::alphabets::ParsimonySet;
 use crate::likelihood::TreeSearchCost;
-use crate::parsimony::scoring::{GapCost, SimpleScoring};
-use crate::parsimony::ParsimonyScoring;
+use crate::parsimony::{
+    scoring::{GapCost, SimpleScoring},
+    ParsimonyScoring,
+};
 use crate::phylo_info::PhyloInfo;
 use crate::tree::{
     NodeIdx::{self, Internal, Leaf},
@@ -38,9 +40,8 @@ impl<A: Alignment> DolloParsimonyCost<SimpleScoring, A> {
         }
     }
 }
-
-impl<S: ParsimonyScoring, A: Alignment> DolloParsimonyCost<S, A> {
-    pub fn with_scoring(info: PhyloInfo<A>, scoring: S) -> Self {
+impl<S: ParsimonyScoring> DolloParsimonyCost<S> {
+    pub fn with_scoring(info: PhyloInfo, scoring: S) -> Self {
         let tmp = RefCell::new(DolloParsimonyInfo::new(&info));
         DolloParsimonyCost { info, tmp, scoring }
     }
@@ -233,9 +234,9 @@ impl DolloParsimonyInfo {
 #[cfg(test)]
 #[cfg_attr(coverage, coverage(off))]
 mod private_tests {
-    use super::*;
-
-    use crate::alignment::{Alignment, Sequences, MSA};
+    use crate::alignment::{Alignment, Sequences};
+    use crate::likelihood::TreeSearchCost;
+    use crate::parsimony::{DolloParsimonyCost, GapCost, SimpleScoring};
     use crate::phylo_info::PhyloInfo;
     use crate::{record_wo_desc as record, tree};
 
