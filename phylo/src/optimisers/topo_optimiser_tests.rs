@@ -218,7 +218,7 @@ fn k80_sim_data_vs_phyml() {
             epsilon = 1e-5
         );
     }
-    assert_relative_eq!(tree.magnitude, phyml_info.tree.magnitude, epsilon = 1e-4);
+    assert_relative_eq!(tree.length, phyml_info.tree.length, epsilon = 1e-4);
     assert_eq!(tree.robinson_foulds(&phyml_info.tree), 0);
 }
 
@@ -259,13 +259,16 @@ fn k80_sim_data_vs_phyml_wrong_start() {
             epsilon = 1e-5
         );
     }
-    assert_relative_eq!(tree.magnitude, phyml_info.tree.magnitude, epsilon = 1e-4);
+    assert_relative_eq!(tree.length, phyml_info.tree.length, epsilon = 1e-4);
     assert_eq!(tree.robinson_foulds(&phyml_info.tree), 0);
 }
 
 #[test]
 #[cfg_attr(feature = "ci_coverage", ignore)]
 fn wag_no_gaps_vs_phyml_nj_tree_start_nni() {
+    // TODO: this test only passes because the NNI moves dont run into a local optimum and therefore
+    // find the same best tree as the SprOptimiser. So, if the data chances the test may fail.
+
     // Check that optimisation on protein data under WAG produces similar tree to PhyML with matching likelihoods
     // on sequences without gaps starting from an NJ tree
     let fldr = Path::new("./data/phyml_protein_example/");
@@ -283,7 +286,7 @@ fn wag_no_gaps_vs_phyml_nj_tree_start_nni() {
     let phyml_logl = SCB::new(wag, phyml_res.clone()).build().unwrap().cost();
 
     // Compare tree height and logl to the output of PhyML
-    assert_relative_eq!(wag_tree.magnitude, phyml_res.tree.magnitude, epsilon = 1e-4);
+    assert_relative_eq!(wag_tree.length, phyml_res.tree.length, epsilon = 1e-4);
     assert_eq!(wag_tree.robinson_foulds(&phyml_res.tree), 0);
     assert_relative_eq!(res.final_cost, phyml_logl, epsilon = 1e-5);
 }
@@ -308,7 +311,7 @@ fn wag_no_gaps_vs_phyml_nj_tree_start_spr() {
     let phyml_logl = SCB::new(wag, phyml_res.clone()).build().unwrap().cost();
 
     // Compare tree height and logl to the output of PhyML
-    assert_relative_eq!(wag_tree.magnitude, phyml_res.tree.magnitude, epsilon = 1e-4);
+    assert_relative_eq!(wag_tree.length, phyml_res.tree.length, epsilon = 1e-4);
     assert_eq!(wag_tree.robinson_foulds(&phyml_res.tree), 0);
     assert_relative_eq!(res.final_cost, phyml_logl, epsilon = 1e-5);
 }
@@ -316,6 +319,8 @@ fn wag_no_gaps_vs_phyml_nj_tree_start_spr() {
 #[test]
 #[cfg_attr(feature = "ci_coverage", ignore)]
 fn test_nni_and_spr_find_same_tree() {
+    // TODO: this test only passes because the NNI moves dont run into a local optimum and therefore
+    // find the same best tree as the SprOptimiser. So, if the data chances the test may fail.
     let fldr = Path::new("./data/phyml_protein_example/");
     let seq_file = fldr.join("nogap_seqs.fasta");
     let tree_file = fldr.join("jati_wag_nogap_nj_start.newick");
@@ -330,7 +335,7 @@ fn test_nni_and_spr_find_same_tree() {
     let nni_tree = res_nni.cost.tree();
     let spr_tree = res_spr.cost.tree();
 
-    assert_relative_eq!(nni_tree.magnitude, spr_tree.magnitude, epsilon = 1e-4);
+    assert_relative_eq!(nni_tree.length, spr_tree.length, epsilon = 1e-4);
     assert_eq!(nni_tree.robinson_foulds(spr_tree), 0);
 }
 
@@ -439,8 +444,8 @@ fn wag_nogaps_pip_vs_subst_tree_nj_start() {
     let reopt_res = BranchOptimiser::new(new_pip_cost.clone()).run().unwrap();
     assert_relative_eq!(new_pip_cost.cost(), reopt_res.final_cost, epsilon = 1e-5);
     assert_relative_eq!(
-        pip_tree.magnitude,
-        reopt_res.cost.info.tree.magnitude,
+        pip_tree.length,
+        reopt_res.cost.info.tree.length,
         epsilon = 1e-5
     );
 }
@@ -533,7 +538,7 @@ fn wag_vs_phyml_empirical_freqs() {
         .build()
         .unwrap();
 
-    assert_relative_eq!(tree.magnitude, phyml_res.tree.magnitude, epsilon = 1e-4);
+    assert_relative_eq!(tree.length, phyml_res.tree.length, epsilon = 1e-4);
     assert_eq!(tree.robinson_foulds(&phyml_res.tree), 0);
 
     let wag_opt_phyml_logl = SCB::new(wag_opt, phyml_res).build().unwrap().cost();
@@ -575,8 +580,8 @@ fn pip_wag_vs_phyml_empirical_freqs() {
     // Check that our tree is better than phyml
     assert!(res.final_cost > phyml_brlen_opt.final_cost);
     assert_relative_eq!(
-        res.cost.tree().magnitude,
-        phyml_brlen_opt.cost.info.tree.magnitude,
+        res.cost.tree().length,
+        phyml_brlen_opt.cost.info.tree.length,
         epsilon = 1e-2
     );
 }
@@ -599,7 +604,7 @@ fn wag_vs_phyml_fixed_freqs() {
         .unwrap();
 
     let tree = res.cost.tree();
-    assert_relative_eq!(tree.magnitude, phyml_res.tree.magnitude, epsilon = 1e-4);
+    assert_relative_eq!(tree.length, phyml_res.tree.length, epsilon = 1e-4);
     assert_eq!(tree.robinson_foulds(&phyml_res.tree), 0);
     assert_relative_eq!(
         res.final_cost,

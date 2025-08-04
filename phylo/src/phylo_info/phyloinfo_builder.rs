@@ -211,7 +211,7 @@ impl PhyloInfoBuilder {
 
 #[cfg(test)]
 #[cfg_attr(coverage, coverage(off))]
-pub mod private_tests {
+mod private_tests {
     use std::path::Path;
 
     use super::PhyloInfoBuilder as PIB;

@@ -29,9 +29,8 @@ fn find_best_regraft_for_single_spr_move<C: TreeSearchCost + Clone + Display + S
     prune_location: &NodeIdx,
 ) -> anyhow::Result<f64> {
     let regraft_optimiser = SprOptimiser {};
-    let best_regraft = regraft_optimiser
-        .best_move_at_location(f64::MIN, &cost_fn, prune_location)?
-        .expect("invalid prune location for benchmarking");
+    let best_regraft =
+        regraft_optimiser.best_move_at_location(f64::MIN, &cost_fn, prune_location)?;
     Ok(best_regraft.cost())
 }
 
@@ -41,13 +40,14 @@ fn run_single_spr_cycle_for_sizes<Q: QMatrix + QMatrixMaker + Send>(
     criterion: &mut Criterion,
 ) {
     let mut bench_group = criterion.benchmark_group(format!("SINGLE-SPR-CYCLE {group_name}"));
+    let spr_optimiser = SprOptimiser {};
     let mut bench = |id: &str, data: (PIPCost<Q>, &[&NodeIdx])| {
         bench_group.bench_function(id, |bench| {
             bench.iter_batched(
                 // clone because of interior mutability in PIPCost
                 || data.clone(),
                 |(cost_fn, prune_locations)| {
-                    single_spr_cycle(cost_fn, prune_locations, SprOptimiser {})
+                    single_spr_cycle(cost_fn, prune_locations, spr_optimiser.clone())
                 },
                 criterion::BatchSize::SmallInput,
             );

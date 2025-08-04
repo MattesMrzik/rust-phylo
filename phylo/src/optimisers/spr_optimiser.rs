@@ -14,6 +14,18 @@ use crate::Result;
 #[derive(Clone)]
 pub struct SprOptimiser {}
 
+impl SprOptimiser {
+    pub fn new() -> Self {
+        SprOptimiser {}
+    }
+}
+
+impl Default for SprOptimiser {
+    fn default() -> Self {
+        SprOptimiser::new()
+    }
+}
+
 impl MoveOptimiser for SprOptimiser {
     fn move_locations<'a, C: TreeSearchCost + Display + Send + Clone + Display>(
         &self,
@@ -30,7 +42,7 @@ impl MoveOptimiser for SprOptimiser {
         base_cost: f64,
         cost: &C,
         node_idx: &NodeIdx,
-    ) -> Result<Option<MoveCostInfo>> {
+    ) -> Result<MoveCostInfo> {
         self.find_max_cost_regraft_for_prune(base_cost, cost, node_idx)
     }
 }
@@ -64,11 +76,12 @@ impl SprOptimiser {
         base_cost: f64,
         cost: &C,
         prune_location: &NodeIdx,
-    ) -> Result<Option<MoveCostInfo>> {
+    ) -> Result<MoveCostInfo> {
         let tree = cost.tree();
         if tree.children(&tree.root).contains(prune_location) {
             // due to topology change the current node may have become the direct child of root
-            return Ok(None);
+            // so the move is no longer possible
+            return Ok(MoveCostInfo::new(base_cost, tree.clone(), vec![]));
         }
 
         let regraft_locations = self
@@ -79,7 +92,7 @@ impl SprOptimiser {
         info!("Node {prune_location:?}: trying to regraft");
         let best_regraft =
             calc_best_regraft_cost(base_cost, *prune_location, regraft_locations, cost)?;
-        Ok(Some(best_regraft))
+        Ok(best_regraft)
     }
 }
 
@@ -215,7 +228,11 @@ fn calc_spr_cost_with_blen_opt<C: TreeSearchCost + Clone + Display>(
         }
     }
     debug!("    Regraft to {regraft:?} w best cost {move_cost}");
-    Ok(MoveCostInfo::new(move_cost, new_tree, vec![regraft]))
+    Ok(MoveCostInfo::new(
+        move_cost,
+        new_tree,
+        vec![prune_location, regraft],
+    ))
 }
 
 fn rooted_spr(tree: &Tree, prune_idx: &NodeIdx, regraft_idx: &NodeIdx) -> Result<Tree> {
@@ -302,7 +319,7 @@ fn rooted_spr_unchecked(tree: &Tree, prune_idx: &NodeIdx, regraft_idx: &NodeIdx)
 
     // Tree height should not have changed
     debug_assert!(relative_eq!(
-        new_tree.magnitude,
+        new_tree.length,
         new_tree.nodes.iter().map(|node| node.blen).sum(),
         epsilon = 1e-10
     ));
@@ -315,7 +332,7 @@ fn rooted_spr_unchecked(tree: &Tree, prune_idx: &NodeIdx, regraft_idx: &NodeIdx)
 
 #[cfg(test)]
 #[cfg_attr(coverage, coverage(off))]
-pub mod private_spr_tests {
+mod private_spr_tests {
     use approx::assert_relative_eq;
 
     use crate::optimisers::spr_optimiser::{rooted_spr, rooted_spr_unchecked};
@@ -387,7 +404,7 @@ pub mod private_spr_tests {
         let tree = tree!("(((A:1.0,B:1.0)E:5.1,(C:3.0,D:4.0)F:6.2)G:7.3);");
         let new_tree = rooted_spr(&tree, &tree.idx("A"), &tree.idx("C")).unwrap();
         assert_eq!(new_tree.len(), tree.len());
-        assert_relative_eq!(new_tree.magnitude, tree.magnitude);
+        assert_relative_eq!(new_tree.length, tree.length);
         let prune_sib = new_tree.node(&tree.idx("B"));
         assert_eq!(prune_sib.blen, 6.1);
         assert_eq!(prune_sib.parent, Some(tree.idx("G")));
@@ -427,6 +444,6 @@ pub mod private_spr_tests {
         assert!([tree.idx("A"), tree.idx("C")].contains(&ne.children[1]));
         assert_eq!(ne.parent, Some(tree.idx("F")));
         assert_eq!(new_tree.len(), tree.len());
-        assert_relative_eq!(new_tree.magnitude, tree.magnitude);
+        assert_relative_eq!(new_tree.length, tree.length);
     }
 }

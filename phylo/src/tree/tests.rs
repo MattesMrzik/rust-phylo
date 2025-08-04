@@ -339,7 +339,7 @@ fn newick_ladder_second_correct() {
     assert_eq!(trees[0].nodes, nodes);
     assert_eq!(trees[0].postorder.len(), 5);
     assert_eq!(trees[0].preorder.len(), 5);
-    assert_relative_eq!(trees[0].magnitude, trees[0].iter().map(|n| n.blen).sum());
+    assert_relative_eq!(trees[0].length, trees[0].iter().map(|n| n.blen).sum());
 }
 
 #[test]
@@ -685,7 +685,7 @@ fn test_to_newick_simple() {
         preorder: vec![I(2), L(0), L(1)],
         complete: false,
         n: 3,
-        magnitude: 8.5,
+        length: 8.5,
         leaf_ids: vec!["A".to_string(), "B".to_string()],
         dirty: vec![false; 3],
     };
@@ -709,7 +709,7 @@ fn test_to_newick_complex() {
     let tree = tree!("(((raccoon:19.19959,bear:6.80041):0.84600,((sea_lion:11.99700, seal:12.00300):7.52973,
     ((monkey:100.85930,cat:47.14069):20.59201, weasel:18.87953):2.09460):3.87382):9.0,dog:25.46154):10.0;");
     assert!(tree.complete);
-    assert_relative_eq!(tree.magnitude, tree.iter().map(|n| n.blen).sum());
+    assert_relative_eq!(tree.length, tree.iter().map(|n| n.blen).sum());
 }
 
 #[test]
@@ -735,7 +735,7 @@ fn test_parse_huge_newick() {
     assert_eq!(tree.leaves().len(), 762);
     assert_eq!(tree.internals().len(), 761);
     assert!(tree.complete);
-    assert_relative_eq!(tree.magnitude, tree.iter().map(|n| n.blen).sum());
+    assert_relative_eq!(tree.length, tree.iter().map(|n| n.blen).sum());
 }
 
 #[test]

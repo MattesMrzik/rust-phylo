@@ -44,8 +44,7 @@ impl<S: ParsimonyScoring> DolloParsimonyCost<S> {
         let tmp = RefCell::new(DolloParsimonyInfo::new(&info));
         DolloParsimonyCost { info, tmp, scoring }
     }
-}
-impl<S: ParsimonyScoring> DolloParsimonyCost<S> {
+
     fn score(&self) -> f64 {
         for node_idx in self.info.tree.postorder() {
             match node_idx {

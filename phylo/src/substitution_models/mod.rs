@@ -155,10 +155,7 @@ impl<Q: QMatrix> Clone for SubstitutionCost<Q> {
     }
 }
 
-impl<Q> TreeSearchCost for SubstitutionCost<Q>
-where
-    Q: QMatrix,
-{
+impl<Q: QMatrix> TreeSearchCost for SubstitutionCost<Q> {
     fn cost(&self) -> f64 {
         self.logl(&self.info)
     }

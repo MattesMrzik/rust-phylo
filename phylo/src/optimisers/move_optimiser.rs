@@ -7,13 +7,13 @@ use crate::Result;
 /// This is the result of a move operation in a phylogenetic tree, i.e. the result of
 /// a call to [`MoveOptimiser::best_move_at_location`].
 pub struct MoveCostInfo {
-    cost: f64,
-    tree: Tree,
-    dirty_nodes: Vec<NodeIdx>,
+    pub(crate) cost: f64,
+    pub(crate) tree: Tree,
+    pub(crate) dirty_nodes: Vec<NodeIdx>,
 }
 
 impl MoveCostInfo {
-    pub(crate) fn new(cost: f64, tree: Tree, dirty_nodes: Vec<NodeIdx>) -> Self {
+    pub fn new(cost: f64, tree: Tree, dirty_nodes: Vec<NodeIdx>) -> Self {
         MoveCostInfo {
             cost,
             dirty_nodes,
@@ -23,7 +23,7 @@ impl MoveCostInfo {
 
     /// The nodes that where affected by the move operation. These are passed to the
     /// [`TreeSearchCost::update_tree`], such that the cost may update its internal node states.
-    pub fn dirty_nodes(&self) -> &Vec<NodeIdx> {
+    pub fn dirty_nodes(&self) -> &[NodeIdx] {
         &self.dirty_nodes
     }
     pub fn cost(&self) -> f64 {
@@ -61,5 +61,5 @@ pub trait MoveOptimiser: Clone + Display {
         base_cost: f64,
         cost: &C,
         node_idx: &NodeIdx,
-    ) -> Result<Option<MoveCostInfo>>;
+    ) -> Result<MoveCostInfo>;
 }

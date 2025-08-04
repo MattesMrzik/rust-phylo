@@ -110,7 +110,7 @@ macro_rules! site {
 
 #[cfg(test)]
 #[cfg_attr(coverage, coverage(off))]
-pub mod tests {
+mod tests {
     use crate::{
         parsimony::{ParsimonySite, SiteFlag},
         tree::Tree,

@@ -14,11 +14,23 @@ use crate::Result;
 #[derive(Clone)]
 pub struct NniOptimiser {}
 
+impl NniOptimiser {
+    pub fn new() -> Self {
+        NniOptimiser {}
+    }
+}
+
+impl Default for NniOptimiser {
+    fn default() -> Self {
+        NniOptimiser::new()
+    }
+}
+
 impl MoveOptimiser for NniOptimiser {
     fn move_locations<'a, C: TreeSearchCost + Display + Send + Clone + Display>(
         &self,
         cost: &'a C,
-    ) -> impl Iterator<Item = &'a crate::tree::NodeIdx> {
+    ) -> impl Iterator<Item = &'a NodeIdx> {
         cost.tree()
             .preorder()
             .iter()
@@ -29,8 +41,8 @@ impl MoveOptimiser for NniOptimiser {
         &self,
         base_cost: f64,
         cost: &C,
-        node_idx: &crate::tree::NodeIdx,
-    ) -> Result<Option<MoveCostInfo>>
+        node_idx: &NodeIdx,
+    ) -> Result<MoveCostInfo>
     where
         C: TreeSearchCost + Display + Send + Clone,
     {
@@ -45,7 +57,7 @@ impl MoveOptimiser for NniOptimiser {
                 max_cost_info = Some(move_cost_info);
             }
         }
-        Ok(max_cost_info)
+        Ok(max_cost_info.expect("at least one NNI move should be possible"))
     }
 }
 
@@ -136,12 +148,11 @@ fn rooted_nni_unchecked(tree: &Tree, node_idx: &NodeIdx, child_idx: &NodeIdx) ->
 
 #[cfg(test)]
 #[cfg_attr(coverage, coverage(off))]
-pub mod private_nni_tests {
-
-    use crate::tree;
-    use crate::tree::Tree;
+mod private_nni_tests {
 
     use super::*;
+    use crate::tree;
+    use crate::tree::Tree;
 
     #[cfg(test)]
     fn compare_trees(tree: &Tree, true_tree: Tree) {

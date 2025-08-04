@@ -6,7 +6,8 @@ use log::{debug, info};
 
 use crate::likelihood::TreeSearchCost;
 use crate::optimisers::{
-    BranchOptimiser, MoveOptimiser, NniOptimiser, PhyloOptimisationResult, SprOptimiser,
+    BranchOptimiser, MoveCostInfo, MoveOptimiser, NniOptimiser, PhyloOptimisationResult,
+    SprOptimiser,
 };
 use crate::parsimony::scoring::ParsimonyScoring;
 use crate::parsimony::{BasicParsimonyCost, DolloParsimonyCost};
@@ -185,8 +186,8 @@ where
         })
     }
 
-    /// Iterates over `prune_locations` in order and applies the best (improving)
-    /// tree move for each pruning location in place
+    /// Iterates over `move_locations` in order and applies the best (improving)
+    /// tree move for each move location in place
     /// # Returns:
     /// - the new cost (or `base_cost` if no improvement was found)
     pub fn fold_improving_moves(
@@ -200,7 +201,7 @@ where
                 let correct_move_locations = move_opti.move_locations(cost_fn).collect_vec();
                 move_locations
                     .iter()
-                    .all(|prune_location| correct_move_locations.contains(prune_location))
+                    .all(|move_location| correct_move_locations.contains(move_location))
             },
             "all move locations must be contained in the tree and valid"
         );
@@ -208,19 +209,17 @@ where
         move_locations.iter().copied().try_fold(
             base_cost,
             |base_cost, move_location| -> Result<_> {
-                let Some(move_cost_info) =
-                    move_opti.best_move_at_location(base_cost, cost_fn, move_location)?
-                else {
-                    return Ok(base_cost);
-                };
+                let move_cost_info =
+                    move_opti.best_move_at_location(base_cost, cost_fn, move_location)?;
+                // let best_cost = move_cost_info.cost();
+                // let dirty_nodes = move_cost_info.dirty_nodes().clone();
+                // let best_tree = move_cost_info.into_tree();
+                let MoveCostInfo {
+                    cost: best_cost,
+                    tree: best_tree,
+                    dirty_nodes,
+                } = move_cost_info;
 
-                let (best_cost, mut dirty_nodes, best_tree) = (
-                    move_cost_info.cost(),
-                    move_cost_info.dirty_nodes().clone(),
-                    move_cost_info.into_tree(),
-                );
-
-                dirty_nodes.push(*move_location);
                 if best_cost > base_cost {
                     cost_fn.update_tree(best_tree, &dirty_nodes);
                     info!("    {move_opti} move applied, new cost {best_cost}");
