@@ -1,4 +1,4 @@
-use crate::alignment::Sequences;
+use crate::alignment::{Alignment, Sequences, MSA};
 use crate::parsimony::{GapCost, ParsimonyAligner, SimpleScoring, SiteFlag::*};
 use crate::{align, record_wo_desc as rec, site, tree};
 

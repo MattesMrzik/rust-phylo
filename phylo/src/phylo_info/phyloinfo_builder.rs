@@ -98,6 +98,7 @@ impl<A: Alignment, AA: AncestralAlignment> PhyloInfoBuilder<A, AA> {
     /// ```
     /// use phylo::alphabets::protein_alphabet;
     /// use phylo::phylo_info::PhyloInfoBuilder;
+    /// use phylo::alignment::{Alignment};
     /// # fn main() -> std::result::Result<(), anyhow::Error> {
     /// let info = PhyloInfoBuilder::new("./examples/data/sequences_DNA_small.fasta").alphabet(Some(protein_alphabet())).build()?;
     /// assert_eq!(info.msa.alphabet(), &protein_alphabet());
@@ -119,6 +120,7 @@ impl<A: Alignment, AA: AncestralAlignment> PhyloInfoBuilder<A, AA> {
     /// # Example
     /// ```
     /// use phylo::phylo_info::PhyloInfoBuilder;
+    /// use phylo::alignment::{Alignment};
     /// # fn main() -> std::result::Result<(), anyhow::Error> {
     /// let info = PhyloInfoBuilder::with_attrs(
     ///     "./examples/data/sequences_DNA_small.fasta",

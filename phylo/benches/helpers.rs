@@ -5,6 +5,7 @@ use std::{collections::HashMap, hint::black_box, path::PathBuf, time::Duration};
 
 use criterion::Criterion;
 
+use phylo::alignment::MSA;
 use phylo::evolutionary_models::FrequencyOptimisation;
 use phylo::optimisers::ModelOptimiser;
 use phylo::phylo_info::{PhyloInfo, PhyloInfoBuilder};

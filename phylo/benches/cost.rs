@@ -1,5 +1,6 @@
 use criterion::{criterion_group, criterion_main, Criterion};
 
+use phylo::alignment::MSA;
 use phylo::evolutionary_models::FrequencyOptimisation;
 use phylo::likelihood::ModelSearchCost;
 use phylo::pip_model::PIPCost;

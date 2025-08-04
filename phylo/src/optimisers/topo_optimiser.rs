@@ -4,6 +4,7 @@ use std::num::NonZeroUsize;
 use itertools::Itertools;
 use log::{debug, info};
 
+use crate::alignment::Alignment;
 use crate::likelihood::TreeSearchCost;
 use crate::optimisers::{
     BranchOptimiser, MoveCostInfo, MoveOptimiser, NniOptimiser, PhyloOptimisationResult,
@@ -51,14 +52,14 @@ impl TopologyOptimiserPredicate {
 pub trait Compatible<MO: MoveOptimiser> {}
 
 // TODO: or to we want to place those in respective files?
-impl<Q: QMatrix> Compatible<SprOptimiser> for PIPCost<Q> {}
-impl<Q: QMatrix> Compatible<NniOptimiser> for PIPCost<Q> {}
-impl<Q: QMatrix> Compatible<SprOptimiser> for SubstitutionCost<Q> {}
-impl<Q: QMatrix> Compatible<NniOptimiser> for SubstitutionCost<Q> {}
-impl<S: ParsimonyScoring> Compatible<SprOptimiser> for DolloParsimonyCost<S> {}
-impl<S: ParsimonyScoring> Compatible<NniOptimiser> for DolloParsimonyCost<S> {}
-impl Compatible<SprOptimiser> for BasicParsimonyCost {}
-impl Compatible<NniOptimiser> for BasicParsimonyCost {}
+impl<Q: QMatrix, A: Alignment> Compatible<SprOptimiser> for PIPCost<Q, A> {}
+impl<Q: QMatrix, A: Alignment> Compatible<NniOptimiser> for PIPCost<Q, A> {}
+impl<Q: QMatrix, A: Alignment> Compatible<SprOptimiser> for SubstitutionCost<Q, A> {}
+impl<Q: QMatrix, A: Alignment> Compatible<NniOptimiser> for SubstitutionCost<Q, A> {}
+impl<S: ParsimonyScoring, A: Alignment> Compatible<SprOptimiser> for DolloParsimonyCost<S, A> {}
+impl<S: ParsimonyScoring, A: Alignment> Compatible<NniOptimiser> for DolloParsimonyCost<S, A> {}
+impl<A: Alignment> Compatible<SprOptimiser> for BasicParsimonyCost<A> {}
+impl<A: Alignment> Compatible<NniOptimiser> for BasicParsimonyCost<A> {}
 
 pub struct TopologyOptimiser<MO, C>
 where

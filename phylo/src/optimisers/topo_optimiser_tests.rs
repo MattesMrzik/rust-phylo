@@ -108,7 +108,7 @@ fn k80_simple() {
 fn k80_simple_nni() {
     // Check that optimisation on k80 data improves k80 likelihood when starting from a given tree
     let tree = tree!("(((A:1.0,B:1.0)E:2.0,(C:1.0,D:1.0)F:2.0)G:3.0);");
-    let msa = Alignment::from_aligned(
+    let msa = MSA::from_aligned(
         Sequences::new(vec![
             record!("A", b"CTATATATAC"),
             record!("B", b"ATATATATAA"),
