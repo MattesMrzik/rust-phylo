@@ -254,6 +254,6 @@ mod private_nni_tests {
             rooted_nni(&tree, &tree.by_id(node_id).idx, &tree.by_id(child_id).idx).unwrap_err();
 
         // assert
-        assert!(err.to_string().contains("child"));
+        assert!(err.to_string().contains("must be the parent"));
     }
 }
