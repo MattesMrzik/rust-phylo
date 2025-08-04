@@ -7,9 +7,11 @@ use crate::Result;
 /// This is the result of a move operation in a phylogenetic tree, i.e. the result of
 /// a call to [`MoveOptimiser::best_move_at_location`].
 pub struct MoveCostInfo {
-    pub(crate) cost: f64,
-    pub(crate) tree: Tree,
-    pub(crate) dirty_nodes: Vec<NodeIdx>,
+    pub cost: f64,
+    pub tree: Tree,
+    /// The nodes that where affected by the move operation. These are passed to the
+    /// [`TreeSearchCost::update_tree`], such that the cost may update its internal node states.
+    pub dirty_nodes: Vec<NodeIdx>,
 }
 
 impl MoveCostInfo {
@@ -19,21 +21,6 @@ impl MoveCostInfo {
             dirty_nodes,
             tree,
         }
-    }
-
-    /// The nodes that where affected by the move operation. These are passed to the
-    /// [`TreeSearchCost::update_tree`], such that the cost may update its internal node states.
-    pub fn dirty_nodes(&self) -> &[NodeIdx] {
-        &self.dirty_nodes
-    }
-    pub fn cost(&self) -> f64 {
-        self.cost
-    }
-    pub fn tree(&self) -> &Tree {
-        &self.tree
-    }
-    pub fn into_tree(self) -> Tree {
-        self.tree
     }
 }
 

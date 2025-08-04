@@ -31,7 +31,7 @@ fn find_best_regraft_for_single_spr_move<C: TreeSearchCost + Clone + Display + S
     let regraft_optimiser = SprOptimiser {};
     let best_regraft =
         regraft_optimiser.best_move_at_location(f64::MIN, &cost_fn, prune_location)?;
-    Ok(best_regraft.cost())
+    Ok(best_regraft.cost)
 }
 
 fn run_single_spr_cycle_for_sizes<Q: QMatrix + QMatrixMaker + Send>(
