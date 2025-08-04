@@ -168,14 +168,16 @@ impl Alignment for MSA {
     /// use phylo::alignment::Sequences;
     /// use phylo::alphabets::dna_alphabet;
     /// use phylo::{record, tree};
+    /// # fn main() -> std::result::Result<(), anyhow::Error> {
     /// let tree = tree!("(((A0:1.0,B1:1.0):1.0,C2:1.0):1.0);");
     /// let seqs = Sequences::with_alphabet(vec![
     ///     record!("A0", Some("A0 sequence"), b"AAAA"),
     ///     record!("B1", Some("B1 sequence"), b"---A"),
     ///     record!("C2", Some("C2 sequence"), b"AA--"),
     /// ], dna_alphabet());
-    /// let msa = MSA::from_aligned(seqs, &tree).unwrap();
+    /// let msa = MSA::from_aligned(seqs, &tree)?;
     /// assert_eq!(*msa.alphabet(), dna_alphabet());
+    /// # Ok(()) }
     ///
     fn alphabet(&self) -> &Alphabet {
         &self.seqs.alphabet
@@ -190,17 +192,19 @@ impl Alignment for MSA {
     /// # Example
     /// ```
     /// # use bio::io::fasta::Record;
-    /// use phylo::alignment::{MSA, Alignment};
+    /// use phylo::alignment::{Alignment, MSA};
     /// use phylo::alignment::Sequences;
     /// use phylo::{record, tree};
+    /// # fn main() -> std::result::Result<(), anyhow::Error> {
     /// let tree = tree!("(((A0:1.0,B1:1.0):1.0,C2:1.0):1.0);");
     /// let seqs = Sequences::new(vec![
     ///     record!("A0", Some("A0 sequence"), b"AAAA"),
     ///     record!("B1", Some("B1 sequence"), b"---A"),
     ///     record!("C2", Some("C2 sequence"), b"AA--"),
     /// ]);
-    /// let msa = MSA::from_aligned(seqs, &tree).unwrap();
+    /// let msa = MSA::from_aligned(seqs, &tree)?;
     /// assert_eq!(msa.len(), 4);
+    /// # Ok(()) }
     /// ```
     #[allow(clippy::len_without_is_empty)]
     fn len(&self) -> usize {
@@ -219,14 +223,16 @@ impl Alignment for MSA {
     /// use phylo::alignment::{MSA, Alignment};
     /// use phylo::alignment::Sequences;
     /// use phylo::{record, tree};
+    /// # fn main() -> std::result::Result<(), anyhow::Error> {
     /// let tree = tree!("(((A0:1.0,B1:1.0):1.0,C2:1.0):1.0);");
     /// let seqs = Sequences::new(vec![
     ///     record!("A0", Some("A0 sequence"), b"AAAA"),
     ///     record!("B1", Some("B1 sequence"), b"---A"),
     ///     record!("C2", Some("C2 sequence"), b"AA--"),
     /// ]);
-    /// let msa = MSA::from_aligned(seqs, &tree).unwrap();
+    /// let msa = MSA::from_aligned(seqs, &tree)?;
     /// assert_eq!(msa.seq_count(), 3);
+    /// # Ok(()) }
     /// ```
     fn seq_count(&self) -> usize {
         self.leaf_maps.len()
@@ -253,16 +259,18 @@ impl Alignment for MSA {
     /// use phylo::alignment::Sequences;
     /// use phylo::phylo_info::PhyloInfo;
     /// use phylo::{record, tree};
+    /// # fn main() -> std::result::Result<(), anyhow::Error> {
     /// let tree = tree!("(((A0:1.0,B1:1.0):1.0,C2:1.0):1.0);");
     /// let seqs = Sequences::new(vec![
     ///     record!("A0", Some("A0 sequence"), b"AAAA"),
     ///     record!("B1", Some("B1 sequence"), b"---A"),
     ///     record!("C2", Some("C2 sequence"), b"AA--"),
     /// ]);
-    /// let msa = MSA::from_aligned(seqs.clone(), &tree).unwrap();
+    /// let msa = MSA::from_aligned(seqs.clone(), &tree)?;
     /// let phylo_info = PhyloInfo { msa, tree };
-    /// let aligned_seqs = phylo_info.compile_alignment(None).unwrap();
+    /// let aligned_seqs = phylo_info.compile_alignment(None)?;
     /// assert_eq!(aligned_seqs, seqs);
+    /// # Ok(()) }
     /// ```
     fn from_aligned_unchecked(seqs: Sequences, tree: &Tree) -> MSA {
         let msa_len = seqs.record(0).seq().len();
