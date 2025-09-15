@@ -137,11 +137,11 @@ where
         let mut prev_cost = f64::NEG_INFINITY;
         let mut iterations = 0;
 
-        let possible_prunes: Vec<_> = self.move_opti.move_locations(&self.c).copied().collect();
-        let current_prunes: Vec<_> = possible_prunes.iter().collect();
+        let possible_move_locs: Vec<_> = self.move_opti.move_locations(&self.c).copied().collect();
+        let current_move_locs: Vec<_> = possible_move_locs.iter().collect();
         cfg_if::cfg_if! {
         if #[cfg(not(feature = "deterministic"))] {
-            let mut current_prunes = current_prunes;
+            let mut current_move_locs = current_move_locs;
             // TODO: decide on an explicit and consistent RNG to use throughout the project
             let rng = &mut rand::thread_rng();
         }
@@ -159,11 +159,11 @@ where
             #[cfg(not(feature = "deterministic"))]
             {
                 use rand::seq::SliceRandom;
-                current_prunes.shuffle(rng);
+                current_move_locs.shuffle(rng);
             }
 
             curr_cost =
-                Self::fold_improving_moves(&mut self.c, &move_opti, curr_cost, &current_prunes)?;
+                Self::fold_improving_moves(&mut self.c, &move_opti, curr_cost, &current_move_locs)?;
 
             // Optimise branch lengths on current tree to match PhyML
             if self.c.blen_optimisation() {
