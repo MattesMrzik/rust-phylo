@@ -13,6 +13,7 @@ use crate::optimisers::{
 use crate::parsimony::scoring::ParsimonyScoring;
 use crate::parsimony::{BasicParsimonyCost, DolloParsimonyCost};
 use crate::pip_model::PIPCost;
+use crate::random::RandomSource;
 use crate::substitution_models::{QMatrix, SubstitutionCost};
 use crate::tree::NodeIdx;
 use crate::Result;
@@ -61,35 +62,44 @@ impl<S: ParsimonyScoring, A: Alignment> Compatible<NniOptimiser> for DolloParsim
 impl<A: Alignment> Compatible<SprOptimiser> for BasicParsimonyCost<A> {}
 impl<A: Alignment> Compatible<NniOptimiser> for BasicParsimonyCost<A> {}
 
-pub struct TopologyOptimiser<MO, C>
+pub struct TopologyOptimiser<'a, MO, C, R>
 where
     MO: MoveOptimiser,
     C: TreeSearchCost + Display + Clone + Send + Compatible<MO>,
+    R: RandomSource,
 {
     pub(crate) predicate: TopologyOptimiserPredicate,
-
     pub(crate) move_opti: MO,
     pub(crate) c: C,
+    pub(crate) rng: &'a R,
 }
 
-impl<MO, C> TopologyOptimiser<MO, C>
+impl<'a, MO, C, R> TopologyOptimiser<'a, MO, C, R>
 where
     MO: MoveOptimiser,
     C: TreeSearchCost + Display + Clone + Send + Compatible<MO>,
+    R: RandomSource,
 {
-    pub fn new(cost: C, move_opti: MO) -> Self {
+    pub fn new(cost: C, move_opti: MO, rng: &'a R) -> Self {
         Self {
             predicate: TopologyOptimiserPredicate::GtEpsilon(1e-3),
             move_opti,
             c: cost,
+            rng,
         }
     }
 
-    pub fn new_with_pred(cost: C, move_opti: MO, predicate: TopologyOptimiserPredicate) -> Self {
+    pub fn new_with_pred(
+        cost: C,
+        move_opti: MO,
+        rng: &'a R,
+        predicate: TopologyOptimiserPredicate,
+    ) -> Self {
         Self {
             c: cost,
             move_opti,
             predicate,
+            rng,
         }
     }
 
@@ -110,14 +120,14 @@ where
     /// use phylo::likelihood::TreeSearchCost;
     /// use phylo::optimisers::{SprOptimiser, TopologyOptimiser};
     /// use phylo::phylo_info::PhyloInfoBuilder;
+    /// use phylo::random::DefaultGenerator;
     /// use phylo::substitution_models::{SubstModel, SubstitutionCostBuilder, K80};
     ///
     /// let info = PhyloInfoBuilder::new("./examples/data/K80.fasta").build()?;
     /// let k80 = SubstModel::<K80>::new(&[], &[4.0, 1.0]);
     /// let c = SubstitutionCostBuilder::new(k80, info).build()?;
     /// let unopt_cost = c.cost();
-    /// let optimiser = TopologyOptimiser::new(c, SprOptimiser {});
-    /// let result = optimiser.run()?;
+    /// let result = TopologyOptimiser::new(c, SprOptimiser {}, &DefaultGenerator::default()).run()?;
     /// assert_eq!(unopt_cost, result.initial_cost);
     /// assert!(result.final_cost > result.initial_cost);
     /// assert!(result.iterations <= 100);
@@ -125,8 +135,6 @@ where
     /// # Ok(()) }
     /// ```
     pub fn run(mut self) -> Result<PhyloOptimisationResult<C>> {
-        debug_assert!(self.c.tree().len() > 3);
-
         info!("Optimising tree topology with SPRs");
         let init_cost = self.c.cost();
         let init_tree = self.c.tree();
@@ -138,14 +146,7 @@ where
         let mut iterations = 0;
 
         let possible_move_locs: Vec<_> = self.move_opti.move_locations(&self.c).copied().collect();
-        let current_move_locs: Vec<_> = possible_move_locs.iter().collect();
-        cfg_if::cfg_if! {
-        if #[cfg(not(feature = "deterministic"))] {
-            let mut current_move_locs = current_move_locs;
-            // TODO: decide on an explicit and consistent RNG to use throughout the project
-            let rng = &mut rand::thread_rng();
-        }
-        }
+        let mut current_move_locs: Vec<_> = possible_move_locs.iter().collect();
 
         let move_opti = self.move_opti.clone();
         // The best move on this iteration might still be worse than the current tree, in which case
@@ -156,11 +157,7 @@ where
             info!("Iteration: {iterations}, current cost: {curr_cost}");
             prev_cost = curr_cost;
 
-            #[cfg(not(feature = "deterministic"))]
-            {
-                use rand::seq::SliceRandom;
-                current_move_locs.shuffle(rng);
-            }
+            self.rng.shuffle(&mut current_move_locs);
 
             curr_cost =
                 Self::fold_improving_moves(&mut self.c, &move_opti, curr_cost, &current_move_locs)?;

@@ -4,7 +4,7 @@ A high-performance Rust library for phylogenetic analysis and multiple sequence 
 
 <!-- [![Crates.io](https://img.shields.io/crates/v/phylo.svg)](https://crates.io/crates/phylo)
 [![Documentation](https://docs.rs/phylo/badge.svg)](https://docs.rs/phylo) -->
-[![Licence](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](https://github.com/acg-team/rust-phylo#license) [![CI](https://github.com/acg-team/rust-phylo/actions/workflows/tests.yml/badge.svg)](https://github.com/acg-team/rust-phylo/actions) [![codecov](https://codecov.io/gh/acg-team/rust-phylo/branch/main/graph/badge.svg)](https://codecov.io/gh/acg-team/rust-phylo)
+[![Licence](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](https://github.com/acg-team/rust-phylo#license) [![CI](https://github.com/acg-team/rust-phylo/actions/workflows/test_stable.yml/badge.svg)](https://github.com/acg-team/rust-phylo/actions) [![codecov](https://codecov.io/gh/acg-team/rust-phylo/branch/main/graph/badge.svg)](https://codecov.io/gh/acg-team/rust-phylo)
 
 [Current Functionality](#current-functionality) • [Getting Started](#getting-started) • [Crate Features](#crate-features) • [Roadmap](#roadmap) • [Contributing](#contributing) • [Related Projects](#related-projects) • [Support](#support) • [Citation](#citation) • [Licence and Attributions](#licence-and-attributions)
 
@@ -68,7 +68,6 @@ This crate supports several optional features:
 - `par-regraft`: Enable parallel regrafting operations using Rayon;
 - `par-regraft-chunk`: Enable chunked parallel regrafting;
 - `par-regraft-manual`: Enable manual parallel regrafting control;
-- `deterministic`: Ensure deterministic behaviour for reproducible results (required for running tests);
 - `precomputed-test-results`: Speed up test runs with precomputed results (for local development).
 
 Enable features in your Cargo.toml:
@@ -117,7 +116,8 @@ Please read our [contributor guide]( CONTRIBUTING.md )!
 - Mattes Mrzik ([GitHub]( https://github.com/MattesMrzik ), [email]( mailto:mattes.mrzik@zhaw.ch ));
 - Dmitrii Iartsev ([GitHub]( https://github.com/jarcev ), [email]( mailto:dmitrii.iartsev@zhaw.ch ));
 - Merlin Maggi ([GitHub]( https://github.com/merlinio2000 ));
-- Luca Müller ([GitHub]( https://github.com/lucasperception )).
+- Luca Müller ([GitHub]( https://github.com/lucasperception ));
+- Kai Davidson ([GitHub]( https://github.com/kalxed )).
 
 ## Related Projects
 

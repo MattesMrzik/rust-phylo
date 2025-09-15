@@ -86,7 +86,7 @@ pub trait Alignment: Display + Clone + Debug {
 /// prerequisites to build an alignment, not an ancestral alignment. Please overwrite this default
 /// implementation and make sure to call [`Tree::node_ids_are_unique`] in addition to checks
 /// your implementation requires.
-// TODO: instead of having this tip here, we could refine the default implementation of
+// TODO: instead of having this tip here, we could change the default implementation of
 // Alignment::from_aligned to ensure prerequisites for alignment as well as ancestral alignment.
 pub trait AncestralAlignment: Alignment {
     fn ancestral_seqs(&self) -> &Sequences;

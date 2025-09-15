@@ -11,7 +11,8 @@ use crate::io::{self, DataError};
 use crate::parsimony::ParsimonyAligner;
 use crate::parsimony_presence_absence::ParsimonyPresenceAbsence;
 use crate::phylo_info::PhyloInfo;
-use crate::tree::{build_nj_tree, Tree};
+use crate::random::{DefaultGenerator, RandomSource};
+use crate::tree::{build_nj_tree_w_rng, Tree};
 use crate::Result;
 
 pub struct PhyloInfoBuilder<A: Alignment, AA: AncestralAlignment> {
@@ -109,6 +110,10 @@ impl<A: Alignment, AA: AncestralAlignment> PhyloInfoBuilder<A, AA> {
         self
     }
 
+    pub fn build(self) -> Result<PhyloInfo<A>> {
+        self.build_w_rng(&DefaultGenerator::default())
+    }
+
     /// Builds the PhyloInfo struct from the sequence file and the tree file (if provided).
     /// If the provided tree file has more than one tree, only the first tree will be processed.
     /// If no tree file is provided, an NJ tree is built from the sequences.
@@ -132,13 +137,13 @@ impl<A: Alignment, AA: AncestralAlignment> PhyloInfoBuilder<A, AA> {
     /// assert_eq!(info.tree.len(), 7);
     /// # Ok(()) }
     /// ```
-    pub fn build(self) -> Result<PhyloInfo<A>> {
+    pub fn build_w_rng(self, rng: &impl RandomSource) -> Result<PhyloInfo<A>> {
         let sequences = self.read_sequences()?;
         let tree = match &self.tree_file {
             Some(tree_file) => self.read_tree(tree_file)?,
             None => {
                 info!("Building NJ tree from sequences");
-                build_nj_tree(&sequences)?
+                build_nj_tree_w_rng(&sequences, rng)?
             }
         };
         let msa = if sequences.aligned {
@@ -154,12 +159,16 @@ impl<A: Alignment, AA: AncestralAlignment> PhyloInfoBuilder<A, AA> {
     }
 
     pub fn build_with_ancestors(self) -> Result<PhyloInfo<AA>> {
+        self.build_with_ancestors_w_rng(&DefaultGenerator::default())
+    }
+
+    pub fn build_with_ancestors_w_rng(self, rng: &impl RandomSource) -> Result<PhyloInfo<AA>> {
         let sequences = self.read_sequences()?;
         let mut tree = match &self.tree_file {
             Some(tree_file) => self.read_tree(tree_file)?,
             None => {
                 info!("Building NJ tree from sequences");
-                build_nj_tree(&sequences)?
+                build_nj_tree_w_rng(&sequences, rng)?
             }
         };
         let msa = if sequences.len() == tree.n {
