@@ -30,7 +30,7 @@ fn aligned_seqs_with_ancestors_subset(ids: &[&str]) -> Sequences {
 }
 
 #[test]
-fn asr() {
+fn parsimony_presence_absence() {
     // arrange
     let tree = tree!("((A0:1.0, B1:1.0) I5:1.0,(C2:1.0,(D3:1.0, E4:1.0) I9:1.0) I7:1.0) I8:1.0;");
     let aligned_s = aligned_seqs_with_ancestors_subset(&["A0", "B1", "C2", "D3", "E4"]);

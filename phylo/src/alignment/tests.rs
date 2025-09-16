@@ -362,11 +362,26 @@ fn display_ancestral_alignment() {
 }
 
 #[test]
+fn from_aligned_with_ancestral_fails() {
+    // arrange
+    let tree = tree!("((C:0.1,D:0.2)I01:0.3,(A:0.4,B:0.5)I02:0.6)Root;");
+    let seqs = Sequences::new(read_sequences("./data/sequences_DNA2_unaligned.fasta").unwrap());
+
+    // act
+    let error_msg = MASA::from_aligned_with_ancestral(seqs, &tree)
+        .unwrap_err()
+        .to_string();
+
+    // assert
+    assert!(error_msg.contains("not aligned"));
+}
+
+#[test]
 fn masa_compile_root() {
     // arrange
     let tree = tree!("(C:0.06465432,D:27.43128366,(A:0.00000001,B:0.00000001):0.08716381);");
     let sequences = Sequences::new(read_sequences("./data/sequences_DNA1.fasta").unwrap());
-    let masa = MASA::from_aligned(sequences.clone(), &tree).unwrap();
+    let masa = MASA::from_aligned_unchecked(sequences.clone(), &tree);
     let phylo_info = PhyloInfo { msa: masa, tree };
 
     // act

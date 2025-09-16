@@ -5,7 +5,7 @@ use approx::assert_relative_eq;
 use assert_matches::assert_matches;
 
 use crate::alignment::{Alignment, AncestralAlignment, Sequences, MSA};
-use crate::alphabets::{dna_alphabet, protein_alphabet};
+use crate::alphabets::{dna_alphabet, protein_alphabet, NUCLEOTIDES};
 use crate::io::{read_sequences, DataError};
 use crate::phylo_info::{PhyloInfo, PhyloInfoBuilder as PIB};
 use crate::substitution_models::FreqVector;
@@ -400,6 +400,8 @@ fn build_ancestral_alignment_from_aligned_leaf_seqs() {
     assert!(res_info.is_ok());
     let info = res_info.unwrap();
     assert_eq!(info.msa.seq_count(), 4);
+    assert_eq!(info.msa.len(), 5);
+    assert_eq!(info.msa.alphabet().symbols(), NUCLEOTIDES);
     assert_eq!(info.msa.ancestral_seqs().s.len(), 3);
     assert_eq!(info.tree.len(), 7);
 }
