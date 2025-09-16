@@ -3,6 +3,7 @@ use std::fs;
 use std::path::Path;
 
 use approx::assert_relative_eq;
+use fixedbitset::FixedBitSet;
 use itertools::repeat_n;
 use nalgebra::{dmatrix, DMatrix};
 use pest::error::ErrorVariant;
@@ -47,7 +48,12 @@ fn setup_test_tree() -> Tree {
 #[test]
 fn single_leaf_tree_complete() {
     let sequences = Sequences::new(vec![record!("A0", b"AAAAAA")]);
-    let tree = Tree::new(&sequences).unwrap();
+    let mut tree = Tree::new(&sequences).unwrap();
+
+    tree.complete = true;
+    tree.compute_postorder();
+    tree.compute_preorder();
+
     assert!(tree.complete);
     assert_eq!(tree.postorder.len(), 1);
     assert_eq!(tree.preorder.len(), 1);
@@ -505,6 +511,31 @@ fn newick_parse_phyml_output() {
     from_newick("((Gorilla:0.06683711,(Orangutan:0.21859880,Gibbon:0.31145586):0.06570906):0.03853171,Human:0.05356244,Chimpanzee:0.05417982);").unwrap();
 }
 
+#[test]
+fn dirty_clean_tree() {
+    let mut tree = tree!("(((A:1.5,B:2.3)E:5.1,(C:3.9,D:4.8)F:6.2)G:7.3);");
+    assert_eq!(tree.dirty.len(), tree.len());
+    assert!(tree.dirty.is_clear());
+    tree.dirty();
+    assert!(!tree.dirty.is_clear() && tree.dirty.is_full());
+    tree.clean();
+    assert!(tree.dirty.is_clear() && !tree.dirty.is_full());
+}
+
+#[test]
+fn partially_clean_tree() {
+    let mut tree = tree!("(((A:1.5,B:2.3)E:5.1,(C:3.9,D:4.8)F:6.2)G:7.3);");
+    assert_eq!(tree.dirty.len(), tree.len());
+    assert!(tree.dirty.is_clear());
+    tree.dirty.put(0);
+    tree.dirty.put(5);
+    tree.dirty.put(6);
+    assert!(!tree.dirty.is_clear() && !tree.dirty.is_full());
+    tree.clean();
+    assert!(tree.dirty.is_clear() && !tree.dirty.is_full());
+}
+
+#[cfg(test)]
 fn make_parsing_error(rules: &[Rule]) -> ErrorVariant<Rule> {
     ErrorVariant::ParsingError {
         positives: rules.to_vec(),
@@ -512,6 +543,7 @@ fn make_parsing_error(rules: &[Rule]) -> ErrorVariant<Rule> {
     }
 }
 
+#[cfg(test)]
 fn check_parsing_error(error: anyhow::Error, expected_parsing_error: &[Rule]) {
     assert_eq!(
         error.downcast_ref::<ParsingError>().unwrap().0.variant,
@@ -700,7 +732,7 @@ fn test_to_newick_simple() {
         n: 3,
         length: 8.5,
         leaf_ids: vec!["A".to_string(), "B".to_string()],
-        dirty: vec![false; 3],
+        dirty: FixedBitSet::with_capacity(3),
     };
     assert_eq!(tree.to_newick(), "((A:1,B:5.5)C:2);");
 }
