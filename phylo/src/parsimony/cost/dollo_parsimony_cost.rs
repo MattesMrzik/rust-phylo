@@ -150,15 +150,12 @@ impl<S: ParsimonyScoring, A: Alignment> TreeSearchCost for DolloParsimonyCost<S,
         -self.score()
     }
 
-    fn update_tree(&mut self, tree: Tree, dirty_nodes: &[NodeIdx]) {
+    fn update_tree(&mut self, tree: Tree) {
         self.info.tree = tree;
-        if dirty_nodes.is_empty() {
-            self.tmp.borrow_mut().node_info_valid.fill(false);
-            return;
+        for idx in self.info.tree.dirty.ones() {
+            self.tmp.borrow_mut().node_info_valid[idx] = false;
         }
-        for node_idx in dirty_nodes {
-            self.tmp.borrow_mut().node_info_valid[usize::from(node_idx)] = false;
-        }
+        self.info.tree.clean();
     }
 
     fn tree(&self) -> &Tree {
@@ -327,7 +324,7 @@ mod private_tests {
 
         assert_eq!(cost.score(), 1.0);
 
-        cost.update_tree(tree, &[]);
+        cost.update_tree(tree);
         assert_eq!(cost.score(), 1.0);
     }
 
@@ -355,7 +352,7 @@ mod private_tests {
 
         assert_eq!(cost.score(), 4.0);
 
-        cost.update_tree(tree, &[]);
+        cost.update_tree(tree);
         assert_eq!(cost.score(), 4.0);
     }
 }

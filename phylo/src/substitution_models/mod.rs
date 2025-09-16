@@ -161,17 +161,13 @@ impl<Q: QMatrix, A: Alignment> TreeSearchCost for SubstitutionCost<Q, A> {
         self.logl(&self.info)
     }
 
-    fn update_tree(&mut self, tree: Tree, dirty_nodes: &[NodeIdx]) {
+    fn update_tree(&mut self, tree: Tree) {
         self.info.tree = tree;
-        if dirty_nodes.is_empty() {
-            self.tmp.borrow_mut().node_info_valid.fill(false);
-            self.tmp.borrow_mut().node_models_valid.fill(false);
-            return;
+        for idx in self.info.tree.dirty.ones() {
+            self.tmp.borrow_mut().node_info_valid[idx] = false;
+            self.tmp.borrow_mut().node_models_valid[idx] = false;
         }
-        for node_idx in dirty_nodes {
-            self.tmp.borrow_mut().node_info_valid[usize::from(node_idx)] = false;
-            self.tmp.borrow_mut().node_models_valid[usize::from(node_idx)] = false;
-        }
+        self.info.tree.clean();
     }
 
     fn tree(&self) -> &Tree {
@@ -248,7 +244,7 @@ impl<Q: QMatrix, A: Alignment> SubstitutionCost<Q, A> {
         let idx = usize::from(node_idx);
 
         let mut tmp_values = self.tmp.borrow_mut();
-        if tree.dirty[idx] || !tmp_values.node_models_valid[idx] {
+        if !tmp_values.node_info_valid[idx] || !tmp_values.node_models_valid[idx] {
             tmp_values.node_models[idx] = self.model.p(node.blen);
             tmp_values.node_models_valid[idx] = true;
             tmp_values.node_info_valid[idx] = false;
@@ -270,7 +266,7 @@ impl<Q: QMatrix, A: Alignment> SubstitutionCost<Q, A> {
         let node = tree.node(node_idx);
         let idx = usize::from(node_idx);
 
-        if tree.dirty[idx] || !tmp_values.node_models_valid[idx] {
+        if !tmp_values.node_info_valid[idx] || !tmp_values.node_models_valid[idx] {
             tmp_values.node_models[idx] = self.model.p(node.blen);
             tmp_values.node_models_valid[idx] = true;
             tmp_values.node_info_valid[idx] = false;
