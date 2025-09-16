@@ -407,6 +407,25 @@ fn build_ancestral_alignment_from_aligned_leaf_seqs() {
 }
 
 #[test]
+fn build_ancestral_alignment_and_tree_from_nj() {
+    // arrange
+    let fldr = Path::new("./data");
+    let builder = PIB::new(fldr.join("sequences_DNA1.fasta"));
+
+    // act
+    let res_info = builder.build_with_ancestors();
+
+    // assert
+    assert!(res_info.is_ok());
+    let info = res_info.unwrap();
+    assert_eq!(info.msa.seq_count(), 4);
+    assert_eq!(info.msa.len(), 5);
+    assert_eq!(info.msa.alphabet().symbols(), NUCLEOTIDES);
+    assert_eq!(info.msa.ancestral_seqs().s.len(), 3);
+    assert_eq!(info.tree.len(), 7);
+}
+
+#[test]
 fn build_ancestral_alignment_from_aligned_leaf_seqs_mismatched_ids() {
     // arrange
     let fldr = Path::new("./data");

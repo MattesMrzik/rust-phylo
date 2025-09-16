@@ -7,7 +7,7 @@ use crate::Result;
 
 /// Trait for aligning sequences, optionally using a phylogenetic tree as guidance.
 pub trait Aligner<A: Alignment> {
-    /// Does compatibility checks and calls [`Self::align_unchecked`].  
+    /// Checks if inputs are compatible and calls [`Self::align_unchecked`].  
     /// Checks:
     ///  - if sequences are not already aligned
     ///  - if sequence IDs in the alignment are unique ([`Sequences::ids_are_unique`])

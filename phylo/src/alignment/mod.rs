@@ -57,7 +57,7 @@ pub trait Alignment: Display + Clone + Debug {
     fn leaf_map(&self, node: &NodeIdx) -> &Mapping;
     fn leaf_maps(&self) -> &SeqMaps;
     fn internal_alignments(&self) -> &InternalAlignments;
-    /// Does compatibility checks, removes columns with only gaps and calls [`Self::from_aligned_unchecked`].  
+    /// Checks if inputs are compatible, removes columns with only gaps and calls [`Self::from_aligned_unchecked`].  
     ///
     /// # Errors
     ///
@@ -92,7 +92,7 @@ pub trait AncestralAlignment: Alignment {
     fn ancestral_seqs(&self) -> &Sequences;
     fn ancestral_map(&self, node_idx: &NodeIdx) -> &Mapping;
     fn ancestral_maps(&self) -> &SeqMaps;
-    /// Does compatibility checks and calls [`Self::from_aligned_with_ancestral_unchecked`].  
+    /// Checks if inputs are compatible and calls [`Self::from_aligned_with_ancestral_unchecked`].  
     /// Checks:
     /// - if sequences are aligned
     /// - if sequence IDs are unique ([`Sequences::ids_are_unique`])
@@ -402,6 +402,8 @@ impl Alignment for MASA {
     /// assert_eq!(root_seq, "XX");
     /// let root_map = phylo_info.msa.ancestral_map(&phylo_info.tree.root);
     /// assert_eq!(root_map, &vec![Some(0), Some(1), None, None]);
+    /// // Ancestral sequences are inferred by (hard coded) ParsimonyPresenceAbsence.
+    /// // Alternatively, you may call MSA::from_aligned and then call ASR on that.
     /// let i1_seq = phylo_info.msa.ancestral_seqs().record_by_id("I1").seq();
     /// let i1_seq = std::str::from_utf8(i1_seq).unwrap().to_string();
     /// assert_eq!(i1_seq, "XXX");
@@ -413,7 +415,7 @@ impl Alignment for MASA {
     fn from_aligned(sequences: Sequences, tree: &Tree) -> Result<Self> {
         let tree = &set_missing_tree_node_ids(tree)?;
         let msa = MSA::from_aligned(sequences, tree)?;
-        // TODO: do the internal alignments, build in the above line, conform with adding ancestral seqs?
+        // TODO: Do the internal_alignments, built in the line above, conform with adding ancestral seqs?
         //       see also from_aligned_with_ancestral
         // If the user wants to use a different ASR method to build the MASA, they can call
         // MSA::from_aligned and then call their desired ASR method on the MSA.
@@ -421,13 +423,6 @@ impl Alignment for MASA {
         asr.reconstruct_ancestral_seqs(&msa, tree)
     }
 
-    /// TODO add doc example here?
-    /// perhaps also call the checks before calling this method
-    /// like
-    /// seqs.ids_are_unique()?;
-    /// validate_ids_with_ancestors(tree, &seqs)?;
-    /// from_aligned_unchecked(sequences, tree)
-    /// do asserts like in from_aligned
     fn from_aligned_unchecked(sequences: Sequences, tree: &Tree) -> Self {
         let msa = MSA::from_aligned_unchecked(sequences, tree);
         // TODO: do the internal alignments, built in the above line, conform with adding ancestral seqs?
@@ -452,6 +447,28 @@ impl AncestralAlignment for MASA {
         &self.ancestral_maps
     }
 
+    /// # Example
+    /// ```
+    /// # use bio::io::fasta::Record;
+    /// use phylo::alignment::{MASA, Alignment, AncestralAlignment};
+    /// use phylo::alignment::Sequences;
+    /// use phylo::phylo_info::PhyloInfo;
+    /// use phylo::{record, tree};
+    /// # fn main() -> std::result::Result<(), anyhow::Error> {
+    /// let tree = tree!("(((A0:1.0,B1:1.0)I1:1.0,C2:1.0)I2:1.0);");
+    /// let seqs = Sequences::new(vec![
+    ///     record!("A0", Some("A0 sequence"), b"AG-T"),
+    ///     record!("B1", Some("B1 sequence"), b"---T"),
+    ///     record!("C2", Some("C2 sequence"), b"AC--"),
+    ///     record!("I1", Some("I1 sequence"), b"AA-A"),
+    ///     record!("I2", Some("I2 sequence"), b"ACGT"),
+    /// ]);
+    /// let masa = MASA::from_aligned_with_ancestral_unchecked(seqs.clone(), &tree);
+    ///
+    /// assert_eq!(masa.seqs().len(), 3);
+    /// assert_eq!(masa.ancestral_seqs().len(), 2);
+    /// # Ok(()) }
+    /// ```
     fn from_aligned_with_ancestral_unchecked(all_seqs: Sequences, tree: &Tree) -> MASA {
         let mut leaf_maps = HashMap::<NodeIdx, Mapping>::with_capacity(tree.n);
         let mut ancestral_maps = HashMap::<NodeIdx, Mapping>::with_capacity(tree.len() - tree.n);

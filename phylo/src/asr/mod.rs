@@ -7,7 +7,7 @@ use crate::Result;
 
 /// Trait for ancestral sequence reconstruction.
 pub trait AncestralSequenceReconstruction<A: Alignment, AA: AncestralAlignment> {
-    /// Does compatibility checks and calls [`Self::reconstruct_ancestral_seqs_unchecked`].   
+    /// Checks if inputs are compatible and calls [`Self::reconstruct_ancestral_seqs_unchecked`].   
     /// Checks:
     ///  - if number of sequences in the alignment matches the number of leaves in the tree
     ///  - if node IDs in the tree are unique ([`Tree::node_ids_are_unique`])
@@ -31,3 +31,7 @@ pub trait AncestralSequenceReconstruction<A: Alignment, AA: AncestralAlignment> 
     /// [`Self::reconstruct_ancestral_seqs`].
     fn reconstruct_ancestral_seqs_unchecked(&self, leaf_alignment: &A, tree: &Tree) -> AA;
 }
+
+#[cfg(test)]
+#[cfg_attr(coverage, coverage(off))]
+mod tests;

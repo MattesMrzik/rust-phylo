@@ -224,9 +224,7 @@ impl<A: Alignment, AA: AncestralAlignment> PhyloInfoBuilder<A, AA> {
         Ok(sequences)
     }
 
-    // TODO: this could be a function like set_missing_tree_node_ids below, or the
-    // set_missing_tree_node_ids could be a method, what do we want?
-    /// Checks that there is at least one tree in the vector, bails with an error otherwise.
+    /// Checks if there is at least one tree in the vector, bails with an error otherwise.
     /// Prints a warning if there is more than one tree because only the first tree will be processed.
     fn check_tree_number(&self, trees: &[Tree]) -> Result<()> {
         if trees.is_empty() {
