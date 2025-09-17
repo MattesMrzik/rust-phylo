@@ -430,7 +430,7 @@ fn build_ancestral_alignment_from_aligned_leaf_seqs_mismatched_ids() {
     // arrange
     let fldr = Path::new("./data");
     let builder = PIB::with_attrs(
-        fldr.join("sequences_DNA1_missmatched_id.fasta"),
+        fldr.join("sequences_DNA1_mismatched_id.fasta"),
         fldr.join("tree_diff_branch_lengths_2.newick"),
     );
 
