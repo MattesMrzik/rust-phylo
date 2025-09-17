@@ -4,6 +4,7 @@ use std::num::NonZeroUsize;
 use itertools::Itertools;
 use log::{debug, info};
 
+use crate::alignment::Alignment;
 use crate::likelihood::TreeSearchCost;
 use crate::optimisers::{
     BranchOptimiser, MoveCostInfo, MoveOptimiser, NniOptimiser, PhyloOptimisationResult,
@@ -52,14 +53,14 @@ impl TopologyOptimiserPredicate {
 pub trait Compatible<MO: MoveOptimiser> {}
 
 // TODO: or to we want to place those in respective files?
-impl<Q: QMatrix> Compatible<SprOptimiser> for PIPCost<Q> {}
-impl<Q: QMatrix> Compatible<NniOptimiser> for PIPCost<Q> {}
-impl<Q: QMatrix> Compatible<SprOptimiser> for SubstitutionCost<Q> {}
-impl<Q: QMatrix> Compatible<NniOptimiser> for SubstitutionCost<Q> {}
-impl<S: ParsimonyScoring> Compatible<SprOptimiser> for DolloParsimonyCost<S> {}
-impl<S: ParsimonyScoring> Compatible<NniOptimiser> for DolloParsimonyCost<S> {}
-impl Compatible<SprOptimiser> for BasicParsimonyCost {}
-impl Compatible<NniOptimiser> for BasicParsimonyCost {}
+impl<Q: QMatrix, A: Alignment> Compatible<SprOptimiser> for PIPCost<Q, A> {}
+impl<Q: QMatrix, A: Alignment> Compatible<NniOptimiser> for PIPCost<Q, A> {}
+impl<Q: QMatrix, A: Alignment> Compatible<SprOptimiser> for SubstitutionCost<Q, A> {}
+impl<Q: QMatrix, A: Alignment> Compatible<NniOptimiser> for SubstitutionCost<Q, A> {}
+impl<S: ParsimonyScoring, A: Alignment> Compatible<SprOptimiser> for DolloParsimonyCost<S, A> {}
+impl<S: ParsimonyScoring, A: Alignment> Compatible<NniOptimiser> for DolloParsimonyCost<S, A> {}
+impl<A: Alignment> Compatible<SprOptimiser> for BasicParsimonyCost<A> {}
+impl<A: Alignment> Compatible<NniOptimiser> for BasicParsimonyCost<A> {}
 
 pub struct TopologyOptimiser<'a, MO, C, R>
 where
@@ -144,8 +145,8 @@ where
         let mut prev_cost = f64::NEG_INFINITY;
         let mut iterations = 0;
 
-        let possible_prunes: Vec<_> = self.move_opti.move_locations(&self.c).copied().collect();
-        let mut current_prunes: Vec<_> = possible_prunes.iter().collect();
+        let possible_move_locs: Vec<_> = self.move_opti.move_locations(&self.c).copied().collect();
+        let mut current_move_locs: Vec<_> = possible_move_locs.iter().collect();
 
         let move_opti = self.move_opti.clone();
         // The best move on this iteration might still be worse than the current tree, in which case
@@ -156,10 +157,10 @@ where
             info!("Iteration: {iterations}, current cost: {curr_cost}");
             prev_cost = curr_cost;
 
-            self.rng.shuffle(&mut current_prunes);
+            self.rng.shuffle(&mut current_move_locs);
 
             curr_cost =
-                Self::fold_improving_moves(&mut self.c, &move_opti, curr_cost, &current_prunes)?;
+                Self::fold_improving_moves(&mut self.c, &move_opti, curr_cost, &current_move_locs)?;
 
             // Optimise branch lengths on current tree to match PhyML
             if self.c.blen_optimisation() {

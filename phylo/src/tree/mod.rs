@@ -362,6 +362,19 @@ impl Tree {
             .filter(|&x| matches!(x.idx, Int(_)))
             .collect()
     }
+
+    pub fn node_ids_are_unique(&self) -> Result<()> {
+        let mut seen = HashSet::new();
+        for node_idx in self.postorder() {
+            if !seen.insert(self.node_id(node_idx)) {
+                bail!(
+                    "Node ID '{}' is not unique in the tree",
+                    self.node_id(node_idx)
+                );
+            }
+        }
+        Ok(())
+    }
 }
 
 pub fn percentiles(lengths: &[f64], categories: u32) -> Vec<f64> {
