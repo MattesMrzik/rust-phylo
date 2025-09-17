@@ -91,6 +91,7 @@ pub trait Alignment: Display + Clone + Debug {
 pub trait AncestralAlignment: Alignment {
     fn ancestral_seqs(&self) -> &Sequences;
     fn ancestral_map(&self, node_idx: &NodeIdx) -> &Mapping;
+    fn ancestral_maps(&self) -> &SeqMaps;
     /// Checks if inputs are compatible and calls [`Self::from_aligned_with_ancestral_unchecked`].  
     /// Checks:
     /// - if sequences are aligned
@@ -444,6 +445,10 @@ impl AncestralAlignment for MASA {
 
     fn ancestral_map(&self, node: &NodeIdx) -> &Mapping {
         self.ancestral_maps.get(node).unwrap()
+    }
+
+    fn ancestral_maps(&self) -> &SeqMaps {
+        &self.ancestral_maps
     }
 
     /// # Example

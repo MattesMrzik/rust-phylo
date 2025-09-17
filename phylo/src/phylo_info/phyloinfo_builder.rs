@@ -251,11 +251,13 @@ impl<A: Alignment, AA: AncestralAlignment> PhyloInfoBuilder<A, AA> {
 
 /// Sets missing ids and bails if there are duplicates among the node ids that were already set.
 pub(crate) fn set_missing_tree_node_ids(tree: &Tree) -> Result<Tree> {
+    info!("Setting missing tree node ids");
     let mut tree_with_all_ids = tree.clone();
     let mut seen_user_set_ids = HashSet::new();
     let mut count = 0;
     for node_idx in tree.postorder() {
         let id = tree.node_id(node_idx);
+        info!("Node {node_idx} has id '{id}'");
         if id.is_empty() {
             let mut new_id = format!("I{count}");
             while !seen_user_set_ids.insert(new_id.clone()) {
@@ -263,6 +265,7 @@ pub(crate) fn set_missing_tree_node_ids(tree: &Tree) -> Result<Tree> {
                 new_id = format!("I{count}");
             }
             tree_with_all_ids.nodes[usize::from(node_idx)].id = new_id;
+            info!("Set missing id of node {node_idx} to I{count}");
         } else if !seen_user_set_ids.insert(id.to_string()) {
             bail!("Duplicate id ({id}) found in the leaves of the tree");
         }

@@ -83,6 +83,7 @@ impl<C: TreeSearchCost + Clone + Display> BranchOptimiser<C> {
 
 impl<C: TreeSearchCost + Clone + Display> BranchOptimiser<C> {
     pub(crate) fn optimise_branch(&mut self, branch: &NodeIdx) -> Result<SingleValOptResult> {
+        info!("Optimising branch length at node {branch:?}");
         let start_blen = self.c.tree().node(branch).blen;
         let (min, max) = if start_blen == 0.0 {
             (0.0, 1.0)

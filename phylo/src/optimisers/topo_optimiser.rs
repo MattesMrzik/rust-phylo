@@ -4,7 +4,7 @@ use std::num::NonZeroUsize;
 use itertools::Itertools;
 use log::{debug, info};
 
-use crate::alignment::Alignment;
+use crate::alignment::{Alignment, AncestralAlignment};
 use crate::likelihood::TreeSearchCost;
 use crate::optimisers::{
     BranchOptimiser, MoveCostInfo, MoveOptimiser, NniOptimiser, PhyloOptimisationResult,
@@ -15,6 +15,7 @@ use crate::parsimony::{BasicParsimonyCost, DolloParsimonyCost};
 use crate::pip_model::PIPCost;
 use crate::random::RandomSource;
 use crate::substitution_models::{QMatrix, SubstitutionCost};
+use crate::tkf_model::TKF92Cost;
 use crate::tree::NodeIdx;
 use crate::Result;
 
@@ -61,6 +62,7 @@ impl<S: ParsimonyScoring, A: Alignment> Compatible<SprOptimiser> for DolloParsim
 impl<S: ParsimonyScoring, A: Alignment> Compatible<NniOptimiser> for DolloParsimonyCost<S, A> {}
 impl<A: Alignment> Compatible<SprOptimiser> for BasicParsimonyCost<A> {}
 impl<A: Alignment> Compatible<NniOptimiser> for BasicParsimonyCost<A> {}
+impl<Q: QMatrix, AA: AncestralAlignment> Compatible<NniOptimiser> for TKF92Cost<Q, AA> {}
 
 pub struct TopologyOptimiser<'a, MO, C, R>
 where
@@ -81,6 +83,7 @@ where
     R: RandomSource,
 {
     pub fn new(cost: C, move_opti: MO, rng: &'a R) -> Self {
+        // TODO check here that the model is compatible with the alphabet
         Self {
             predicate: TopologyOptimiserPredicate::GtEpsilon(1e-3),
             move_opti,
@@ -162,7 +165,7 @@ where
             curr_cost =
                 Self::fold_improving_moves(&mut self.c, &move_opti, curr_cost, &current_move_locs)?;
 
-            // Optimise branch lengths on current tree to match PhyML
+            // Optimise branch lengths on current tree to match PhyM
             if self.c.blen_optimisation() {
                 let o = BranchOptimiser::new(self.c.clone()).run()?;
                 if o.final_cost > curr_cost {
