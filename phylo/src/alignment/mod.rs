@@ -91,13 +91,16 @@ pub trait Alignment: Display + Clone + Debug {
 pub trait AncestralAlignment: Alignment {
     fn ancestral_seqs(&self) -> &Sequences;
     fn ancestral_map(&self, node_idx: &NodeIdx) -> &Mapping;
-    fn ancestral_maps(&self) -> &SeqMaps;
     /// Checks if inputs are compatible and calls [`Self::from_aligned_with_ancestral_unchecked`].  
     /// Checks:
     /// - if sequences are aligned
     /// - if sequence IDs are unique ([`Sequences::ids_are_unique`])
     /// - if sequence IDs match the node IDs in the tree ([`validate_ids_with_ancestors`])
     /// - removes columns with only gaps ([`Sequences::remove_gap_cols`])
+    ///
+    /// Only overwrite this method if absolutely necessary. The default implementation
+    /// ensures that prerequisites are met. Overwriting and not ensuring these checks
+    /// may lead to unexpected panics or wrong results.
     fn from_aligned_with_ancestral(mut all_seqs: Sequences, tree: &Tree) -> Result<Self> {
         if !all_seqs.aligned {
             bail!("Sequences are not aligned")
@@ -108,7 +111,7 @@ pub trait AncestralAlignment: Alignment {
         Ok(Self::from_aligned_with_ancestral_unchecked(all_seqs, tree))
     }
     /// Constructs an ancestral alignment instance from aligned sequences and a phylogenetic tree. Is called
-    /// by [`Self::from_aligned_with_ancestral`].
+    /// by the default implementation of [`Self::from_aligned_with_ancestral`].
     fn from_aligned_with_ancestral_unchecked(all_seqs: Sequences, tree: &Tree) -> Self;
 }
 
@@ -441,10 +444,6 @@ impl AncestralAlignment for MASA {
 
     fn ancestral_map(&self, node: &NodeIdx) -> &Mapping {
         self.ancestral_maps.get(node).unwrap()
-    }
-
-    fn ancestral_maps(&self) -> &SeqMaps {
-        &self.ancestral_maps
     }
 
     /// # Example

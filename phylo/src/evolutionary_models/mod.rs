@@ -14,7 +14,6 @@ pub enum FrequencyOptimisation {
 
 pub trait EvoModel: Display + DynClone {
     fn p(&self, time: f64) -> SubstMatrix;
-    // same here
     fn q(&self) -> &SubstMatrix;
     fn rate(&self, i: u8, j: u8) -> f64;
     fn params(&self) -> &[f64];

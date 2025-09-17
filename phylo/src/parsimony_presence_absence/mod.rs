@@ -13,7 +13,7 @@ use crate::{aligned_seq, record};
 /// Reconstructs ancestral wild card sequences, i.e. instead of the usual reconstruction that
 /// returns sequences with characters of the alphabet, this just returns the presence or absence of
 /// any character at a site. These are represented in an [`AncestralAlignment`] as sequences of
-/// [AMB_CHAR](`crate::alphabets::AMB_CHAR`) for presence and [GAP](`GAP`)
+/// [AMB_CHAR](`crate::alphabets::AMB_CHAR`) for presence and [GAP](`crate::alphabets::GAP`)
 /// for absence together with the leaf sequences.
 ///
 /// It infers per column insertions sites to be the latest common ancestor of leaves that have a

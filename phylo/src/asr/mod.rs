@@ -13,6 +13,10 @@ pub trait AncestralSequenceReconstruction<A: Alignment, AA: AncestralAlignment> 
     ///  - if node IDs in the tree are unique ([`Tree::node_ids_are_unique`])
     ///  - if sequence IDs in the alignment are unique ([`crate::alignment::Sequences::ids_are_unique`])
     ///  - if the sequence IDs in the alignment match the taxa IDs in the tree ([`validate_taxa_ids`])
+    ///  
+    /// Only overwrite this method if absolutely necessary. The default implementation
+    /// ensures that prerequisites are met. Overwriting and not ensuring these checks
+    /// may lead to unexpected panics or wrong results.
     fn reconstruct_ancestral_seqs(&self, leaf_alignment: &A, tree: &Tree) -> Result<AA> {
         if leaf_alignment.seq_count() != tree.n {
             bail!(
