@@ -14,6 +14,8 @@ use crate::tree::{
     Tree,
 };
 
+pub mod reassignment;
+
 #[derive(Clone)]
 pub struct TKF92Model<Q: QMatrix> {
     q: Q,
@@ -786,6 +788,7 @@ impl<Q: QMatrix + Display, AA: AncestralAlignment> TKF92Cost<Q, AA>
     }
 }
 
+#[allow(dead_code)]
 fn print_felsenstein(cost: &TKF92Cost<impl QMatrix, impl AncestralAlignment>) {
     for node in cost.phylo.tree.preorder() {
         println!("{}", cost.phylo.tree.node(node).id);
