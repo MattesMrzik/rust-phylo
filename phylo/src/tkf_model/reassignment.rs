@@ -579,13 +579,13 @@ impl<Q: QMatrix + Display, AA: AncestralAlignment> ReassignEdge<Q, AA> {
                 DirtyTreeEdge::T3 | DirtyTreeEdge::T4 => {
                     let parent_is_char = assignment[1];
                     let current_is_char =
-                        Self::get_map_from_any_node(&self.cost.phylo.msa, node)[site].is_some();
+                        get_map_from_any_node(&self.cost.phylo.msa, node)[site].is_some();
                     (parent_is_char, current_is_char)
                 }
                 DirtyTreeEdge::T2 => {
                     let parent_is_char = assignment[0];
                     let current_is_char =
-                        Self::get_map_from_any_node(&self.cost.phylo.msa, node)[site].is_some();
+                        get_map_from_any_node(&self.cost.phylo.msa, node)[site].is_some();
                     (parent_is_char, current_is_char)
                 }
                 DirtyTreeEdge::V2 => {
@@ -599,8 +599,7 @@ impl<Q: QMatrix + Display, AA: AncestralAlignment> ReassignEdge<Q, AA> {
                     } else {
                         let parent_idx = &self.cost.phylo.tree.node(node).parent.unwrap();
                         let parent_is_char =
-                            Self::get_map_from_any_node(&self.cost.phylo.msa, parent_idx)[site]
-                                .is_some();
+                            get_map_from_any_node(&self.cost.phylo.msa, parent_idx)[site].is_some();
                         let current_is_char = assignment[0];
                         (parent_is_char, current_is_char)
                     }
@@ -730,7 +729,7 @@ impl<Q: QMatrix + Display, AA: AncestralAlignment> ReassignEdge<Q, AA> {
             } else {
                 let t1 = self.cost.phylo.tree.node(v1_idx).parent.unwrap();
                 let site = self.cost.model_info.borrow().blocks[block_id] - 1;
-                Self::get_map_from_any_node(&self.cost.phylo.msa, &t1)[site].is_some()
+                get_map_from_any_node(&self.cost.phylo.msa, &t1)[site].is_some()
             };
             // if there is no char (or even no node) then we dont have to fix anything up the tree
             if t1_is_char {
@@ -799,7 +798,7 @@ impl<Q: QMatrix + Display, AA: AncestralAlignment> ReassignEdge<Q, AA> {
                 false
             } else {
                 let parent_idx = &self.cost.phylo.tree.node(&current).parent.unwrap();
-                Self::get_map_from_any_node(&self.cost.phylo.msa, parent_idx)[site].is_some()
+                get_map_from_any_node(&self.cost.phylo.msa, parent_idx)[site].is_some()
             };
             let mut count = 0;
             while current != self.cost.phylo.tree.root && parent_is_char {
@@ -820,7 +819,7 @@ impl<Q: QMatrix + Display, AA: AncestralAlignment> ReassignEdge<Q, AA> {
                     false
                 } else {
                     let parent_id = &self.cost.phylo.tree.node(&current).parent.unwrap();
-                    Self::get_map_from_any_node(&self.cost.phylo.msa, parent_id)[site].is_some()
+                    get_map_from_any_node(&self.cost.phylo.msa, parent_id)[site].is_some()
                 };
             }
             which_model.push(count);
@@ -855,13 +854,6 @@ impl<Q: QMatrix + Display, AA: AncestralAlignment> ReassignEdge<Q, AA> {
             vec![[false, false]]
         } else {
             vec![[true, true]]
-        }
-    }
-
-    fn get_map_from_any_node<'a>(msa: &'a AA, node: &'a NodeIdx) -> &'a Mapping {
-        match node {
-            Internal(_) => msa.ancestral_map(node),
-            Leaf(_) => msa.leaf_map(node),
         }
     }
 
@@ -924,15 +916,15 @@ impl<Q: QMatrix + Display, AA: AncestralAlignment> ReassignEdge<Q, AA> {
             false
         } else {
             let t1_idx = &self.cost.phylo.tree.node(v1_idx).parent.unwrap();
-            Self::get_map_from_any_node(&self.cost.phylo.msa, t1_idx)[site].is_some()
+            get_map_from_any_node(&self.cost.phylo.msa, t1_idx)[site].is_some()
         };
         let t2_idx = &self.cost.phylo.tree.sibling(v2_idx).unwrap();
-        let t2_is_char = Self::get_map_from_any_node(&self.cost.phylo.msa, t2_idx)[site].is_some();
+        let t2_is_char = get_map_from_any_node(&self.cost.phylo.msa, t2_idx)[site].is_some();
         let children_of_v2 = &self.cost.phylo.tree.node(v2_idx).children;
         let t3_idx = &children_of_v2[0];
         let t4_idx = &children_of_v2[1];
-        let t3_is_char = Self::get_map_from_any_node(&self.cost.phylo.msa, t3_idx)[site].is_some();
-        let t4_is_char = Self::get_map_from_any_node(&self.cost.phylo.msa, t4_idx)[site].is_some();
+        let t3_is_char = get_map_from_any_node(&self.cost.phylo.msa, t3_idx)[site].is_some();
+        let t4_is_char = get_map_from_any_node(&self.cost.phylo.msa, t4_idx)[site].is_some();
 
         (t1_is_char, t2_is_char, t3_is_char, t4_is_char)
     }
@@ -967,6 +959,15 @@ impl<Q: QMatrix + Display, AA: AncestralAlignment> ReassignEdge<Q, AA> {
                 }
             }
         }
+    }
+}
+pub(crate) fn get_map_from_any_node<'a, AA: AncestralAlignment>(
+    msa: &'a AA,
+    node: &'a NodeIdx,
+) -> &'a Mapping {
+    match node {
+        Internal(_) => msa.ancestral_map(node),
+        Leaf(_) => msa.leaf_map(node),
     }
 }
 

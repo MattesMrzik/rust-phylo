@@ -858,6 +858,7 @@ fn get_blocks<AA: AncestralAlignment>(msa: &AA) -> Vec<usize> {
     blocks
 }
 
+// TODO: this is also used in other models, we could place this somewhere else
 fn get_leaf_seq_info<Q: QMatrix, AA: AncestralAlignment>(
     phylo: &PhyloInfo<AA>,
     q: &Q,
@@ -865,24 +866,14 @@ fn get_leaf_seq_info<Q: QMatrix, AA: AncestralAlignment>(
     let n = q.n();
     let msa_length = phylo.msa.len();
     let mut leaf_seq_info = HashMap::with_capacity(phylo.tree.leaves().len());
-    println!("getting leaf seq info");
-    println!("the msa length is {msa_length}");
-    println!("the alphabet size is {n}");
     for node in phylo.tree.leaves() {
-        println!("leaf id is  {}", node.id);
         let seq = phylo.msa.seqs().record_by_id(&node.id).seq().to_vec();
         let alignment_map = phylo.msa.leaf_map(&node.idx);
         let mut leaf_seq_w_gaps = DMatrix::<f64>::zeros(n, msa_length);
         for (i, mut site_info) in leaf_seq_w_gaps.column_iter_mut().enumerate() {
             if let Some(c) = alignment_map[i] {
-                println!("at site {i} the char is {c}");
                 site_info.copy_from(phylo.msa.alphabet().char_encoding(seq[c]));
             } else {
-                println!("at site {i} there is a gap");
-                println!(
-                    "the gap encoding is {:?}",
-                    phylo.msa.alphabet().gap_encoding()
-                );
                 site_info.copy_from(phylo.msa.alphabet().gap_encoding());
             }
         }

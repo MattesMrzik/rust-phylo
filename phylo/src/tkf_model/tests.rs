@@ -1,25 +1,29 @@
 use std::cell::RefCell;
 use std::path::Path;
 
+use approx::assert_relative_eq;
+
+use crate::alignment::{Alignment, Sequences, MASA};
 use crate::optimisers::{NniOptimiser, TopologyOptimiser};
-use crate::phylo_info::PhyloInfoBuilder;
+use crate::phylo_info::{PhyloInfo, PhyloInfoBuilder};
 use crate::random::DefaultGenerator;
 use crate::substitution_models::{QMatrixMaker, JC69};
+use crate::tkf_model::reassignment::get_map_from_any_node;
+use crate::tkf_model::{b, h1, log_i1, log_n1, n0};
 use crate::{alignment::AncestralAlignment, substitution_models::QMatrix};
+use crate::{record_wo_desc as record, tree};
 
 use super::TKF92Cost;
 use super::{get_blocks, TKF92Model, TKF92ModelInfo};
 
 #[cfg(test)]
-fn logl_without_node_values<Q: QMatrix, AA: AncestralAlignment>(cost: &TKF92Cost<Q, AA>) -> f64 {
-    use crate::tkf_model::{h1, log_i1, log_n1, n0};
-
-    use super::b;
-
+fn logl_without_node_values_without_felsenstein<Q: QMatrix, AA: AncestralAlignment>(
+    cost: &TKF92Cost<Q, AA>,
+) -> f64 {
     let blocks = get_blocks(&cost.phylo.msa);
     let tree = &cost.phylo.tree;
     let model = &cost.model;
-    let node_map = cost.phylo.msa.ancestral_maps();
+    let virtual_root = &cost.model_info.borrow().virtual_root;
     let l = model.lambda();
     let m = model.mu();
     let r = model.r();
@@ -36,7 +40,7 @@ fn logl_without_node_values<Q: QMatrix, AA: AncestralAlignment>(cost: &TKF92Cost
         } else {
             fragment - blocks[i - 1]
         };
-        if node_map[&cost.model_info.borrow().virtual_root][fragment - 1].is_some() {
+        if get_map_from_any_node(&cost.phylo.msa, virtual_root)[fragment - 1].is_some() {
             // the eq seq at the root has a fragment
             x *= l / m * (1.0 - r) / r;
             prob += fragment_len as f64 * r.ln();
@@ -51,8 +55,10 @@ fn logl_without_node_values<Q: QMatrix, AA: AncestralAlignment>(cost: &TKF92Cost
 
             let time = tree.node(node_idx).blen;
             let parent_id = &tree.node(node_idx).parent.unwrap();
-            let mut parent_is_gap = node_map[parent_id][fragment - 1].is_none();
-            let mut current_is_gap = node_map[node_idx][fragment - 1].is_none();
+            let mut parent_is_gap =
+                get_map_from_any_node(&cost.phylo.msa, parent_id)[fragment - 1].is_none();
+            let mut current_is_gap =
+                get_map_from_any_node(&cost.phylo.msa, node_idx)[fragment - 1].is_none();
 
             if cost.model_info.borrow().edge_is_time_reversed[usize::from(node_idx)] {
                 // println!("this edge is time reversed {node_idx}");
@@ -104,6 +110,171 @@ fn logl_without_node_values<Q: QMatrix, AA: AncestralAlignment>(cost: &TKF92Cost
         prob += (fragment_len - 1) as f64 * (1.0 + x).ln();
     }
     prob
+}
+
+#[test]
+fn tkf_beta() {
+    assert_relative_eq!(b(0.3, 0.5, 0.7), 0.5461782813185221)
+}
+
+#[test]
+fn tkf_log_i1() {
+    // arrange
+    let l = 2.0;
+    let m = 3.0;
+    let time = 1.0;
+    let b = b(l, m, time);
+    // act & assert
+    assert_relative_eq!(log_i1(l, b), -0.8172396554020775) // log((1-2(1-e^(-1))/(3-2*e^(-1)))
+}
+
+#[test]
+fn tkf_log_n1() {
+    // arrange
+    let l = 2.0;
+    let m = 3.0;
+    let time = 0.5;
+    let b = b(l, m, time);
+    // act & assert
+    assert_relative_eq!(log_n1(l, m, b, time), -2.732135332549935)
+    // log((1-e^(-1.5) - 3(1-e^(-.5))/(3-2*e^(-.5)) )* (1-2(1-e^(-.5))/(3-2*e^(-.5)))   (2(1-e^(-1))/(3-2*e^(-1)))^0)
+}
+
+#[test]
+fn tkf_n0() {
+    // arrange
+    let l = 2.0;
+    let m = 3.0;
+    let time = 0.5;
+    let b = b(l, m, time);
+    // act & assert
+    assert_relative_eq!(n0(m, b), 0.6605755607027574) // (3(1-e^(-.5))/(3-2*e^(-.5)))
+}
+
+#[test]
+fn tkf_h1() {
+    // arrange
+    let l = 2.0;
+    let m = 3.0;
+    let time = 1.5;
+    let b = b(l, m, time);
+    // act & assert
+    assert_relative_eq!(h1(l, m, b, time), 0.004350089645603061)
+    // e^(-4.5) * (1-2(1-e^(-1.5))/(3-2*e^(-1.5)))
+}
+
+#[test]
+fn tkf_get_blocks() {
+    // arrange
+    let tree = tree!("((A0:1.0,B1:1.0)I1:1.0);");
+    let seqs = Sequences::new(vec![
+        record!("A0", b"AAB-D"),
+        record!("B1", b"-ARAW"),
+        record!("I1", b"AAA-A"),
+    ]);
+
+    let msa = MASA::from_aligned_with_ancestral(seqs, &tree).unwrap();
+
+    // act & assert
+    assert_eq!(get_blocks(&msa), vec![1, 3, 4, 5]);
+}
+
+#[test]
+fn test_tkf92_logl_without_substitution() {
+    // arrange
+    let tree = tree!("(((A1:2.0,B2:2.0)I3:0.3,C4:2.0)R5:1.0);");
+    let seqs = Sequences::new(vec![
+        record!("A1", b"--NNNNN---"),
+        record!("B2", b"-------NNN"),
+        record!("I3", b"--N-------"),
+        record!("C4", b"NNN-------"),
+        record!("R5", b"--N-------"),
+    ]);
+    let msa = MASA::from_aligned_with_ancestral(seqs, &tree).unwrap();
+    let m = msa.len() as f64;
+    let pyhlo = PhyloInfo {
+        msa,
+        tree: tree.clone(),
+    };
+    let q = JC69::create(&[], &[]);
+    let lambda = 0.1;
+    let mu = 0.2;
+    let r = 0.3;
+    let tkf_model = TKF92Model {
+        q,
+        params: vec![lambda, mu, r],
+    };
+    let model_info = RefCell::new(TKF92ModelInfo::new(&pyhlo, &tkf_model));
+    let tkf_cost = TKF92Cost {
+        model: tkf_model,
+        phylo: pyhlo,
+        model_info,
+    };
+
+    // act
+    let logl = tkf_cost.logl();
+    let half_manual = logl_without_node_values_without_felsenstein(&tkf_cost);
+    let mut manual_calculation = 0.0;
+    manual_calculation += (1.0 - lambda / mu).ln();
+    manual_calculation += m * r.ln();
+    // immortal links
+    manual_calculation += log_i1(lambda, b(lambda, mu, tree.by_id("A1").blen));
+    manual_calculation += log_i1(lambda, b(lambda, mu, tree.by_id("B2").blen));
+    manual_calculation += log_i1(lambda, b(lambda, mu, tree.by_id("I3").blen));
+    manual_calculation += log_i1(lambda, b(lambda, mu, tree.by_id("C4").blen));
+    // first block
+    let x = lambda * b(lambda, mu, tree.by_id("C4").blen) * (1.0 - r) / r;
+    manual_calculation += x.ln() + 1.0 * (1.0 + x).ln();
+    // second block
+    let mut x = lambda / mu * (1.0 - r) / r;
+    x *= h1(
+        lambda,
+        mu,
+        b(lambda, mu, tree.by_id("C4").blen),
+        tree.by_id("C4").blen,
+    );
+    x *= h1(
+        lambda,
+        mu,
+        b(lambda, mu, tree.by_id("A1").blen),
+        tree.by_id("A1").blen,
+    );
+    x *= h1(
+        lambda,
+        mu,
+        b(lambda, mu, tree.by_id("I3").blen),
+        tree.by_id("I3").blen,
+    );
+    x *= n0(mu, b(lambda, mu, tree.by_id("B2").blen));
+    manual_calculation += x.ln();
+    // third block
+    let x = lambda * b(lambda, mu, tree.by_id("C4").blen) * (1.0 - r) / r;
+    manual_calculation += x.ln() + 3.0 * (1.0 + x).ln();
+    // fourth block
+    let x = lambda * b(lambda, mu, tree.by_id("B2").blen) * (1.0 - r) / r;
+    manual_calculation += x.ln() + 2.0 * (1.0 + x).ln();
+    manual_calculation += log_n1(
+        lambda,
+        mu,
+        b(lambda, mu, tree.by_id("B2").blen),
+        tree.by_id("B2").blen,
+    );
+    manual_calculation -= n0(mu, b(lambda, mu, tree.by_id("B2").blen)).ln();
+    manual_calculation -= (lambda * b(lambda, mu, tree.by_id("B2").blen)).ln();
+
+    // assert
+    assert_relative_eq!(logl, manual_calculation);
+    assert_relative_eq!(logl, half_manual);
+}
+
+#[test]
+fn test_tkf92_logl_with_substitution() {
+    // do i even need the felsenstein in my cost or could i simply add in to my cost in the topo
+    // opti
+    // I will first test my current impl agaist the cft test logl and if
+    // all is good then make a commit such that i have this working version
+    // and then i can impl a indel tkf and make tkf cost just the indel cost
+    // plus the substitution cost and also just call update tree on both
 }
 
 #[test]
