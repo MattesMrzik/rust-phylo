@@ -180,7 +180,7 @@ fn tkf_get_blocks() {
 }
 
 #[test]
-fn test_tkf92_logl_without_substitution() {
+fn tkf_logl_without_substitution() {
     // arrange
     let tree = tree!("(((A1:2.0,B2:2.0)I3:0.3,C4:2.0)R5:1.0);");
     let seqs = Sequences::new(vec![
@@ -268,7 +268,7 @@ fn test_tkf92_logl_without_substitution() {
 }
 
 #[test]
-fn test_tkf92_logl_with_substitution() {
+fn tkf_logl_with_substitution() {
     // do i even need the felsenstein in my cost or could i simply add in to my cost in the topo
     // opti
     // I will first test my current impl agaist the cft test logl and if
@@ -278,7 +278,7 @@ fn test_tkf92_logl_with_substitution() {
 }
 
 #[test]
-fn test_tkf92() {
+fn tkf() {
     let _ = env_logger::builder().is_test(true).try_init();
     let fldr = Path::new("./data/");
     let phylo = PhyloInfoBuilder::with_attrs(
@@ -302,5 +302,57 @@ fn test_tkf92() {
     let move_opti = NniOptimiser {};
     let rng = &DefaultGenerator::default();
     let topo_opti = TopologyOptimiser::new(tkf_cost, move_opti, rng);
-    topo_opti.run().unwrap();
+    let result = topo_opti.run().unwrap();
+    println!("test print final cost {}", result.final_cost);
+    println!("test print msa = {}", result.cost.phylo.msa)
+}
+
+#[cfg(test)]
+fn get_tkf_only_felsenstein(seqs: Sequences) -> f64 {
+    let tree = tree!("(((A1:2.0,B2:2.0)I3:0.3,C4:2.0)R5:1.0);");
+    let msa = MASA::from_aligned_with_ancestral(seqs, &tree).unwrap();
+    let pyhlo = PhyloInfo {
+        msa,
+        tree: tree.clone(),
+    };
+    let q = JC69::create(&[], &[]);
+    let lambda = 0.1;
+    let mu = 0.2;
+    let r = 0.3;
+    let tkf_model = TKF92Model {
+        q,
+        params: vec![lambda, mu, r],
+    };
+    let model_info = RefCell::new(TKF92ModelInfo::new(&pyhlo, &tkf_model));
+    let tkf_cost = TKF92Cost {
+        model: tkf_model,
+        phylo: pyhlo,
+        model_info,
+    };
+
+    let logl = tkf_cost.logl();
+    let half_manual = logl_without_node_values_without_felsenstein(&tkf_cost);
+    logl - half_manual
+}
+
+#[test]
+fn tkf_indel_history_doesnt_change_felsenstein() {
+    // julijas impl does by nature not depend on it since it works with msa not masa
+    let seqs = Sequences::new(vec![
+        record!("A1", b"--GTGTA---"),
+        record!("B2", b"-------AGT"),
+        record!("I3", b"--N-------"),
+        record!("C4", b"GTA-------"),
+        record!("R5", b"--N-------"),
+    ]);
+    let felsenstein_logl_1 = get_tkf_only_felsenstein(seqs);
+    let seqs2 = Sequences::new(vec![
+        record!("A1", b"--GTGTA---"),
+        record!("B2", b"-------AGT"),
+        record!("I3", b"--NNNNNNNN"),
+        record!("C4", b"GTA-------"),
+        record!("R5", b"--NNNNN---"),
+    ]);
+    let felsenstein_logl_2 = get_tkf_only_felsenstein(seqs2);
+    assert_relative_eq!(felsenstein_logl_1, felsenstein_logl_2, epsilon = 1e-12);
 }
