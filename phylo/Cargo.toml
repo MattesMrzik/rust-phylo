@@ -76,7 +76,7 @@ unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage)'] }
 env_logger = "0.10"
 criterion = "0.5.1"
 pprof = { version = "0.14.0", features = ["criterion", "flamegraph"] }
-
+rayon = { version = "1.10.0" }
 
 [[bench]]
 name = "tree_from_msa"

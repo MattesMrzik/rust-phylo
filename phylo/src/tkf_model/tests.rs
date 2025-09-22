@@ -1,20 +1,27 @@
 use std::cell::RefCell;
+use std::io::{self, Write};
 use std::path::Path;
 
+use anyhow::bail;
 use approx::assert_relative_eq;
+use itertools::Itertools;
+// use this a a optional in the cargo.toml if the flag par_chunk is passed
+use rayon::prelude::*;
 
 use crate::alignment::{Alignment, Sequences, MASA};
 use crate::optimisers::{NniOptimiser, TopologyOptimiser};
 use crate::phylo_info::{PhyloInfo, PhyloInfoBuilder};
 use crate::random::DefaultGenerator;
+use crate::substitution_models::GTR;
 use crate::substitution_models::{QMatrixMaker, JC69};
-use crate::tkf_model::reassignment::get_map_from_any_node;
-use crate::tkf_model::{b, h1, log_i1, log_n1, n0};
+use crate::tkf_model::{
+    b, h1, log_i1, log_n1, n0,
+    reassignment::{get_allowed_assignments, get_map_from_any_node, ReassignEdge},
+};
+use crate::tkf_model::{get_blocks, TKF92Cost, TKF92Model, TKF92ModelInfo};
+use crate::tree::{NodeIdx, Tree};
 use crate::{alignment::AncestralAlignment, substitution_models::QMatrix};
-use crate::{record_wo_desc as record, tree};
-
-use super::TKF92Cost;
-use super::{get_blocks, TKF92Model, TKF92ModelInfo};
+use crate::{record_wo_desc as record, tree, Result};
 
 #[cfg(test)]
 fn logl_without_node_values_without_felsenstein<Q: QMatrix, AA: AncestralAlignment>(
@@ -307,15 +314,14 @@ fn tkf() {
     println!("test print msa = {}", result.cost.phylo.msa)
 }
 
-#[cfg(test)]
-fn get_tkf_only_felsenstein(seqs: Sequences) -> f64 {
-    let tree = tree!("(((A1:2.0,B2:2.0)I3:0.3,C4:2.0)R5:1.0);");
+fn get_gtr_tkf_cost(tree: Tree, seqs: Sequences) -> TKF92Cost<GTR, MASA> {
     let msa = MASA::from_aligned_with_ancestral(seqs, &tree).unwrap();
-    let pyhlo = PhyloInfo {
-        msa,
-        tree: tree.clone(),
-    };
-    let q = JC69::create(&[], &[]);
+    let phylo = PhyloInfo { msa, tree };
+    get_gtr_tkf_cost_from_phylo(phylo)
+}
+#[cfg(test)]
+fn get_gtr_tkf_cost_from_phylo(phylo: PhyloInfo<MASA>) -> TKF92Cost<GTR, MASA> {
+    let q = GTR::create(&[0.3; 4], &[0.5; 5]);
     let lambda = 0.1;
     let mu = 0.2;
     let r = 0.3;
@@ -323,15 +329,21 @@ fn get_tkf_only_felsenstein(seqs: Sequences) -> f64 {
         q,
         params: vec![lambda, mu, r],
     };
-    let model_info = RefCell::new(TKF92ModelInfo::new(&pyhlo, &tkf_model));
-    let tkf_cost = TKF92Cost {
+    let model_info = RefCell::new(TKF92ModelInfo::new(&phylo, &tkf_model));
+    TKF92Cost {
         model: tkf_model,
-        phylo: pyhlo,
+        phylo,
         model_info,
-    };
+    }
+}
 
-    let logl = tkf_cost.logl();
-    let half_manual = logl_without_node_values_without_felsenstein(&tkf_cost);
+#[cfg(test)]
+fn get_tkf_only_felsenstein(seqs: Sequences) -> f64 {
+    let tree = tree!("(((A1:2.0,B2:2.0)I3:0.3,C4:2.0)R5:1.0);");
+    let cost = get_gtr_tkf_cost(tree, seqs);
+
+    let logl = cost.logl();
+    let half_manual = logl_without_node_values_without_felsenstein(&cost);
     logl - half_manual
 }
 
@@ -355,4 +367,255 @@ fn tkf_indel_history_doesnt_change_felsenstein() {
     ]);
     let felsenstein_logl_2 = get_tkf_only_felsenstein(seqs2);
     assert_relative_eq!(felsenstein_logl_1, felsenstein_logl_2, epsilon = 1e-12);
+}
+
+#[cfg(test)]
+fn decode_index(mut idx: usize, possible_edge_assignments: &Vec<Vec<[bool; 2]>>) -> Vec<[bool; 2]> {
+    let mut tuple = Vec::with_capacity(possible_edge_assignments.len());
+    for poss in possible_edge_assignments {
+        let choice = idx % poss.len();
+        tuple.push(poss[choice]);
+        idx /= poss.len();
+    }
+    tuple
+}
+
+#[test]
+fn test_decode_index() {
+    let possible_edge_assignments = vec![
+        vec![[true, true], [true, false], [false, true], [false, false]], // 4
+        vec![[true, true], [false, false]],                               // 2
+        vec![[true, true], [true, false], [false, true]],                 // 3
+    ];
+    let number_of_possibilities: usize = possible_edge_assignments
+        .iter()
+        .map(|poss| poss.len())
+        .product();
+    assert_eq!(number_of_possibilities, 24);
+    let mut all_possibilities = Vec::with_capacity(number_of_possibilities);
+    for i in 0..number_of_possibilities {
+        all_possibilities.push(decode_index(i, &possible_edge_assignments));
+    }
+    let unique: Vec<_> = all_possibilities.iter().unique().collect();
+    assert_eq!(unique.len(), number_of_possibilities);
+}
+
+#[cfg(test)]
+fn find_brute_force_max<Q: QMatrix + Send>(
+    cost: TKF92Cost<Q, MASA>,
+    v2_idx: &NodeIdx,
+) -> Result<f64> {
+    // should be same value aus dp last
+
+    use crate::tkf_model::reassignment::get_mapping_from_vec;
+
+    let reassign = ReassignEdge::new(cost);
+    let mut possible_edge_assignments: Vec<Vec<[bool; 2]>> =
+        vec![vec![]; reassign.cost.model_info.borrow().blocks.len()];
+
+    for block_id in 0..reassign.cost.model_info.borrow().blocks.len() {
+        let (t1, t2, t3, t4) = reassign.are_chars_at_leafs(v2_idx, block_id);
+        possible_edge_assignments[block_id] = get_allowed_assignments(t1, t2, t3, t4);
+    }
+
+    let number_of_possibilities: usize = possible_edge_assignments
+        .iter()
+        .map(|poss| poss.len())
+        .product();
+
+    if number_of_possibilities > 1000000 {
+        bail!("too many possibilities to brute force: {number_of_possibilities}",);
+    } else {
+        println!("calculation of {number_of_possibilities} possibilities");
+    }
+
+    let num_threads = rayon::current_num_threads();
+    println!("using {num_threads} threads");
+    let chunk_size = number_of_possibilities.div_ceil(num_threads);
+
+    // let mut max: Option<f64> = None;
+    // // let mut arg_max: Option<Vec<[bool; 2]>> = None;
+    // for (i, possibility) in possible_edge_assignments
+    //     .into_iter()
+    //     .multi_cartesian_product()
+    //     .enumerate()
+    // {
+    //     // print!("calculating {} of {}\r", i, possibilities.len());
+    //     if (i + 1) % 100 == 0 {
+    //         let percent = i as f64 / number_of_possibilities as f64 * 100.0;
+    //         print!("calculating {i} of {number_of_possibilities}, which is {percent:.4}% \r");
+    //         let _ = io::stdout().flush();
+    //     }
+    //
+    //     let new_mapping = reassign.get_mapping_from_vec(v2_idx, &possibility);
+    //     for (node_idx, map) in new_mapping {
+    //         reassign.cost.phylo.msa.update_ancestral_map(&node_idx, map);
+    //     }
+    //     reassign.cost.model_info.borrow_mut().valid = false;
+    //     let current = reassign.cost.logl();
+    //     if let Some(ref mut m) = max {
+    //         if current > *m {
+    //             *m = current;
+    //             // arg_max = Some(possibility);
+    //         }
+    //     } else {
+    //         max = Some(current);
+    //         // arg_max = Some(possibility);
+    //     }
+    // }
+
+    let cost_clones = vec![reassign.cost.clone(); num_threads];
+
+    let block_lens = &reassign.cost.model_info.borrow().block_lens;
+    let v1_idx = &reassign.cost.phylo.tree.node(v2_idx).parent.unwrap();
+    let chunk_maxes: Vec<f64> = (0..number_of_possibilities)
+        .into_par_iter()
+        .chunks(chunk_size)
+        .zip(cost_clones.into_par_iter())
+        .map(move |(chunk, mut thread_cost)| {
+            let mut local_max: Option<f64> = None;
+
+            for i in chunk {
+                let possibility = decode_index(i, &possible_edge_assignments);
+                let new_mapping = get_mapping_from_vec(v2_idx, v1_idx, &possibility, block_lens);
+
+                for (node_idx, map) in new_mapping {
+                    thread_cost.phylo.msa.update_ancestral_map(&node_idx, map);
+                }
+                thread_cost.model_info.borrow_mut().valid = false;
+                let current = thread_cost.logl();
+
+                local_max = Some(match local_max {
+                    Some(m) => m.max(current),
+                    None => current,
+                });
+            }
+
+            local_max.unwrap()
+        })
+        .collect();
+
+    let global_max = chunk_maxes.into_iter().fold(f64::MIN, |a, b| a.max(b));
+    // println!("the brute force max = {}", max.unwrap());
+    // println!("and the argmax is:");
+    // for max_assignment in &arg_max.unwrap() {
+    //     println!("{max_assignment:?}");
+    // }
+    println!("done");
+    // if let Some(m) = max {
+    //     Ok(m)
+    // } else {
+    //     bail!("no max found");
+    // }
+    Ok(global_max)
+}
+
+#[cfg(test)]
+fn get_max_reestimated<Q: QMatrix>(
+    cost: TKF92Cost<Q, MASA>,
+    node_idx: &NodeIdx,
+) -> (f64, bool, i32) {
+    let mut reassign = ReassignEdge::new(cost.clone());
+    let factor_ns_before_reestimate = reassign.count_factor_ns_on_dirty_tree(node_idx);
+    reassign.fill_dp(node_idx);
+    let (new_mapping, backtracking_prob) = reassign.get_mapping_from_backtracking(node_idx);
+    // for statistic count the number of times the dp max is different to the original mapping
+    let mut reassigned_same_as_ori = true;
+    for (node, map) in new_mapping {
+        if map != *cost.phylo.msa.ancestral_map(&node) {
+            reassigned_same_as_ori = false;
+        }
+        reassign.cost.phylo.msa.update_ancestral_map(&node, map);
+    }
+    reassign.cost.model_info.borrow_mut().valid = false;
+    let reestimated_cost = reassign.cost.logl();
+    let factor_ns_after_reestimate = reassign.count_factor_ns_on_dirty_tree(node_idx);
+
+    // println!("checking dp table vs dp armgax cost");
+    assert_relative_eq!(reestimated_cost, backtracking_prob, epsilon = 1e-12);
+    // println!("factor_ns_after_reestimate = {factor_ns_after_reestimate}");
+    // println!("factor_ns_before_reestimate = {factor_ns_before_reestimate}");
+    let diff_in_number_of_factor_ns = factor_ns_after_reestimate - factor_ns_before_reestimate;
+    (
+        reestimated_cost,
+        reassigned_same_as_ori,
+        diff_in_number_of_factor_ns,
+    )
+}
+
+#[test]
+fn tkf_reassignment() {
+    let fldr = Path::new("./data");
+    let phylo = PhyloInfoBuilder::with_attrs(
+        fldr.join("outputname_TRUE.fasta"),
+        fldr.join("tkf_tree.newick"),
+    )
+    .build_with_ancestors()
+    .unwrap();
+
+    let cost = get_gtr_tkf_cost_from_phylo(phylo);
+    /*let tree = tree!("(((A1:2.0,B2:2.0)I3:0.3,C4:2.0)R5:1.0);");
+    let seqs = Sequences::new(vec![
+        record!("A1", b"A"),
+        record!("B2", b"A"),
+        record!("I3", b"A"),
+        record!("C4", b"A"),
+        record!("R5", b"A"),
+    ]);
+    let cost = get_gtr_tkf_cost(tree, seqs);*/
+    // println!("original cost = {}", cost.logl());
+
+    let postorder = cost.phylo.tree.postorder().clone();
+    // (pa(v2_idx), v2_idx) is the edge we want to re-estimate
+
+    let mut number_of_dp_correct = 0;
+    let mut numer_of_same_as_ori = 0;
+    let mut number_of_diff_factor_ns = 0;
+    for v2_idx in &postorder {
+        // only re-estimate non root internal nodes
+        if v2_idx == &cost.phylo.tree.root || cost.phylo.tree.node(v2_idx).children.is_empty() {
+            continue;
+        }
+        let node_id = cost.phylo.tree.node(v2_idx).id.clone();
+        // if node_id != "N20" {
+        //     continue;
+        // }
+        // println!("\n\n\ndoing re-estimation at node {node_id}");
+        let (max_dp, same_as_ori, diff_in_number_of_factor_ns) =
+            get_max_reestimated(cost.clone(), v2_idx);
+        // println!(
+        //     "node factor ns = {:?}",
+        //     cost.model_info.borrow().node_factor_n
+        // );
+        numer_of_same_as_ori += same_as_ori as usize;
+        number_of_diff_factor_ns += diff_in_number_of_factor_ns.abs();
+        let max_brute_force_opt = find_brute_force_max(cost.clone(), v2_idx);
+        match max_brute_force_opt {
+            Ok(max_brute_force) => {
+                assert_relative_eq!(max_dp, max_brute_force);
+                number_of_dp_correct += 1;
+            }
+            Err(_) => continue,
+        }
+    }
+    println!("number of dp correct = {number_of_dp_correct}");
+    println!(
+        "skipped brute force on = {}",
+        postorder.len() - 1 - cost.phylo.tree.n - number_of_dp_correct
+    );
+    println!("number of same as ori = {numer_of_same_as_ori}");
+    println!("diff in number of factor ns = {number_of_diff_factor_ns}");
+}
+
+// TODO: use precomputed
+
+#[test]
+fn todo() {
+    // i could check the dp table by returning all valid paths in it
+    // by starting in the back and doing some recursive calling of the
+    // backtracking pointers and collecting all the paths ie mappings
+    // and calculate their prob an compare against the last col
+    // although since i only save the max pointer i wont get no more paths
+    // then non infty values in the last col
+    // so instead i could (if probs are tied) save more than one max back pointer
 }

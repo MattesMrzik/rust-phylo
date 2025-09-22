@@ -165,7 +165,7 @@ where
             curr_cost =
                 Self::fold_improving_moves(&mut self.c, &move_opti, curr_cost, &current_move_locs)?;
 
-            // Optimise branch lengths on current tree to match PhyM
+            // Optimise branch lengths on current tree to match PhyML
             if self.c.blen_optimisation() {
                 let o = BranchOptimiser::new(self.c.clone()).run()?;
                 if o.final_cost > curr_cost {

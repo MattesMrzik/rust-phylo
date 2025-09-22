@@ -54,6 +54,20 @@ pub struct TKF92ModelInfo<Q: QMatrix> {
     // aggregated_x[node, block] = the product of the xs of all the edges in the subtree
     aggregated_x: DMatrix<f64>,
 
+    // TODO i think i also need the x for every edge, since if update_tree is called we
+    // have no way of knowing the old tree and thus the old x values that need to be removed
+    // before reassignment
+    // Alternatively to DMatrix i could store the action instead of f64, which slightly
+    // reduces the memory footprint
+    node_x: DMatrix<f64>,
+
+    // TODO same as for node_x: since if update tree is called we
+    // have no way of knowing the old tree and thus the old factor_n values that need to be removed
+    // before reassignment
+    // Alternatively to DMatrix i could store the action instead of f64, which slightly
+    // reduces the memory footprint
+    node_factor_n: DMatrix<f64>,
+
     // factor_n[node, block] = n1/ (n0 * lambda * beta(node.blen)) if there is an edge in the subtree
     // where the current event is an insertion and the last one was a deletion
     factor_ns: DMatrix<f64>,
@@ -130,9 +144,11 @@ impl<Q: QMatrix> TKF92ModelInfo<Q> {
         TKF92ModelInfo::<Q> {
             phantom: PhantomData,
             aggregated_x: DMatrix::<f64>::zeros(n_nodes, n_blocks),
+            node_x: DMatrix::<f64>::zeros(n_nodes, n_blocks),
+            node_factor_n: DMatrix::<f64>::zeros(n_nodes, n_blocks),
             factor_ns: DMatrix::<f64>::zeros(n_nodes, n_blocks),
-            felsenstein: vec![DMatrix::from_element(phylo.msa.len(), n_states, 1.0); n_nodes],
             felsenstein_prob: DMatrix::<f64>::zeros(n_nodes, n_blocks),
+            felsenstein: vec![DMatrix::from_element(phylo.msa.len(), n_states, 1.0); n_nodes],
             n0: vec![None; n_nodes],
             h1: vec![None; n_nodes],
             insertion: vec![None; n_nodes],
@@ -151,19 +167,29 @@ impl<Q: QMatrix> TKF92ModelInfo<Q> {
     }
 }
 
-#[derive(Clone)]
 pub struct TKF92Cost<Q: QMatrix + Display, AA: AncestralAlignment> {
     // TODO: q was also 'static in pip
     model: TKF92Model<Q>,
     phylo: PhyloInfo<AA>,
     // TODO: maybe refcell is used here to make it mutable in impl fn while keeping the other fields
     // of this struct immutable, i.e. only passing &self and not &mut self
+    // TODO: why not just dont use a refcell
     model_info: RefCell<TKF92ModelInfo<Q>>,
 }
 
 impl<Q: QMatrix, AA: AncestralAlignment> Display for TKF92Cost<Q, AA> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "TKF92")
+    }
+}
+
+impl<Q: QMatrix + Display + Clone, AA: AncestralAlignment + Clone> Clone for TKF92Cost<Q, AA> {
+    fn clone(&self) -> Self {
+        TKF92Cost {
+            model: self.model.clone(),
+            phylo: self.phylo.clone(),
+            model_info: RefCell::new(self.model_info.borrow().clone()),
+        }
     }
 }
 
@@ -245,6 +271,10 @@ impl<Q: QMatrix + Display, AA: AncestralAlignment> TKF92Cost<Q, AA>
             let block_len = self.model_info.borrow().block_lens[block_id];
             logl += self.model_info.borrow().factor_ns[(root_id, block_id)];
             logl += self.model_info.borrow().felsenstein_prob[(root_id, block_id)];
+            // println!(
+            //     "felsenstein prob for block {block_id} = {}",
+            //     self.model_info.borrow().felsenstein_prob[(root_id, block_id)]
+            // );
 
             let x = self.model_info.borrow().aggregated_x[(root_id, block_id)];
             // println!(
@@ -443,6 +473,8 @@ impl<Q: QMatrix + Display, AA: AncestralAlignment> TKF92Cost<Q, AA>
         // this is the same as in set_indel_x_and_prob_for_not_root
         let root_idx = self.model_info.borrow().virtual_root;
         let root_id = usize::from(root_idx);
+        self.model_info.borrow_mut().node_x[(root_id, block_id)] = x;
+        self.model_info.borrow_mut().node_factor_n[(root_id, block_id)] = 0.0;
         for child in self.get_childs_in_time_reversed_tree(&root_idx) {
             let child_id = usize::from(child);
             x *= self.model_info.borrow().aggregated_x[(child_id, block_id)];
@@ -454,8 +486,10 @@ impl<Q: QMatrix + Display, AA: AncestralAlignment> TKF92Cost<Q, AA>
 
     fn set_indel_x_and_factor_n_for_not_root(&self, node_idx: &NodeIdx, block_id: usize) {
         let (mut x, mut factor_n) = self.get_indel_x_and_factor_n_for_not_root(node_idx, block_id);
-        // this is the same as in set_indel_x_and_prob_for_root
         let node_id = usize::from(node_idx);
+        self.model_info.borrow_mut().node_x[(node_id, block_id)] = x;
+        self.model_info.borrow_mut().node_factor_n[(node_id, block_id)] = factor_n;
+        // this is the same as in set_indel_x_and_prob_for_root
         for child in self.get_childs_in_time_reversed_tree(node_idx) {
             let child_id = usize::from(child);
             x *= self.model_info.borrow().aggregated_x[(child_id, block_id)];

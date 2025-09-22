@@ -196,7 +196,7 @@ impl<A: Alignment, AA: AncestralAlignment> PhyloInfoBuilder<A, AA> {
                 bail!("Building an ancestral alignment from unaligned sequences (including ancestral_sequencess) is not supported");
             }
         } else {
-            bail!("The number of sequences does not match the number of leaves nor the number of nodes in the tree");
+            bail!("The number of sequences ({}) does not match the number of leaves ({}) nor the number of nodes ({}) in the tree", sequences.len(), tree.n, tree.len());
         }?;
 
         Ok(PhyloInfo { tree, msa })
