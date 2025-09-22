@@ -1,5 +1,4 @@
 use std::cell::RefCell;
-use std::io::{self, Write};
 use std::path::Path;
 
 use anyhow::bail;
@@ -16,7 +15,9 @@ use crate::substitution_models::GTR;
 use crate::substitution_models::{QMatrixMaker, JC69};
 use crate::tkf_model::{
     b, h1, log_i1, log_n1, n0,
-    reassignment::{get_allowed_assignments, get_map_from_any_node, ReassignEdge},
+    reassignment::{
+        get_allowed_assignments, get_map_from_any_node, get_mapping_from_vec, ReassignEdge,
+    },
 };
 use crate::tkf_model::{get_blocks, TKF92Cost, TKF92Model, TKF92ModelInfo};
 use crate::tree::{NodeIdx, Tree};
@@ -405,11 +406,7 @@ fn find_brute_force_max<Q: QMatrix + Send>(
     cost: TKF92Cost<Q, MASA>,
     v2_idx: &NodeIdx,
 ) -> Result<f64> {
-    // should be same value aus dp last
-
-    use crate::tkf_model::reassignment::get_mapping_from_vec;
-
-    let reassign = ReassignEdge::new(cost);
+    let mut reassign = ReassignEdge::new(cost);
     let mut possible_edge_assignments: Vec<Vec<[bool; 2]>> =
         vec![vec![]; reassign.cost.model_info.borrow().blocks.len()];
 
@@ -429,85 +426,87 @@ fn find_brute_force_max<Q: QMatrix + Send>(
         println!("calculation of {number_of_possibilities} possibilities");
     }
 
-    let num_threads = rayon::current_num_threads();
-    println!("using {num_threads} threads");
-    let chunk_size = number_of_possibilities.div_ceil(num_threads);
-
-    // let mut max: Option<f64> = None;
-    // // let mut arg_max: Option<Vec<[bool; 2]>> = None;
-    // for (i, possibility) in possible_edge_assignments
-    //     .into_iter()
-    //     .multi_cartesian_product()
-    //     .enumerate()
-    // {
-    //     // print!("calculating {} of {}\r", i, possibilities.len());
-    //     if (i + 1) % 100 == 0 {
-    //         let percent = i as f64 / number_of_possibilities as f64 * 100.0;
-    //         print!("calculating {i} of {number_of_possibilities}, which is {percent:.4}% \r");
-    //         let _ = io::stdout().flush();
-    //     }
-    //
-    //     let new_mapping = reassign.get_mapping_from_vec(v2_idx, &possibility);
-    //     for (node_idx, map) in new_mapping {
-    //         reassign.cost.phylo.msa.update_ancestral_map(&node_idx, map);
-    //     }
-    //     reassign.cost.model_info.borrow_mut().valid = false;
-    //     let current = reassign.cost.logl();
-    //     if let Some(ref mut m) = max {
-    //         if current > *m {
-    //             *m = current;
-    //             // arg_max = Some(possibility);
-    //         }
-    //     } else {
-    //         max = Some(current);
-    //         // arg_max = Some(possibility);
-    //     }
-    // }
-
-    let cost_clones = vec![reassign.cost.clone(); num_threads];
-
-    let block_lens = &reassign.cost.model_info.borrow().block_lens;
+    // this is the not parallel version
+    let mut max: Option<f64> = None;
+    // let mut arg_max: Option<Vec<[bol; 2]>> = None;
     let v1_idx = &reassign.cost.phylo.tree.node(v2_idx).parent.unwrap();
-    let chunk_maxes: Vec<f64> = (0..number_of_possibilities)
-        .into_par_iter()
-        .chunks(chunk_size)
-        .zip(cost_clones.into_par_iter())
-        .map(move |(chunk, mut thread_cost)| {
-            let mut local_max: Option<f64> = None;
+    let block_lens = &reassign.cost.model_info.borrow().block_lens;
+    for (i, possibility) in possible_edge_assignments
+        .into_iter()
+        .multi_cartesian_product()
+        .enumerate()
+    {
+        // print!("calculating {} of {}\r", i, possibilities.len());
+        if (i + 1) % 10000 == 0 {
+            let percent = i as f64 / number_of_possibilities as f64 * 100.0;
+            // print!("calculating {i} of {number_of_possibilities}, which is {percent:.4}% \r");
+            print!("calculating {i} of {number_of_possibilities}, which is {percent:.4}% ");
+            // let _ = io::stdout().flush();
+        }
 
-            for i in chunk {
-                let possibility = decode_index(i, &possible_edge_assignments);
-                let new_mapping = get_mapping_from_vec(v2_idx, v1_idx, &possibility, block_lens);
-
-                for (node_idx, map) in new_mapping {
-                    thread_cost.phylo.msa.update_ancestral_map(&node_idx, map);
-                }
-                thread_cost.model_info.borrow_mut().valid = false;
-                let current = thread_cost.logl();
-
-                local_max = Some(match local_max {
-                    Some(m) => m.max(current),
-                    None => current,
-                });
+        let new_mapping = get_mapping_from_vec(v2_idx, v1_idx, &possibility, block_lens);
+        for (node_idx, map) in new_mapping {
+            reassign.cost.phylo.msa.update_ancestral_map(&node_idx, map);
+        }
+        reassign.cost.model_info.borrow_mut().valid = false;
+        let current = reassign.cost.logl();
+        if let Some(ref mut m) = max {
+            if current > *m {
+                *m = current;
+                // arg_max = Some(possibility);
             }
+        } else {
+            max = Some(current);
+            // arg_max = Some(possibility);
+        }
+    }
+    println!("done");
+    if let Some(m) = max {
+        Ok(m)
+    } else {
+        bail!("no max found");
+    }
 
-            local_max.unwrap()
-        })
-        .collect();
-
-    let global_max = chunk_maxes.into_iter().fold(f64::MIN, |a, b| a.max(b));
+    // let num_threads = rayon::current_num_threads();
+    // println!("using {num_threads} threads");
+    // let chunk_size = number_of_possibilities.div_ceil(num_threads);
+    // let cost_clones = vec![reassign.cost.clone(); num_threads];
+    // let block_lens = &reassign.cost.model_info.borrow().block_lens;
+    // let v1_idx = &reassign.cost.phylo.tree.node(v2_idx).parent.unwrap();
+    // let chunk_maxes: Vec<f64> = (0..number_of_possibilities)
+    //     .into_par_iter()
+    //     .chunks(chunk_size)
+    //     .zip(cost_clones.into_par_iter())
+    //     .map(move |(chunk, mut thread_cost)| {
+    //         let mut local_max: Option<f64> = None;
+    //
+    //         for i in chunk {
+    //             let possibility = decode_index(i, &possible_edge_assignments);
+    //             let new_mapping = get_mapping_from_vec(v2_idx, v1_idx, &possibility, block_lens);
+    //
+    //             for (node_idx, map) in new_mapping {
+    //                 thread_cost.phylo.msa.update_ancestral_map(&node_idx, map);
+    //             }
+    //             thread_cost.model_info.borrow_mut().valid = false;
+    //             let current = thread_cost.logl();
+    //
+    //             local_max = Some(match local_max {
+    //                 Some(m) => m.max(current),
+    //                 None => current,
+    //             });
+    //         }
+    //
+    //         local_max.unwrap()
+    //     })
+    //     .collect();
+    //
+    // let global_max = chunk_maxes.into_iter().fold(f64::MIN, |a, b| a.max(b));
     // println!("the brute force max = {}", max.unwrap());
     // println!("and the argmax is:");
     // for max_assignment in &arg_max.unwrap() {
     //     println!("{max_assignment:?}");
     // }
-    println!("done");
-    // if let Some(m) = max {
-    //     Ok(m)
-    // } else {
-    //     bail!("no max found");
-    // }
-    Ok(global_max)
+    // Ok(global_max)
 }
 
 #[cfg(test)]
