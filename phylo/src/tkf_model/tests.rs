@@ -1,4 +1,6 @@
 use std::cell::RefCell;
+use std::fs::File;
+use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::Path;
 
 use anyhow::bail;
@@ -384,15 +386,19 @@ fn decode_index(mut idx: usize, possible_edge_assignments: &Vec<Vec<[bool; 2]>>)
 #[test]
 fn test_decode_index() {
     let possible_edge_assignments = vec![
-        vec![[true, true], [true, false], [false, true], [false, false]], // 4
-        vec![[true, true], [false, false]],                               // 2
-        vec![[true, true], [true, false], [false, true]],                 // 3
+        vec![[true, true], [true, false], [false, true], [false, false]],
+        vec![[true, true], [false, false]],
+        vec![[true, true], [true, false], [false, true]],
+        vec![[true, true], [false, false]],
+        vec![[true, true], [true, false], [false, true], [false, false]],
+        vec![[true, true]],
+        vec![[true, true], [false, false]],
     ];
     let number_of_possibilities: usize = possible_edge_assignments
         .iter()
         .map(|poss| poss.len())
         .product();
-    assert_eq!(number_of_possibilities, 24);
+    assert_eq!(number_of_possibilities, 384);
     let mut all_possibilities = Vec::with_capacity(number_of_possibilities);
     for i in 0..number_of_possibilities {
         all_possibilities.push(decode_index(i, &possible_edge_assignments));
@@ -420,93 +426,104 @@ fn find_brute_force_max<Q: QMatrix + Send>(
         .map(|poss| poss.len())
         .product();
 
-    if number_of_possibilities > 1000000 {
+    if number_of_possibilities > 10000000 {
+        println!("too many possibilities to brute force: {number_of_possibilities}");
         bail!("too many possibilities to brute force: {number_of_possibilities}",);
     } else {
         println!("calculation of {number_of_possibilities} possibilities");
     }
 
-    // this is the not parallel version
-    let mut max: Option<f64> = None;
-    // let mut arg_max: Option<Vec<[bol; 2]>> = None;
-    let v1_idx = &reassign.cost.phylo.tree.node(v2_idx).parent.unwrap();
-    let block_lens = &reassign.cost.model_info.borrow().block_lens;
-    for (i, possibility) in possible_edge_assignments
-        .into_iter()
-        .multi_cartesian_product()
-        .enumerate()
-    {
-        // print!("calculating {} of {}\r", i, possibilities.len());
-        if (i + 1) % 10000 == 0 {
-            let percent = i as f64 / number_of_possibilities as f64 * 100.0;
-            // print!("calculating {i} of {number_of_possibilities}, which is {percent:.4}% \r");
-            print!("calculating {i} of {number_of_possibilities}, which is {percent:.4}% ");
-            // let _ = io::stdout().flush();
-        }
+    let use_multi_threading = true;
 
-        let new_mapping = get_mapping_from_vec(v2_idx, v1_idx, &possibility, block_lens);
-        for (node_idx, map) in new_mapping {
-            reassign.cost.phylo.msa.update_ancestral_map(&node_idx, map);
-        }
-        reassign.cost.model_info.borrow_mut().valid = false;
-        let current = reassign.cost.logl();
-        if let Some(ref mut m) = max {
-            if current > *m {
-                *m = current;
+    if !use_multi_threading {
+        let mut max: Option<f64> = None;
+        // let mut arg_max: Option<Vec<[bool; 2]>> = None;
+        let v1_idx = reassign.cost.phylo.tree.node(v2_idx).parent.unwrap();
+        let block_lens = reassign.cost.model_info.borrow().block_lens.clone();
+        for (i, possibility) in possible_edge_assignments
+            .into_iter()
+            .multi_cartesian_product()
+            .enumerate()
+        {
+            // print!("calculating {} of {}\r", i, possibilities.len());
+            if (i + 1) % 10000 == 0 {
+                let percent = i as f64 / number_of_possibilities as f64 * 100.0;
+                // print!("calculating {i} of {number_of_possibilities}, which is {percent:.4}% \r");
+                println!("calculating {i} of {number_of_possibilities}, which is {percent:.4}% ");
+                // let _ = io::stdout().flush();
+            }
+
+            let new_mapping = get_mapping_from_vec(v2_idx, &v1_idx, &possibility, &block_lens);
+            for (node_idx, map) in new_mapping {
+                reassign.cost.phylo.msa.update_ancestral_map(&node_idx, map);
+            }
+            reassign.cost.model_info.borrow_mut().valid = false;
+            let current = reassign.cost.logl();
+            if let Some(ref mut m) = max {
+                if current > *m {
+                    *m = current;
+                    // arg_max = Some(possibility);
+                }
+            } else {
+                max = Some(current);
                 // arg_max = Some(possibility);
             }
-        } else {
-            max = Some(current);
-            // arg_max = Some(possibility);
         }
-    }
-    println!("done");
-    if let Some(m) = max {
-        Ok(m)
+        println!("done");
+        if let Some(m) = max {
+            Ok(m)
+        } else {
+            bail!("no max found");
+        }
     } else {
-        bail!("no max found");
-    }
+        let num_threads = rayon::current_num_threads();
+        let num_threads = 10;
+        println!("using {num_threads} threads");
+        let chunk_size = number_of_possibilities.div_ceil(num_threads);
+        let cost_clones = vec![reassign.cost.clone(); num_threads];
+        let block_lens = &reassign.cost.model_info.borrow().block_lens;
+        let v1_idx = &reassign.cost.phylo.tree.node(v2_idx).parent.unwrap();
+        let chunk_maxes: Vec<f64> = (0..number_of_possibilities)
+            .into_par_iter()
+            .chunks(chunk_size)
+            .enumerate()
+            .zip(cost_clones.into_par_iter())
+            .map(move |((chunk_id, chunk), mut thread_cost)| {
+                let mut local_max: Option<f64> = None;
 
-    // let num_threads = rayon::current_num_threads();
-    // println!("using {num_threads} threads");
-    // let chunk_size = number_of_possibilities.div_ceil(num_threads);
-    // let cost_clones = vec![reassign.cost.clone(); num_threads];
-    // let block_lens = &reassign.cost.model_info.borrow().block_lens;
-    // let v1_idx = &reassign.cost.phylo.tree.node(v2_idx).parent.unwrap();
-    // let chunk_maxes: Vec<f64> = (0..number_of_possibilities)
-    //     .into_par_iter()
-    //     .chunks(chunk_size)
-    //     .zip(cost_clones.into_par_iter())
-    //     .map(move |(chunk, mut thread_cost)| {
-    //         let mut local_max: Option<f64> = None;
-    //
-    //         for i in chunk {
-    //             let possibility = decode_index(i, &possible_edge_assignments);
-    //             let new_mapping = get_mapping_from_vec(v2_idx, v1_idx, &possibility, block_lens);
-    //
-    //             for (node_idx, map) in new_mapping {
-    //                 thread_cost.phylo.msa.update_ancestral_map(&node_idx, map);
-    //             }
-    //             thread_cost.model_info.borrow_mut().valid = false;
-    //             let current = thread_cost.logl();
-    //
-    //             local_max = Some(match local_max {
-    //                 Some(m) => m.max(current),
-    //                 None => current,
-    //             });
-    //         }
-    //
-    //         local_max.unwrap()
-    //     })
-    //     .collect();
-    //
-    // let global_max = chunk_maxes.into_iter().fold(f64::MIN, |a, b| a.max(b));
-    // println!("the brute force max = {}", max.unwrap());
-    // println!("and the argmax is:");
-    // for max_assignment in &arg_max.unwrap() {
-    //     println!("{max_assignment:?}");
-    // }
-    // Ok(global_max)
+                for i in chunk {
+                    let possibility = decode_index(i, &possible_edge_assignments);
+                    let new_mapping =
+                        get_mapping_from_vec(v2_idx, v1_idx, &possibility, block_lens);
+
+                    for (node_idx, map) in new_mapping {
+                        thread_cost.phylo.msa.update_ancestral_map(&node_idx, map);
+                    }
+                    thread_cost.model_info.borrow_mut().valid = false;
+                    let current = thread_cost.logl();
+
+                    local_max = Some(match local_max {
+                        Some(m) => m.max(current),
+                        None => current,
+                    });
+                    if chunk_id == 0 && (i + 1) % 10000 == 0 {
+                        let percent = (i + 1) as f64 / chunk_size as f64 * 100.0;
+                        // print!("calculating {i} of {number_of_possibilities}, which is {percent:.4}% \r");
+                        println!(
+                            "calculating {} of {number_of_possibilities}, which is {percent:.4}%",
+                            i + 1
+                        );
+                        // let _ = io::stdout().flush();
+                    }
+                }
+
+                local_max.unwrap()
+            })
+            .collect();
+
+        let global_max = chunk_maxes.into_iter().fold(f64::MIN, |a, b| a.max(b));
+        Ok(global_max)
+    }
 }
 
 #[cfg(test)]
@@ -524,7 +541,15 @@ fn get_max_reestimated<Q: QMatrix>(
         if map != *cost.phylo.msa.ancestral_map(&node) {
             reassigned_same_as_ori = false;
         }
-        reassign.cost.phylo.msa.update_ancestral_map(&node, map);
+        reassign
+            .cost
+            .phylo
+            .msa
+            .update_ancestral_map(&node, map.clone());
+        // println!(
+        //     "updating mapping at node {}, map = {map:?}",
+        //     reassign.cost.phylo.tree.node(&node).id
+        // );
     }
     reassign.cost.model_info.borrow_mut().valid = false;
     let reestimated_cost = reassign.cost.logl();
@@ -542,15 +567,71 @@ fn get_max_reestimated<Q: QMatrix>(
     )
 }
 
+#[cfg(test)]
+fn strip_fasta(
+    input_path: &str,
+    output_path: &str,
+    start: usize,
+    stop: usize,
+) -> std::io::Result<()> {
+    let input_file = File::open(input_path)?;
+    let reader = BufReader::new(input_file);
+
+    let output_file = File::create(output_path)?;
+    let mut writer = BufWriter::new(output_file);
+
+    let mut header = String::new();
+    let mut seq = String::new();
+
+    for line in reader.lines() {
+        let line = line?;
+        if line.starts_with('>') {
+            // write previous record
+            if !header.is_empty() {
+                let stripped = &seq[start..stop.min(seq.len())]; // handle end of sequence
+                writeln!(writer, "{header}")?;
+                writeln!(writer, "{stripped}")?;
+            }
+
+            // start new record
+            header = line;
+            seq.clear();
+        } else {
+            seq.push_str(line.trim());
+        }
+    }
+
+    // write last record
+    if !header.is_empty() {
+        let stripped = &seq[start..stop.min(seq.len())];
+        writeln!(writer, "{header}")?;
+        writeln!(writer, "{stripped}")?;
+    }
+
+    Ok(())
+}
+
 #[test]
 fn tkf_reassignment() {
     let fldr = Path::new("./data");
-    let phylo = PhyloInfoBuilder::with_attrs(
-        fldr.join("outputname_TRUE.fasta"),
-        fldr.join("tkf_tree.newick"),
-    )
-    .build_with_ancestors()
-    .unwrap();
+    let start = 0;
+    let end = 2000;
+    // i want to read the fasta file and stip the seqs to only inlcude the [start, end] region by
+    // reading the file and then outputting a new file called outputname_TRUE_stripped.fasta
+    // by using standard file operations
+    let input_fasta = fldr.join("outputname_TRUE.fasta");
+    let output_fasta = fldr.join("outputname_TRUE_stripped.fasta");
+
+    let _ = strip_fasta(
+        input_fasta.to_str().unwrap(),
+        output_fasta.to_str().unwrap(),
+        start,
+        end,
+    );
+
+    let phylo = PhyloInfoBuilder::with_attrs(output_fasta, fldr.join("tkf_tree.newick"))
+        .build_with_ancestors()
+        .unwrap();
 
     let cost = get_gtr_tkf_cost_from_phylo(phylo);
     /*let tree = tree!("(((A1:2.0,B2:2.0)I3:0.3,C4:2.0)R5:1.0);");
@@ -570,6 +651,8 @@ fn tkf_reassignment() {
     let mut number_of_dp_correct = 0;
     let mut numer_of_same_as_ori = 0;
     let mut number_of_diff_factor_ns = 0;
+    let skip_nodes = ["N15", "N16", "N17", "N18", "N19", "N20", "N21", "N22"];
+    let skip_nodes = [""];
     for v2_idx in &postorder {
         // only re-estimate non root internal nodes
         if v2_idx == &cost.phylo.tree.root || cost.phylo.tree.node(v2_idx).children.is_empty() {
@@ -579,7 +662,17 @@ fn tkf_reassignment() {
         // if node_id != "N20" {
         //     continue;
         // }
-        // println!("\n\n\ndoing re-estimation at node {node_id}");
+        let mut skip_found = false;
+        for skip in &skip_nodes {
+            if node_id == *skip {
+                println!("skipping node {node_id}");
+                skip_found = true;
+            }
+        }
+        if skip_found {
+            continue;
+        }
+        println!("doing re-estimation at node {node_id}");
         let (max_dp, same_as_ori, diff_in_number_of_factor_ns) =
             get_max_reestimated(cost.clone(), v2_idx);
         // println!(
@@ -617,4 +710,13 @@ fn todo() {
     // although since i only save the max pointer i wont get no more paths
     // then non infty values in the last col
     // so instead i could (if probs are tied) save more than one max back pointer
+    //
+    //
+    // TODO
+    // move my private tests ie the ones that i run for reassignment that do the automatic testing
+    // to another file that i can easily ignore in git (only delete this if the todo below is done)
+    //
+    // TODO i can also move the joint tkf+felstenstein imple to another file and then if i
+    // implement the indel only tkf and adding the substitution cost as a separate cost
+    // i can have both impl and test them against each other in the test file mentioned above
 }

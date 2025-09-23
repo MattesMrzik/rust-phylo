@@ -106,6 +106,7 @@ impl<Q: QMatrix + Display, AA: AncestralAlignment> ReassignEdge<Q, AA> {
                 //     self.cost.model_info.borrow().aggregated_x[(usize::from(root), block_id)],
                 //     x
                 // );
+                assert!((x - 1.0).abs() > 1e-10, "Something is wrong with the alignment since x is 1.0, which means cols with only gaps at leaves");
                 let integrated_x_prop = x.ln() + (block_len as f64 - 1.0) * (1.0 + x).ln();
                 // println!("integrated_x_prob {}", integrated_x_prop);
 
@@ -130,7 +131,6 @@ impl<Q: QMatrix + Display, AA: AncestralAlignment> ReassignEdge<Q, AA> {
                     &actions,
                     block_id,
                 );
-                // println!("felsenstein_prob {felsenstein_prob}");
                 // if insertion happened further up the tree, then the prob is captured here
                 let mut felsenstein_prob_for_up_the_tree = 0.0;
                 if felsenstein_prob == 0.0 {
@@ -151,9 +151,6 @@ impl<Q: QMatrix + Display, AA: AncestralAlignment> ReassignEdge<Q, AA> {
                         self.cost.model_info.borrow().felsenstein_prob
                             [(usize::from(root), block_id)];
                 }
-                // println!(
-                //     "felsenstein in different subtree {felsenstein_prob_in_different_subtree}"
-                // );
 
                 // println!("adding integrated_x_prop {integrated_x_prop}");
                 // println!("adding felsenprob {felsenstein_prob}, up tree {felsenstein_prob_for_up_the_tree}, diff subtree {felsenstein_prob_in_different_subtree}");
@@ -567,6 +564,11 @@ impl<Q: QMatrix + Display, AA: AncestralAlignment> ReassignEdge<Q, AA> {
                     x *= l / m * (1.0 - r) / r;
                 }
             } else {
+                // println!(
+                //     "action for edge {typ:?} at node {} is {:?}",
+                //     self.cost.phylo.tree.node(node).id,
+                //     actions.get(typ).unwrap()
+                // );
                 let b = b(l, m, time);
                 x *= match actions.get(typ).unwrap() {
                     Action::Insertion => l * b * (1.0 - r) / r,
