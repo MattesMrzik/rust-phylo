@@ -54,9 +54,11 @@ impl<Q: QMatrix + Display, AA: AncestralAlignment> ReassignEdge<Q, AA> {
     //       adding the new one, since the rest of the tree stays the same,
     pub fn fill_dp(&mut self, v2_idx: &NodeIdx) {
         // println!("filling dp");
-        if !self.cost.model_info.borrow().valid {
-            self.cost.reset_all_nodes();
-        }
+
+        // should this be called here? how should the nodes be set ? or shoudl i only call this
+        // after the reassignment is done? bc i got old values to remove from the model info, and
+        // the new ones i get directly from the tree blens
+        self.cost.reset_all_nodes();
         // Question: here i thought that without the mut self, and therefore self.cost would not change
         // but self.cost.model_info.borrow_mut() can change self
         let root = &self.cost.phylo.tree.root;

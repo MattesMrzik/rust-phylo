@@ -154,7 +154,11 @@ where
         let move_opti = self.move_opti.clone();
         // The best move on this iteration might still be worse than the current tree, in which case
         // the search stops.
+        // TODO: with the above comment do you mean running into local optima?
         // This means that curr_cost is always higher than or equal to prev_cost.
+        // TODO: with the first comment you mean that for a prune location we might not find a
+        // better tree. would that cause the prev_cost to be higher than curr_cost?
+        // Which would contradict the above statement.
         while self.predicate.test(iterations, curr_cost - prev_cost) {
             iterations += 1;
             info!("Iteration: {iterations}, current cost: {curr_cost}");
@@ -165,7 +169,11 @@ where
             curr_cost =
                 Self::fold_improving_moves(&mut self.c, &move_opti, curr_cost, &current_move_locs)?;
 
-            // Optimise branch lengths on current tree to match PhyML
+            // Optimise branch lengths on current tree to match PhyML.
+            // Since fold_improving_moves can return the same tree as before the move.
+            // (For example in SprOptimiser if the move location became a child of the root due to
+            // a previous move)
+            // We still want to do branch length optimisation in that case.
             if self.c.blen_optimisation() {
                 let o = BranchOptimiser::new(self.c.clone()).run()?;
                 if o.final_cost > curr_cost {

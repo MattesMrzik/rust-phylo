@@ -45,90 +45,82 @@ impl<Q: QMatrix> TKF92Model<Q> {
     }
 }
 
+/// For a detailed explanation of the TKF92 model and how the probabilities are calculated see:
+/// <coming paper>
 #[derive(Clone)]
 pub struct TKF92ModelInfo<Q: QMatrix> {
     phantom: PhantomData<Q>,
 
-    // TODO: the aggregated nature of x and factor_n is not really needed now,
-    //       maybe later for realignment.
-    // aggregated_x[node, block] = the product of the xs of all the edges in the subtree
+    /// aggregated_x\[node, block] = the product of the xs of all the edges in the subtree below
+    /// <node> (including the x of <node> itself) for the block with id <block>
     aggregated_x: DMatrix<f64>,
 
-    // TODO i think i also need the x for every edge, since if update_tree is called we
-    // have no way of knowing the old tree and thus the old x values that need to be removed
-    // before reassignment
-    // Alternatively to DMatrix i could store the action instead of f64, which slightly
-    // reduces the memory footprint
+    /// node_x\[node, block] = the x value for the edge above <node> for the block with id <block>
+    // TODO: this could be optimized to only store the values for the dirty nodes. Then, we would
+    // have to determine these values not during the cost calculation but during the tree update.
     node_x: DMatrix<f64>,
 
-    // TODO same as for node_x: since if update tree is called we
-    // have no way of knowing the old tree and thus the old factor_n values that need to be removed
-    // before reassignment
-    // Alternatively to DMatrix i could store the action instead of f64, which slightly
-    // reduces the memory footprint
+    /// node_factor_n\[node, block] = the factor_n value for the edge above <node> for the block
+    /// with id <block>
+    // TODO: this could be optimized to only store the values for the dirty nodes. Then, we would
+    // have to determine these values not during the cost calculation but during the tree update.
     node_factor_n: DMatrix<f64>,
 
-    // factor_n[node, block] = n1/ (n0 * lambda * beta(node.blen)) if there is an edge in the subtree
+    /// factor_ns\[node, block] = n1/ (n0 * lambda * beta(node.blen)) if there is an edge in the subtree
     // where the current event is an insertion and the last one was a deletion
     factor_ns: DMatrix<f64>,
 
     // felsenstein_prob[node, block] = contains the felsenstein prob of that column, i
     // if there is an insertion in the subtree
-    // TODO: this could be merged with factor_n
-    // TODO: can i even decouple the substitution cost from indel probabilities?
     felsenstein_prob: DMatrix<f64>,
 
-    /// felsenstein\[node\]\[site, state\]
+    /// felsenstein\[node]\[site, state]
     felsenstein: Vec<DMatrix<f64>>,
 
-    // n0[node] = n0(node.blen), I might not need this for every node
+    /// n0\[node] = n0(node.blen), may hold already computed values for n0 that can be reused
     n0: Vec<Option<f64>>,
 
-    // h1[node] = h1(node.blen), I might not need this for every node
+    /// h1\[node] = h1(node.blen), may hold already computed values for h1 that can be reused
     h1: Vec<Option<f64>>,
 
-    // insertion[node] = l * beta * (1.0 - r) / r;, I might not need this for every node
+    /// insertion\[node] = l * beta * (1.0 - r) / r, may hold already computed values for insertion
+    /// that can be reused
     insertion: Vec<Option<f64>>,
 
-    // log_n1[node] = ln(n1(node.blen)), I might not need this for every node
+    /// factor_n\[node] = n1/ (n0 * lambda * beta(node.blen)), may hold already computed values for factor_n that can be
+    /// reused
     factor_n: Vec<Option<f64>>,
 
-    // beta[usize::from(node)] = beta(node.blen)), i need beta for every node anyways
-    // since i1 uses them, so these values a precomputed
+    /// beta\[usize::from(node)] = beta(node.blen))
     beta: Vec<f64>,
 
-    // the right exclusive interval borders of the blocks
+    /// The right exclusive interval borders of the blocks
     blocks: Vec<usize>,
 
-    // the lengths of the blocks
+    /// The lengths of the blocks
     block_lens: Vec<usize>,
 
-    // a vector for every edge storing if the edge is time reversed or not,
+    //  a vector for every edge storing if the edge is time reversed or not,
     // reversed: Vec<bool>,
-
-    // models[usize::from(node)] = Q.exp(node.blen)
+    /// models\[usize::from(node)] = Q.exp(node.blen)
     models: Vec<SubstMatrix>,
 
-    // TODO: couldn't AncestralAlignment::get_node_map() be used instead?
-    //       If I keep this var, then I should use it not for every site,
-    //       but only for every block
-    // leaf_sequence_info[node.id][site, state] = the prob of observing this state
+    /// leaf_sequence_info[node.id][site, state] = the prob of observing <state> at <site> in the
+    /// leaf with id <node.id>
     leaf_sequence_info: HashMap<String, DMatrix<f64>>,
-
-    // usize::from(node), this is not the root of the tree but a virtual root for computational ease
-    virtual_root: NodeIdx,
-
-    // edge_is_time_reversed[usize::from(node)] = true if the edge is time reversed
-    edge_is_time_reversed: Vec<bool>,
 
     // last_event_deletion[usize::from(node)] = true if the last event was a deletion for a that node
     last_event_deletion: Vec<bool>,
 
+    /// valid\[usize::from(node)] = true if the intermediate values for that <node> are valid
+    valid: Vec<bool>,
+
+    // usize::from(node), this is not the root of the tree but a virtual root for computational ease
+    virtual_root: NodeIdx,
+    // edge_is_time_reversed[usize::from(node)] = true if the edge is time reversed
+    edge_is_time_reversed: Vec<bool>,
     // last_event_insertion[usize::from(node)] = true if the last event was an insertion for a that node
     last_event_insertion: Vec<bool>,
-
-    // true if the all the intermediate values are correctly set
-    valid: bool,
 }
 
 impl<Q: QMatrix> TKF92ModelInfo<Q> {
@@ -162,7 +154,7 @@ impl<Q: QMatrix> TKF92ModelInfo<Q> {
             edge_is_time_reversed: vec![false; n_nodes],
             last_event_deletion: vec![false; n_nodes],
             last_event_insertion: vec![false; n_nodes],
-            valid: false,
+            valid: vec![false; n_nodes],
         }
     }
 }
@@ -179,7 +171,14 @@ pub struct TKF92Cost<Q: QMatrix + Display, AA: AncestralAlignment> {
 
 impl<Q: QMatrix, AA: AncestralAlignment> Display for TKF92Cost<Q, AA> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "TKF92")
+        write!(
+            f,
+            "TKF92 with lambda = {}, mu = {}, r = {}, Q = {}",
+            self.model.lambda(),
+            self.model.mu(),
+            self.model.r(),
+            self.model.q
+        )
     }
 }
 
@@ -206,9 +205,14 @@ where
         // TODO instead of all nodes i only want non valid nodes to be reset
         self.reset_all_nodes();
         // the update tree can either be a single edge len
+        // i can look at the tree and compare it to the old tree and check where the topo changed
+        // or do i also want to reestimate when only the blen is changed? i guess yes
 
         // do i have to update all the nodes up to the root?
         // perhaps i only need to this once before realignment
+        // how does julia do this for substitution_models?
+        // i do collect models up the tree, but these change after topo move, so i also need to
+        // recollect them
 
         // so if i only want to update the root node i cannot use the set_node method
 
@@ -238,36 +242,39 @@ impl<Q: QMatrix + Display, AA: AncestralAlignment> TKF92Cost<Q, AA>
 // where
 //     TKF92Model<Q>: EvoModel,
 {
+    // TODO: pub crate for testing but should make it private before PR merge
     fn logl(&self) -> f64 {
-        self.logl_strip(10000, false)
-    }
-
-    fn logl_strip(&self, only_until_block: usize, exclude_const: bool) -> f64 {
         // println!("logl start in tkf");
-        let not_valid = !self.model_info.borrow().valid;
-        if not_valid {
-            self.reset_all_nodes();
+        for node_idx in self.phylo.tree.postorder() {
+            match node_idx {
+                Internal(_) => {
+                    if self.phylo.tree.root == *node_idx {
+                        self.set_root();
+                    } else {
+                        self.set_internal(node_idx);
+                    }
+                }
+                Leaf(_) => {
+                    self.set_leaf(node_idx);
+                }
+            };
         }
+
         let l: f64 = self.model.lambda();
         let m = self.model.mu();
         let r = self.model.r();
         let root_id = usize::from(self.model_info.borrow().virtual_root);
         let mut logl = 0.0;
-        if !exclude_const {
-            logl += (1.0 - l / m).ln();
-            logl += self.phylo.msa.len() as f64 * r.ln();
-            for node in self.phylo.tree.postorder() {
-                if node == &self.phylo.tree.root {
-                    continue;
-                }
-                logl += log_i1(l, self.model_info.borrow_mut().beta[usize::from(node)]);
+        logl += (1.0 - l / m).ln();
+        logl += self.phylo.msa.len() as f64 * r.ln();
+        for node in self.phylo.tree.postorder() {
+            if node == &self.phylo.tree.root {
+                continue;
             }
+            logl += log_i1(l, self.model_info.borrow_mut().beta[usize::from(node)]);
         }
         // println!("calculating loglike, and the const part is {}", logl);
         for block_id in 0..self.model_info.borrow().blocks.len() {
-            if block_id == only_until_block {
-                break;
-            }
             let block_len = self.model_info.borrow().block_lens[block_id];
             logl += self.model_info.borrow().factor_ns[(root_id, block_id)];
             logl += self.model_info.borrow().felsenstein_prob[(root_id, block_id)];
@@ -372,6 +379,22 @@ impl<Q: QMatrix + Display, AA: AncestralAlignment> TKF92Cost<Q, AA>
     }
 
     // TODO: should this setting not be part of the model info instead of cost?
+    // TODO: if we just set some nodes to be not valid to indicate that we need to recalculate them
+    // then we still need to iterate over all the nodes (right now we do this in postorder)
+    // which scales badly for very large trees. Previously we passed the dirty nodes to update tree
+    // which meant that in theory we only need to update these nodes and their ancestors.
+    // TODO: also for my cost i dont need to set all the nodes after the dp, i could just return
+    // the likelihood and if the move (for which the reestimation was done) is not accepted then we
+    // also dont need to reset all the nodes. Can this be achieved with the current implementation
+    // of the topology optimizer or the nni optimizer? Perhaps by setting the valid indicators in
+    // the modelinfo to false and updateing the masa, such that only uppon next call to cost/logl
+    // we update the intermediate values at the internal nodes
+    // TODO: how do we update the masa? i think i can just use the update_tree method since there
+    // mut cost is passed and i can reestimate the cost.phylo.masa. perhaps rename the method to
+    // update_phylo or udpate_phylo_info
+    //
+    // depending on whether i call this from logl or update tree i can reestiamte the dirty tree
+    //
     fn reset_all_nodes(&self) {
         // println!("resetting all nodes");
         for node_idx in self.phylo.tree.postorder() {
@@ -380,59 +403,76 @@ impl<Q: QMatrix + Display, AA: AncestralAlignment> TKF92Cost<Q, AA>
             let m = self.model.mu();
             let beta = b(l, m, time);
             self.model_info.borrow_mut().beta[usize::from(node_idx)] = beta;
+            // i think i also have to reset the arrays storing precomputed values
             let virtual_root = self.model_info.borrow().virtual_root;
             match node_idx {
                 Internal(_) => {
                     if virtual_root == *node_idx {
-                        // println!("rest_all_nodes: root");
                         self.set_root();
                     } else {
-                        // println!("rest_all_nodes: internal");
                         self.set_internal(node_idx);
                     }
                 }
                 Leaf(_) => {
-                    // println!("rest_all_nodes: leaf");
                     self.set_leaf(node_idx);
                 }
             };
         }
-        self.model_info.borrow_mut().valid = true;
     }
 
     fn set_root(&self) {
         let root_idx = &self.phylo.tree.root;
-        let len = self.model_info.borrow().blocks.len();
-        for block_id in 0..len {
+        if self.model_info.borrow().valid[usize::from(root_idx)] {
+            return;
+        }
+        let n_blocks = self.model_info.borrow().blocks.len();
+        for block_id in 0..n_blocks {
             self.set_felsenstein_for_internal(root_idx, block_id);
             self.set_felsenstein_prob_for_root(block_id);
             self.set_indel_x_and_factor_n_for_root(block_id);
         }
+        self.model_info.borrow_mut().valid[usize::from(root_idx)] = true;
     }
 
     fn set_internal(&self, node_idx: &NodeIdx) {
         let node_id = usize::from(node_idx);
+        if self.model_info.borrow().valid[node_id] {
+            return;
+        }
         self.model_info.borrow_mut().models[node_id] =
             self.model.p(self.phylo.tree.node(node_idx).blen);
-        let len = self.model_info.borrow().blocks.len();
-        for block_id in 0..len {
+        let n_blocks = self.model_info.borrow().blocks.len();
+        for block_id in 0..n_blocks {
             self.set_felsenstein_for_internal(node_idx, block_id);
             self.set_felsenstein_prob_for_non_root(node_idx, block_id);
             self.set_indel_x_and_factor_n_for_not_root(node_idx, block_id);
         }
+
+        if let Some(parent_idx) = self.phylo.tree.parent(node_idx) {
+            self.model_info.borrow_mut().valid[usize::from(parent_idx)] = false;
+        }
+        self.model_info.borrow_mut().valid[node_id] = true;
     }
 
     fn set_leaf(&self, node_idx: &NodeIdx) {
         let node_id = usize::from(node_idx);
-        let len = self.model_info.borrow().blocks.len();
+        if self.model_info.borrow().valid[node_id] {
+            return;
+        }
+        let n_blocks = self.model_info.borrow().blocks.len();
         self.model_info.borrow_mut().models[node_id] =
             self.model.p(self.phylo.tree.node(node_idx).blen);
-        for block_id in 0..len {
+        for block_id in 0..n_blocks {
             // println!("block id = {block_id}");
             self.set_felsenstein_for_leaf(node_idx, block_id);
             self.set_felsenstein_prob_for_non_root(node_idx, block_id);
             self.set_indel_x_and_factor_n_for_not_root(node_idx, block_id);
         }
+
+        if let Some(parent_idx) = self.phylo.tree.parent(node_idx) {
+            self.model_info.borrow_mut().valid[usize::from(parent_idx)] = false;
+        }
+        self.model_info.borrow_mut().valid[node_id] = true;
     }
 
     // TODO: set_felsenstein_prob_for_root and set_felsenstein_prob_for_non_root

@@ -10,11 +10,13 @@ use itertools::Itertools;
 use rayon::prelude::*;
 
 use crate::alignment::{Alignment, Sequences, MASA};
+use crate::likelihood::TreeSearchCost;
 use crate::optimisers::{NniOptimiser, TopologyOptimiser};
 use crate::phylo_info::{PhyloInfo, PhyloInfoBuilder};
+use crate::pip_model::{PIPCostBuilder, PIPModel};
 use crate::random::DefaultGenerator;
-use crate::substitution_models::GTR;
 use crate::substitution_models::{QMatrixMaker, JC69};
+use crate::substitution_models::{GTR, HKY};
 use crate::tkf_model::{
     b, h1, log_i1, log_n1, n0,
     reassignment::{
@@ -457,7 +459,7 @@ fn find_brute_force_max<Q: QMatrix + Send>(
             for (node_idx, map) in new_mapping {
                 reassign.cost.phylo.msa.update_ancestral_map(&node_idx, map);
             }
-            reassign.cost.model_info.borrow_mut().valid = false;
+            reassign.cost.model_info.borrow_mut().valid[usize::from(v2_idx)] = false;
             let current = reassign.cost.logl();
             if let Some(ref mut m) = max {
                 if current > *m {
@@ -499,7 +501,7 @@ fn find_brute_force_max<Q: QMatrix + Send>(
                     for (node_idx, map) in new_mapping {
                         thread_cost.phylo.msa.update_ancestral_map(&node_idx, map);
                     }
-                    thread_cost.model_info.borrow_mut().valid = false;
+                    thread_cost.model_info.borrow_mut().valid[usize::from(v2_idx)] = false;
                     let current = thread_cost.logl();
 
                     local_max = Some(match local_max {
@@ -527,12 +529,14 @@ fn find_brute_force_max<Q: QMatrix + Send>(
 }
 
 #[cfg(test)]
-fn get_max_reestimated<Q: QMatrix>(
+fn get_max_dp_reestimated<Q: QMatrix>(
     cost: TKF92Cost<Q, MASA>,
     node_idx: &NodeIdx,
+    assert_check: bool,
 ) -> (f64, bool, i32) {
     let mut reassign = ReassignEdge::new(cost.clone());
-    let factor_ns_before_reestimate = reassign.count_factor_ns_on_dirty_tree(node_idx);
+    // let factor_ns_before_reestimate = reassign.count_factor_ns_on_dirty_tree(node_idx);
+    let factor_ns_before_reestimate = 0;
     reassign.fill_dp(node_idx);
     let (new_mapping, backtracking_prob) = reassign.get_mapping_from_backtracking(node_idx);
     // for statistic count the number of times the dp max is different to the original mapping
@@ -551,12 +555,16 @@ fn get_max_reestimated<Q: QMatrix>(
         //     reassign.cost.phylo.tree.node(&node).id
         // );
     }
-    reassign.cost.model_info.borrow_mut().valid = false;
-    let reestimated_cost = reassign.cost.logl();
-    let factor_ns_after_reestimate = reassign.count_factor_ns_on_dirty_tree(node_idx);
+    reassign.cost.model_info.borrow_mut().valid[usize::from(node_idx)] = false;
+    // let reestimated_cost = reassign.cost.logl();
+    let reestimated_cost = 0.0;
+    // let factor_ns_after_reestimate = reassign.count_factor_ns_on_dirty_tree(node_idx);
+    let factor_ns_after_reestimate = 0;
 
     // println!("checking dp table vs dp armgax cost");
-    assert_relative_eq!(reestimated_cost, backtracking_prob, epsilon = 1e-12);
+    if assert_check {
+        assert_relative_eq!(reestimated_cost, backtracking_prob, epsilon = 1e-12);
+    }
     // println!("factor_ns_after_reestimate = {factor_ns_after_reestimate}");
     // println!("factor_ns_before_reestimate = {factor_ns_before_reestimate}");
     let diff_in_number_of_factor_ns = factor_ns_after_reestimate - factor_ns_before_reestimate;
@@ -674,7 +682,7 @@ fn tkf_reassignment() {
         }
         println!("doing re-estimation at node {node_id}");
         let (max_dp, same_as_ori, diff_in_number_of_factor_ns) =
-            get_max_reestimated(cost.clone(), v2_idx);
+            get_max_dp_reestimated(cost.clone(), v2_idx, true);
         // println!(
         //     "node factor ns = {:?}",
         //     cost.model_info.borrow().node_factor_n
@@ -697,6 +705,84 @@ fn tkf_reassignment() {
     );
     println!("number of same as ori = {numer_of_same_as_ori}");
     println!("diff in number of factor ns = {number_of_diff_factor_ns}");
+}
+
+#[test]
+fn compare_runtime() {
+    // TODO: move this to benches
+    // things to bench:
+    // cost from scratch
+    // cost after dirty (this includes the reestimation under tkf92)
+    // just the reestimation under tkf92 depending on len of the msa or "difficulty" of msa,
+    // perhaps having many indels makes it slower since i have to consider more possibilities
+    // in the assignments
+    // cost just the indel part vs the substitution part vs both together
+    let fldr = Path::new("./data/runtime");
+
+    // loop over 10000, 20000, 30000, 40000, 50000 , ..., 250000
+    for strip in (10000..=250000).step_by(10000) {
+        println!("strip = {strip}");
+        let tree_file = fldr.join("tree_of_life.newick");
+
+        let phylo_no_ancestors = PhyloInfoBuilder::with_attrs(
+            fldr.join(format!("outputname_TRUE_no_ancestors_strip{strip}.fasta")),
+            tree_file.clone(),
+        )
+        .build()
+        .unwrap();
+        let phylo_with_ancestors = PhyloInfoBuilder::with_attrs(
+            fldr.join(format!("outputname_TRUE_strip{strip}.fasta")),
+            tree_file,
+        )
+        .build_with_ancestors()
+        .unwrap();
+
+        let model = PIPModel::<HKY>::new(&[0.22, 0.26, 0.33, 0.19], &[0.5, 0.25, 0.5]);
+
+        let pip_cost = PIPCostBuilder::new(model, phylo_no_ancestors)
+            .build()
+            .unwrap();
+        let tkf_cost = get_gtr_tkf_cost_from_phylo(phylo_with_ancestors);
+
+        // i want to have a timer that i can start and stop and then print the elapsed time
+        let start = std::time::Instant::now();
+        pip_cost.cost();
+        let duration = start.elapsed();
+        println!("PIP cost time: {duration:?}");
+
+        let start = std::time::Instant::now();
+        tkf_cost.logl();
+        let duration = start.elapsed();
+        println!("TKF cost time: {duration:?}");
+
+        // also test the reestimation time
+        let postorder = tkf_cost.phylo.tree.postorder().clone();
+        let mut durations = Vec::new();
+        for (i, v2_idx) in postorder.iter().enumerate() {
+            if i % 30 != 0 {
+                continue;
+            }
+            // only re-estimate non root internal nodes
+            if v2_idx == &tkf_cost.phylo.tree.root
+                || tkf_cost.phylo.tree.node(v2_idx).children.is_empty()
+            {
+                continue;
+            }
+            let node_id = tkf_cost.phylo.tree.node(v2_idx).id.clone();
+            // println!("doing re-estimation at node {node_id}");
+            let start = std::time::Instant::now();
+
+            let (_max_dp, _same_as_ori, _diff_in_number_of_factor_ns) =
+                get_max_dp_reestimated(tkf_cost.clone(), v2_idx, false);
+            let duration = start.elapsed();
+            // println!("re-estimation time at node {node_id}: {duration:?}");
+            durations.push(duration);
+        }
+        let total_duration: std::time::Duration = durations.iter().sum();
+        // println!("total re-estimation time: {total_duration:?}");
+        let avg_duration = total_duration / (durations.len() as u32);
+        println!("avg re-estimation time: {avg_duration:?}\n");
+    }
 }
 
 // TODO: use precomputed
