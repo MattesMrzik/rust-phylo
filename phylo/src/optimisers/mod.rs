@@ -50,7 +50,7 @@ impl StopCondition {
     /// Validates whether the optimisation should continue based on the current iteration
     /// number and the change in cost (delta) since the last iteration.
     /// Returns `true` if the optimisation should continue, `false` otherwise
-    fn should_continue(&self, iteration: usize, delta: f64) -> bool {
+    pub fn should_continue(&self, iteration: usize, delta: f64) -> bool {
         match *self {
             StopCondition::Epsilon(min_delta) => delta > min_delta,
             StopCondition::FixedIter(max) => max.get() > iteration,
