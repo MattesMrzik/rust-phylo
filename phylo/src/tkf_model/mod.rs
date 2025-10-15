@@ -167,7 +167,7 @@ impl<Q: QMatrix, AA: AncestralAlignment> Display for TKF92Cost<Q, AA> {
     }
 }
 
-struct TKF92CostBuilder<Q: QMatrix, AA: AncestralAlignment> {
+pub struct TKF92CostBuilder<Q: QMatrix, AA: AncestralAlignment> {
     lambda: f64,
     mu: f64,
     r: f64,
