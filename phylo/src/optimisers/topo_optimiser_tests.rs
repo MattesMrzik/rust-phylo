@@ -879,3 +879,35 @@ fn max_iter() {
     assert!(result.final_cost >= res_default.final_cost);
     assert_eq!(result.initial_cost, unopt_cost);
 }
+
+
+// Warning: If you change this test, please also update the example in the README.md file!
+// Additionally: use "use crate::..." in this test here, but "use phylo::..." in the README.md
+// file, and remove the main().unwrap() when copying this to the README.md file.
+#[test]
+fn example_main_from_readme() {
+    use std::path::Path;
+    
+    use crate::likelihood::TreeSearchCost;
+    use crate::optimisers::TopologyOptimiser;
+    use crate::phylo_info::PhyloInfoBuilder;
+    use crate::substitution_models::{SubstModel, SubstitutionCostBuilder, K80};
+
+    fn main() -> std::result::Result<(), anyhow::Error> {
+        // Note: This example uses test data from the repository
+        let info = PhyloInfoBuilder::new(Path::new("./examples/data/K80.fasta")).build()?;
+        let k80 = SubstModel::<K80>::new(&[], &[4.0, 1.0]);
+        let c = SubstitutionCostBuilder::new(k80, info).build()?;
+        let unopt_cost = c.cost();
+        let rng = FakeGenerator::default();
+
+        let optimiser = TopologyOptimiser::new(c, SprOptimiser {}, &rng);
+        let result = optimiser.run()?;
+        assert_eq!(unopt_cost, result.initial_cost);
+        assert!(result.final_cost > result.initial_cost);
+        assert!(result.iterations <= 100);
+        assert_eq!(result.cost.tree().len(), 9); // The initial tree has 9 nodes, 5 leaves and 4 internal nodes, and so should the resulting tree.
+        Ok(()) 
+    }
+    main().unwrap();
+}
