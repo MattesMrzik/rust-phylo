@@ -15,7 +15,7 @@ use crate::parsimony::{BasicParsimonyCost, DolloParsimonyCost};
 use crate::pip_model::PIPCost;
 use crate::random::RandomSource;
 use crate::substitution_models::{QMatrix, SubstitutionCost};
-use crate::tkf_model::TKF92Cost;
+use crate::tkf_model::{TKF92Cost, TKF92IndelCost};
 use crate::tree::NodeIdx;
 use crate::Result;
 
@@ -62,7 +62,8 @@ impl<S: ParsimonyScoring, A: Alignment> Compatible<SprOptimiser> for DolloParsim
 impl<S: ParsimonyScoring, A: Alignment> Compatible<NniOptimiser> for DolloParsimonyCost<S, A> {}
 impl<A: Alignment> Compatible<SprOptimiser> for BasicParsimonyCost<A> {}
 impl<A: Alignment> Compatible<NniOptimiser> for BasicParsimonyCost<A> {}
-impl<Q: QMatrix, AA: AncestralAlignment> Compatible<NniOptimiser> for TKF92Cost<Q, AA> {}
+impl<AA: AncestralAlignment> Compatible<NniOptimiser> for TKF92IndelCost<AA> {}
+impl<Q: QMatrix, AA: AncestralAlignment> Compatible<SprOptimiser> for TKF92Cost<Q, AA> {}
 
 pub struct TopologyOptimiser<'a, MO, C, R>
 where
@@ -154,11 +155,13 @@ where
         let move_opti = self.move_opti.clone();
         // The best move on this iteration might still be worse than the current tree, in which case
         // the search stops.
-        // TODO: with the above comment do you mean running into local optima?
         // This means that curr_cost is always higher than or equal to prev_cost.
-        // TODO: with the first comment you mean that for a prune location we might not find a
-        // better tree. would that cause the prev_cost to be higher than curr_cost?
-        // Which would contradict the above statement.
+        // TODO: The above comment is confusing to me: The first says we run into local optima,
+        // which would make the current cost lower than the previous cost. Or is the current tree
+        // also among the moves, which would mean that current cost is always at least as high as
+        // previous cost. Then I would restate: Since the current tree is among the possible moves,
+        // the current cost is always at least as high as the previous cost. However, we might run
+        // into local optima, in which case no better tree can be found and the search stops.
         while self.predicate.test(iterations, curr_cost - prev_cost) {
             iterations += 1;
             info!("Iteration: {iterations}, current cost: {curr_cost}");
