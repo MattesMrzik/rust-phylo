@@ -880,14 +880,13 @@ fn max_iter() {
     assert_eq!(result.initial_cost, unopt_cost);
 }
 
-
 // Warning: If you change this test, please also update the example in the README.md file!
 // Additionally: use "use crate::..." in this test here, but "use phylo::..." in the README.md
 // file, and remove the main().unwrap() when copying this to the README.md file.
 #[test]
 fn example_main_from_readme() {
     use std::path::Path;
-    
+
     use crate::likelihood::TreeSearchCost;
     use crate::optimisers::TopologyOptimiser;
     use crate::phylo_info::PhyloInfoBuilder;
@@ -907,7 +906,7 @@ fn example_main_from_readme() {
         assert!(result.final_cost > result.initial_cost);
         assert!(result.iterations <= 100);
         assert_eq!(result.cost.tree().len(), 9); // The initial tree has 9 nodes, 5 leaves and 4 internal nodes, and so should the resulting tree.
-        Ok(()) 
+        Ok(())
     }
     main().unwrap();
 }
