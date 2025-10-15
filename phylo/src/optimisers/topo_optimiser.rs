@@ -117,46 +117,6 @@ where
         let mut delta = curr_cost - prev_cost;
         let mut costs = vec![curr_cost];
 
-<<<<<<< HEAD
-        let possible_move_locs: Vec<_> = self.move_opti.move_locations(&self.c).copied().collect();
-        let mut current_move_locs: Vec<_> = possible_move_locs.iter().collect();
-
-        let move_opti = self.move_opti.clone();
-        // The best move on this iteration might still be worse than the current tree, in which case
-        // the search stops.
-        // This means that curr_cost is always higher than or equal to prev_cost.
-        // TODO: The above comment is confusing to me: The first says we run into local optima,
-        // which would make the current cost lower than the previous cost. Or is the current tree
-        // also among the moves, which would mean that current cost is always at least as high as
-        // previous cost. Then I would restate: Since the current tree is among the possible moves,
-        // the current cost is always at least as high as the previous cost. However, we might run
-        // into local optima, in which case no better tree can be found and the search stops.
-        while self.predicate.test(iterations, curr_cost - prev_cost) {
-            iterations += 1;
-            info!("Iteration: {iterations}, current cost: {curr_cost}");
-            prev_cost = curr_cost;
-
-            self.rng.shuffle(&mut current_move_locs);
-
-            curr_cost =
-                Self::fold_improving_moves(&mut self.c, &move_opti, curr_cost, &current_move_locs)?;
-
-            // Optimise branch lengths on current tree to match PhyML.
-            // Since fold_improving_moves can return the same tree as before the move.
-            // (For example in SprOptimiser if the move location became a child of the root due to
-            // a previous move)
-            // We still want to do branch length optimisation in that case.
-            if self.c.blen_optimisation() {
-                let o = BranchOptimiser::new(self.c.clone()).run()?;
-                if o.final_cost > curr_cost {
-                    curr_cost = o.final_cost;
-                    let mut tree = o.cost.tree().clone();
-                    tree.dirty();
-                    self.c.update_tree(tree);
-                }
-            }
-            debug!("Tree after iteration {}: \n{}", iterations, self.c.tree());
-=======
         while self.stop_condition.should_continue(iterations, delta) {
             iterations += 1;
             info!("Iteration: {iterations}, current cost: {curr_cost}");
@@ -165,7 +125,6 @@ where
             delta = curr_cost - prev_cost;
             costs.push(curr_cost);
             debug_assert_eq!(curr_cost, self.c.cost());
->>>>>>> upstream
         }
 
         info!("Done optimising tree topology");
