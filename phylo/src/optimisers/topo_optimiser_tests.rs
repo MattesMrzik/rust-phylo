@@ -900,7 +900,6 @@ fn example_main_from_readme() {
         let c = SubstitutionCostBuilder::new(k80, info).build()?;
         let unopt_cost = c.cost();
         let rng = FakeGenerator::default();
-
         let optimiser = TopologyOptimiser::new(c, SprOptimiser {}, &rng);
         let result = optimiser.run()?;
         assert_eq!(unopt_cost, result.initial_cost);
