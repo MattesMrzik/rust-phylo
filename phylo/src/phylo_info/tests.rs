@@ -380,7 +380,7 @@ fn build_ancestral_alignment_from_aligned_leaf_seqs_missing_record() {
     // assert
     let error_msg = res_info.unwrap_err().to_string();
     assert!(
-        error_msg.contains("The number of sequences does not match the number of leaves nor the number of nodes in the tree")
+        error_msg.contains("The number of sequences (3) does not match the number of leaves (4) nor the number of nodes (7) in the tree")
     );
 }
 
