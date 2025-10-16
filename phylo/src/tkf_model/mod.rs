@@ -18,7 +18,7 @@ use crate::Result;
 
 static DUMMY_FREQS: LazyLock<DVector<f64>> = LazyLock::new(|| DVector::<f64>::zeros(0));
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct TKF92IndelModel {
     params: Vec<f64>,
 }
@@ -38,9 +38,21 @@ impl TKF92IndelModel {
     }
 }
 
+impl Display for TKF92IndelModel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "TKF92 (only the indel process) with lambda = {}, mu = {}, r = {}",
+            self.lambda(),
+            self.mu(),
+            self.r(),
+        )
+    }
+}
+
 /// For a detailed explanation of the TKF92 model and how the probabilities are calculated see:
 /// <coming paper>.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct TKF92IndelModelInfo {
     /// aggregated_x\[node, block] = the product of the xs of all the edges in the subtree below
     /// <node> (including the x of <node> itself) for the block with id <block>.
@@ -114,7 +126,7 @@ impl TKF92IndelModelInfo {
         }
     }
 }
-
+#[derive(Debug)]
 pub struct TKF92IndelCost<AA: AncestralAlignment> {
     model: TKF92IndelModel,
     phylo: PhyloInfo<AA>,
@@ -131,7 +143,36 @@ impl<AA: AncestralAlignment + Clone> Clone for TKF92IndelCost<AA> {
     }
 }
 
-#[derive(Clone)]
+pub struct TKF92IndelCostBuilder<AA: AncestralAlignment> {
+    lambda: f64,
+    mu: f64,
+    r: f64,
+    phylo: PhyloInfo<AA>,
+}
+
+impl<AA: AncestralAlignment> TKF92IndelCostBuilder<AA> {
+    pub fn new(lambda: f64, mu: f64, r: f64, phylo: PhyloInfo<AA>) -> Self {
+        Self {
+            lambda,
+            mu,
+            r,
+            phylo,
+        }
+    }
+
+    pub fn build(self) -> Result<TKF92IndelCost<AA>> {
+        let tkf92_model = TKF92IndelModel {
+            params: vec![self.lambda, self.mu, self.r],
+        };
+        let tkf92_info = TKF92IndelModelInfo::new(&self.phylo);
+        Ok(TKF92IndelCost {
+            model: tkf92_model,
+            phylo: self.phylo.clone(),
+            model_info: RefCell::new(tkf92_info),
+        })
+    }
+}
+#[derive(Clone, Debug)]
 pub struct TKF92Cost<Q: QMatrix + Display, AA: AncestralAlignment> {
     // TODO: if we have just the sum of the two costs like this, we need to keep track of the
     // phylo (which is tree and alignment) twice, which might be too big of a downside, since the
@@ -144,13 +185,7 @@ pub struct TKF92Cost<Q: QMatrix + Display, AA: AncestralAlignment> {
 
 impl<AA: AncestralAlignment> Display for TKF92IndelCost<AA> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "TKF92 only indels with lambda = {}, mu = {}, r = {}",
-            self.model.lambda(),
-            self.model.mu(),
-            self.model.r(),
-        )
+        write!(f, "{}", self.model)
     }
 }
 
@@ -404,7 +439,7 @@ impl<AA: AncestralAlignment> TKF92IndelCost<AA> {
         let site = self.model_info.borrow().blocks[block_id] - 1;
         let parent_is_gap = match parent_idx {
             Internal(_) => self.phylo.msa.ancestral_map(&parent_idx)[site].is_none(),
-            Leaf(_) => self.phylo.msa.leaf_map(&parent_idx)[site].is_none(),
+            _ => unreachable!("The parent of a node cannot be a leaf."),
         };
         let current_is_gap = match node_idx {
             Internal(_) => self.phylo.msa.ancestral_map(node_idx)[site].is_none(),

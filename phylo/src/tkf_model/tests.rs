@@ -13,6 +13,11 @@ use crate::{frequencies, record_wo_desc as record, tree};
 
 use super::*;
 
+#[test]
+fn tkf_dummy_freqs() {
+    assert_eq!(&*DUMMY_FREQS, &DVector::<f64>::zeros(0));
+}
+
 #[cfg(test)]
 pub(crate) fn get_mapping_for_any_node<'a, AA: AncestralAlignment>(
     msa: &'a AA,
@@ -169,6 +174,30 @@ fn tkf_get_blocks() {
 }
 
 #[test]
+fn tkf_indel_get_and_set_params_and_freqs() {
+    let mut tkf_indel_cost =
+        TKF92IndelCostBuilder::new(1.0, 2.0, 3.0, setup_test_phylo(dna_alphabet()))
+            .build()
+            .unwrap();
+    // params
+    assert_eq!(tkf_indel_cost.params(), vec![1.0, 2.0, 3.0]);
+    assert_eq!(tkf_indel_cost.model.lambda(), 1.0);
+    assert_eq!(tkf_indel_cost.model.mu(), 2.0);
+    assert_eq!(tkf_indel_cost.model.r(), 3.0);
+    tkf_indel_cost.set_param(2, 3.3);
+    assert_eq!(tkf_indel_cost.params(), vec![1.0, 2.0, 3.3]);
+    assert_eq!(tkf_indel_cost.model.lambda(), 1.0);
+    assert_eq!(tkf_indel_cost.model.mu(), 2.0);
+    assert_eq!(tkf_indel_cost.model.r(), 3.3);
+    // freqs
+    assert_eq!(tkf_indel_cost.freqs(), &*DUMMY_FREQS);
+    assert_eq!(
+        tkf_indel_cost.empirical_freqs(),
+        setup_test_phylo(dna_alphabet()).freqs()
+    );
+}
+
+#[test]
 fn tkf_get_and_set_params() {
     let subst_model = SubstModel::<GTR>::new(&[0.1, 0.2, 0.3, 0.4], &[0.5, 0.6, 0.7, 0.8, 0.9]);
     let mut tkf_cost =
@@ -188,6 +217,43 @@ fn tkf_get_and_set_params() {
         tkf_cost.params(),
         vec![1.0, 2.0, 3.3, 0.5, 0.6, 0.77, 0.8, 0.9]
     );
+    assert_eq!(
+        tkf_cost.empirical_freqs(),
+        setup_test_phylo(dna_alphabet()).freqs()
+    );
+}
+
+#[test]
+fn tkf_indel_fmt() {
+    // arrange
+    let tkf_indel_model = TKF92IndelModel {
+        params: vec![1.1, 2.0, 3.0],
+    };
+
+    // act
+    let fmt = format!("{}", tkf_indel_model);
+
+    // assert
+    assert_eq!(
+        fmt,
+        "TKF92 (only the indel process) with lambda = 1.1, mu = 2, r = 3"
+    );
+}
+
+#[test]
+fn tkf_fmt() {
+    // arrange
+    let subst_model = SubstModel::<JC69>::new(&[], &[]);
+    let tkf_cost =
+        TKF92CostBuilder::new(1.0, 2.0, 3.0, subst_model, setup_test_phylo(dna_alphabet()))
+            .build()
+            .unwrap();
+
+    // act
+    let fmt = format!("{}", tkf_cost);
+
+    // assert
+    assert_eq!(fmt, "TKF92 with lambda = 1, mu = 2, r = 3, Q = JC69");
 }
 
 #[test]
@@ -286,6 +352,22 @@ fn tkf_indel_logl_() {
     // assert
     assert_relative_eq!(logl, manual_calculation);
     assert_relative_eq!(logl, half_manual);
+}
+
+#[test]
+fn tkf_cost_builder_fails() {
+    // arrange
+    let phylo = setup_test_phylo(protein_alphabet());
+    let subst_model = SubstModel::<GTR>::new(&[0.1, 0.3, 0.4, 0.2], &[1.2, 0.5, 5.0, 1.0, 1.0]);
+
+    // act
+    let tkf_cost = TKF92CostBuilder::new(0.1, 0.2, 0.3, subst_model, phylo)
+        .build()
+        .unwrap_err()
+        .to_string();
+
+    // assert
+    assert_eq!(tkf_cost, "Alphabet mismatch between model and alignment");
 }
 
 #[test]
