@@ -274,6 +274,7 @@ impl<Q: QMatrix, M: Alignment> ModelSearchCost for PIPCost<Q, M> {
     fn cost(&self) -> f64 {
         self.logl()
     }
+
     fn set_param(&mut self, param: usize, value: f64) {
         self.model.set_param(param, value);
         self.tmp.borrow_mut().models_valid.fill(false);

@@ -9,7 +9,7 @@ use crate::phylo_info::PhyloInfo;
 use crate::substitution_models::{QMatrixMaker, SubstModel, SubstitutionCostBuilder as SCB};
 use crate::substitution_models::{BLOSUM, GTR, HIVB, HKY, JC69, K80, TN93, WAG};
 use crate::tree::NodeIdx::{self, Internal, Leaf};
-use crate::{record_wo_desc as record, tree};
+use crate::{frequencies, record_wo_desc as record, tree};
 
 use super::*;
 
@@ -169,6 +169,40 @@ fn tkf_get_blocks() {
 }
 
 #[test]
+fn tkf_get_and_set_params() {
+    let subst_model = SubstModel::<GTR>::new(&[0.1, 0.2, 0.3, 0.4], &[0.5, 0.6, 0.7, 0.8, 0.9]);
+    let mut tkf_cost =
+        TKF92CostBuilder::new(1.0, 2.0, 3.0, subst_model, setup_test_phylo(dna_alphabet()))
+            .build()
+            .unwrap();
+    assert_eq!(
+        tkf_cost.params(),
+        vec![1.0, 2.0, 3.0, 0.5, 0.6, 0.7, 0.8, 0.9]
+    );
+    assert_eq!(tkf_cost.indel_cost.model.lambda(), 1.0);
+    assert_eq!(tkf_cost.indel_cost.model.mu(), 2.0);
+    assert_eq!(tkf_cost.indel_cost.model.r(), 3.0);
+    tkf_cost.set_param(2, 3.3);
+    tkf_cost.set_param(5, 0.77);
+    assert_eq!(
+        tkf_cost.params(),
+        vec![1.0, 2.0, 3.3, 0.5, 0.6, 0.77, 0.8, 0.9]
+    );
+}
+
+#[test]
+fn tkf_get_and_set_freqs() {
+    let subst_model = SubstModel::<GTR>::new(&[0.1, 0.2, 0.3, 0.4], &[0.5, 0.6, 0.7, 0.8, 0.9]);
+    let mut tkf_cost =
+        TKF92CostBuilder::new(1.0, 2.0, 3.0, subst_model, setup_test_phylo(dna_alphabet()))
+            .build()
+            .unwrap();
+    assert_eq!(tkf_cost.freqs().as_slice(), &[0.1, 0.2, 0.3, 0.4]);
+    tkf_cost.set_freqs(frequencies!(&[0.4, 0.3, 0.2, 0.1]));
+    assert_eq!(tkf_cost.freqs().as_slice(), &[0.4, 0.3, 0.2, 0.1]);
+}
+
+#[test]
 fn tkf_indel_logl_() {
     // arrange
     let tree = tree!("(((A1:2.0,B2:2.0)I3:0.3,C4:2.0)R5:1.0);");
@@ -285,7 +319,7 @@ fn tkf_logl_with_substitution() {
     let logl = tkf_cost.cost();
     let subst_logl = subst_cost.cost();
     let tkf_logl =
-        tkf_indel_logl_without_aggregation(&tkf_cost.tkf92_cost.model, &tkf_cost.tkf92_cost.phylo);
+        tkf_indel_logl_without_aggregation(&tkf_cost.indel_cost.model, &tkf_cost.indel_cost.phylo);
 
     // assert
     assert_relative_eq!(logl, subst_logl + tkf_logl, epsilon = 1e-12);
@@ -333,15 +367,15 @@ fn tkf_indel_history_doesnt_change_felsenstein() {
     // act
     let tkf_log_1 = tkf_cost1.cost();
     let tkf_log_2 = tkf_cost2.cost();
-    let tkf_indel_cost_1 = tkf_cost1.tkf92_cost.clone().cost();
+    let tkf_indel_cost_1 = tkf_cost1.indel_cost.clone().cost();
     let tkf_indel_cost_without_agg_1 = tkf_indel_logl_without_aggregation(
-        &tkf_cost1.tkf92_cost.model,
-        &tkf_cost1.tkf92_cost.phylo,
+        &tkf_cost1.indel_cost.model,
+        &tkf_cost1.indel_cost.phylo,
     );
-    let tkf_indel_cost_2 = tkf_cost2.tkf92_cost.clone().cost();
+    let tkf_indel_cost_2 = tkf_cost2.indel_cost.clone().cost();
     let tkf_indel_cost_without_agg_2 = tkf_indel_logl_without_aggregation(
-        &tkf_cost2.tkf92_cost.model,
-        &tkf_cost2.tkf92_cost.phylo,
+        &tkf_cost2.indel_cost.model,
+        &tkf_cost2.indel_cost.phylo,
     );
 
     // assert

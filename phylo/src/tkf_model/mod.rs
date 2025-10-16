@@ -137,7 +137,7 @@ pub struct TKF92Cost<Q: QMatrix + Display, AA: AncestralAlignment> {
     // phylo (which is tree and alignment) twice, which might be too big of a downside. Since the
     // cost is copied often. Alternatively we could implement the substitution cost inside the
     // tkf92 cost, which would duplicate some code.
-    tkf92_cost: TKF92IndelCost<AA>,
+    indel_cost: TKF92IndelCost<AA>,
     subst_cost: SubstitutionCost<Q, AA>,
     combined_parameters: Vec<f64>,
 }
@@ -159,9 +159,9 @@ impl<Q: QMatrix, AA: AncestralAlignment> Display for TKF92Cost<Q, AA> {
         write!(
             f,
             "TKF92 with lambda = {}, mu = {}, r = {}, Q = {}",
-            self.tkf92_cost.model.lambda(),
-            self.tkf92_cost.model.mu(),
-            self.tkf92_cost.model.r(),
+            self.indel_cost.model.lambda(),
+            self.indel_cost.model.mu(),
+            self.indel_cost.model.r(),
             self.subst_cost.model.qmatrix
         )
     }
@@ -208,7 +208,7 @@ impl<Q: QMatrix, AA: AncestralAlignment> TKF92CostBuilder<Q, AA> {
         };
         let combined_parameters = [tkf92_cost.model.params(), self.subst_model.params()].concat();
         Ok(TKF92Cost {
-            tkf92_cost,
+            indel_cost: tkf92_cost,
             subst_cost: SCB::new(self.subst_model, self.phylo).build().unwrap(),
             combined_parameters,
         })
@@ -247,19 +247,17 @@ impl<AA: AncestralAlignment> ModelSearchCost for TKF92IndelCost<AA> {
 
 impl<Q: QMatrix, AA: AncestralAlignment> ModelSearchCost for TKF92Cost<Q, AA> {
     fn cost(&self) -> f64 {
-        self.tkf92_cost.cost() + self.subst_cost.cost()
+        self.indel_cost.cost() + self.subst_cost.cost()
     }
 
     fn set_param(&mut self, i: usize, v: f64) {
-        // TODO: do we want to check that i is in bounds?
         self.combined_parameters[i] = v;
         if i < 3 {
-            self.tkf92_cost.set_param(i, v);
+            self.indel_cost.set_param(i, v);
             return;
         }
         let i = i - 3;
         self.subst_cost.set_param(i, v);
-        self.tkf92_cost.model_info.borrow_mut().valid.fill(false);
     }
 
     fn params(&self) -> &[f64] {
