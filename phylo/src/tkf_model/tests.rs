@@ -176,19 +176,16 @@ fn tkf_get_blocks() {
 #[test]
 fn tkf_indel_get_and_set_params_and_freqs() {
     let mut tkf_indel_cost =
-        TKF92IndelCostBuilder::new(1.0, 2.0, 3.0, setup_test_phylo(dna_alphabet()))
+        TKF92IndelCostBuilder::new(1.0, 2.0, 0.3, setup_test_phylo(dna_alphabet()))
             .build()
             .unwrap();
     // params
-    assert_eq!(tkf_indel_cost.params(), vec![1.0, 2.0, 3.0]);
+    assert_eq!(tkf_indel_cost.params(), vec![1.0, 2.0, 0.3]);
     assert_eq!(tkf_indel_cost.model.lambda(), 1.0);
     assert_eq!(tkf_indel_cost.model.mu(), 2.0);
-    assert_eq!(tkf_indel_cost.model.r(), 3.0);
-    tkf_indel_cost.set_param(2, 3.3);
-    assert_eq!(tkf_indel_cost.params(), vec![1.0, 2.0, 3.3]);
-    assert_eq!(tkf_indel_cost.model.lambda(), 1.0);
-    assert_eq!(tkf_indel_cost.model.mu(), 2.0);
-    assert_eq!(tkf_indel_cost.model.r(), 3.3);
+    assert_eq!(tkf_indel_cost.model.r(), 0.3);
+    tkf_indel_cost.set_param(2, 0.33);
+    assert_eq!(tkf_indel_cost.params(), vec![1.0, 2.0, 0.33]);
     // freqs
     assert_eq!(tkf_indel_cost.freqs(), &*DUMMY_FREQS);
     assert_eq!(
@@ -201,21 +198,21 @@ fn tkf_indel_get_and_set_params_and_freqs() {
 fn tkf_get_and_set_params() {
     let subst_model = SubstModel::<GTR>::new(&[0.1, 0.2, 0.3, 0.4], &[0.5, 0.6, 0.7, 0.8, 0.9]);
     let mut tkf_cost =
-        TKF92CostBuilder::new(1.0, 2.0, 3.0, subst_model, setup_test_phylo(dna_alphabet()))
+        TKF92CostBuilder::new(1.0, 2.0, 0.3, subst_model, setup_test_phylo(dna_alphabet()))
             .build()
             .unwrap();
     assert_eq!(
         tkf_cost.params(),
-        vec![1.0, 2.0, 3.0, 0.5, 0.6, 0.7, 0.8, 0.9]
+        vec![1.0, 2.0, 0.3, 0.5, 0.6, 0.7, 0.8, 0.9]
     );
     assert_eq!(tkf_cost.indel_cost.model.lambda(), 1.0);
     assert_eq!(tkf_cost.indel_cost.model.mu(), 2.0);
-    assert_eq!(tkf_cost.indel_cost.model.r(), 3.0);
-    tkf_cost.set_param(2, 3.3);
+    assert_eq!(tkf_cost.indel_cost.model.r(), 0.3);
+    tkf_cost.set_param(2, 0.33);
     tkf_cost.set_param(5, 0.77);
     assert_eq!(
         tkf_cost.params(),
-        vec![1.0, 2.0, 3.3, 0.5, 0.6, 0.77, 0.8, 0.9]
+        vec![1.0, 2.0, 0.33, 0.5, 0.6, 0.77, 0.8, 0.9]
     );
     assert_eq!(
         tkf_cost.empirical_freqs(),
@@ -245,7 +242,7 @@ fn tkf_fmt() {
     // arrange
     let subst_model = SubstModel::<JC69>::new(&[], &[]);
     let tkf_cost =
-        TKF92CostBuilder::new(1.0, 2.0, 3.0, subst_model, setup_test_phylo(dna_alphabet()))
+        TKF92CostBuilder::new(1.0, 2.0, 0.3, subst_model, setup_test_phylo(dna_alphabet()))
             .build()
             .unwrap();
 
@@ -253,14 +250,14 @@ fn tkf_fmt() {
     let fmt = format!("{}", tkf_cost);
 
     // assert
-    assert_eq!(fmt, "TKF92 with lambda = 1, mu = 2, r = 3, Q = JC69");
+    assert_eq!(fmt, "TKF92 with lambda = 1, mu = 2, r = 0.3, Q = JC69");
 }
 
 #[test]
 fn tkf_get_and_set_freqs() {
     let subst_model = SubstModel::<GTR>::new(&[0.1, 0.2, 0.3, 0.4], &[0.5, 0.6, 0.7, 0.8, 0.9]);
     let mut tkf_cost =
-        TKF92CostBuilder::new(1.0, 2.0, 3.0, subst_model, setup_test_phylo(dna_alphabet()))
+        TKF92CostBuilder::new(1.0, 2.0, 0.3, subst_model, setup_test_phylo(dna_alphabet()))
             .build()
             .unwrap();
     assert_eq!(tkf_cost.freqs().as_slice(), &[0.1, 0.2, 0.3, 0.4]);

@@ -4,6 +4,7 @@ use std::sync::LazyLock;
 
 use anyhow::bail;
 use hashbrown::HashSet;
+use log::warn;
 use nalgebra::{DMatrix, DVector};
 
 use crate::alignment::AncestralAlignment;
@@ -24,17 +25,40 @@ pub struct TKF92IndelModel {
 }
 
 impl TKF92IndelModel {
+    // TODO: it might be better for model optimisation to have parameter lambda and scale s = mu/lambda,
+    // because of the constraint that mu > lambda.
     fn lambda(&self) -> f64 {
         self.params[0]
     }
+
     fn mu(&self) -> f64 {
         self.params[1]
     }
+
     fn r(&self) -> f64 {
         self.params[2]
     }
+
     fn params(&self) -> &[f64] {
         &self.params
+    }
+
+    /// Returns true if the parameter is in its valid range,
+    /// assuming that the other parameters of the model are valid.
+    fn valid_param(&self, i: usize, v: f64) -> bool {
+        if i > 2 {
+            return false;
+        }
+        if i == 0 {
+            // lambda
+            v > 0.0 && v < self.mu()
+        } else if i == 1 {
+            // mu
+            v > self.lambda()
+        } else {
+            // r in [0, 1)
+            (0.0..1.0).contains(&v)
+        }
     }
 }
 
@@ -150,6 +174,46 @@ pub struct TKF92IndelCostBuilder<AA: AncestralAlignment> {
     phylo: PhyloInfo<AA>,
 }
 
+fn valid_tkf_indel_parameters(lambda: f64, mu: f64, r: f64) -> Vec<f64> {
+    let mut valid_lambda = lambda;
+    let mut valid_mu = mu;
+    let mut valid_r = r;
+    if lambda <= 0.0 && mu <= 0.0 {
+        warn!("Both lambda and mu must be positive. Setting lambda to 1 and mu to 1.1");
+        valid_lambda = 1.0;
+        valid_mu = 1.1;
+    }
+    if lambda <= 0.0 {
+        warn!(
+            "Tried to set lambda to invalid value {}. It must be in (0, mu) with mu = {}. Setting lambda to 0.9*mu = {}",
+            lambda, mu, 0.9*mu
+        );
+        valid_lambda = 0.9 * mu;
+    }
+    if mu <= 0.0 {
+        warn!(
+            "Tried to set mu to invalid value {}. It must be in (lambda, inf) with lambda = {}. Setting mu to 1.1*lambda = {}",
+            mu, lambda, 1.1*lambda
+        );
+        valid_mu = 1.1 * lambda;
+    }
+    if lambda >= mu {
+        warn!(
+            "Tried to set mu to invalid value {}. It must be in (lambda, inf) with lambda = {}. Setting mu to 1.1*lambda = {}",
+            mu, lambda, 1.1*lambda
+        );
+        valid_mu = 1.1 * lambda;
+    }
+    if !(0.0..1.0).contains(&r) {
+        warn!(
+            "Tried to set r to invalid value {}. It must be in [0, 1). Setting r to 0.5",
+            r
+        );
+        valid_r = 0.5;
+    }
+    vec![valid_lambda, valid_mu, valid_r]
+}
+
 impl<AA: AncestralAlignment> TKF92IndelCostBuilder<AA> {
     pub fn new(lambda: f64, mu: f64, r: f64, phylo: PhyloInfo<AA>) -> Self {
         Self {
@@ -162,7 +226,7 @@ impl<AA: AncestralAlignment> TKF92IndelCostBuilder<AA> {
 
     pub fn build(self) -> Result<TKF92IndelCost<AA>> {
         let tkf92_model = TKF92IndelModel {
-            params: vec![self.lambda, self.mu, self.r],
+            params: valid_tkf_indel_parameters(self.lambda, self.mu, self.r),
         };
         let tkf92_info = TKF92IndelModelInfo::new(&self.phylo);
         Ok(TKF92IndelCost {
@@ -233,7 +297,7 @@ impl<Q: QMatrix, AA: AncestralAlignment> TKF92CostBuilder<Q, AA> {
         }
 
         let tkf92_model = TKF92IndelModel {
-            params: vec![self.lambda, self.mu, self.r],
+            params: valid_tkf_indel_parameters(self.lambda, self.mu, self.r),
         };
         let tkf92_info = TKF92IndelModelInfo::new(&self.phylo);
         let tkf92_cost = TKF92IndelCost {
@@ -256,8 +320,10 @@ impl<AA: AncestralAlignment> ModelSearchCost for TKF92IndelCost<AA> {
     }
 
     fn set_param(&mut self, i: usize, v: f64) {
-        self.model.params[i] = v;
-        self.model_info.borrow_mut().valid.fill(false);
+        if self.model.valid_param(i, v) {
+            self.model.params[i] = v;
+            self.model_info.borrow_mut().valid.fill(false);
+        }
     }
 
     fn params(&self) -> &[f64] {
