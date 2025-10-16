@@ -41,7 +41,7 @@ impl TKF92IndelModel {
 /// For a detailed explanation of the TKF92 model and how the probabilities are calculated see:
 /// <coming paper>.
 #[derive(Clone)]
-pub struct TKF92IndelModelInfo {
+struct TKF92IndelModelInfo {
     /// aggregated_x\[node, block] = the product of the xs of all the edges in the subtree below
     /// <node> (including the x of <node> itself) for the block with id <block>.
     aggregated_x: DMatrix<f64>,
@@ -58,7 +58,7 @@ pub struct TKF92IndelModelInfo {
     node_factor_n: DMatrix<f64>,
 
     /// factor_ns\[node, block] = n1/ (n0 * lambda * beta(v.blen)) if there is a node <v> in the subtree
-    // where the current event is an insertion and the previous one was a deletion.
+    /// where the current event is an insertion and the previous one was a deletion.
     factor_ns: DMatrix<f64>,
 
     /// n0\[node] = n0(node.blen), may hold already computed values for n0 that can be reused.
@@ -92,7 +92,7 @@ pub struct TKF92IndelModelInfo {
 }
 
 impl TKF92IndelModelInfo {
-    pub fn new<AA: AncestralAlignment>(phylo: &PhyloInfo<AA>) -> TKF92IndelModelInfo {
+    fn new<AA: AncestralAlignment>(phylo: &PhyloInfo<AA>) -> TKF92IndelModelInfo {
         let blocks = get_blocks(&phylo.msa);
         let block_lens = get_block_lens(&blocks);
         let n_blocks = blocks.len();
@@ -134,7 +134,7 @@ impl<AA: AncestralAlignment + Clone> Clone for TKF92IndelCost<AA> {
 #[derive(Clone)]
 pub struct TKF92Cost<Q: QMatrix + Display, AA: AncestralAlignment> {
     // TODO: if we have just the sum of the two costs like this, we need to keep track of the
-    // phylo (which is tree and alignment) twice, which might be too big of a downside. Since the
+    // phylo (which is tree and alignment) twice, which might be too big of a downside, since the
     // cost is copied often. Alternatively we could implement the substitution cost inside the
     // tkf92 cost, which would duplicate some code.
     indel_cost: TKF92IndelCost<AA>,
@@ -279,18 +279,17 @@ impl<Q: QMatrix, AA: AncestralAlignment> ModelSearchCost for TKF92Cost<Q, AA> {
 
 impl<AA: AncestralAlignment> TKF92IndelCost<AA> {
     fn logl(&self) -> f64 {
-        // println!("logl start in tkf");
         for node_idx in self.phylo.tree.postorder() {
             match node_idx {
                 Internal(_) => {
                     if self.phylo.tree.root == *node_idx {
                         self.set_root();
                     } else {
-                        self.set_internal(node_idx);
+                        self.set_non_root(node_idx);
                     }
                 }
                 Leaf(_) => {
-                    self.set_leaf(node_idx);
+                    self.set_non_root(node_idx);
                 }
             };
         }
@@ -330,12 +329,13 @@ impl<AA: AncestralAlignment> TKF92IndelCost<AA> {
         self.reset_cached_factors(root_idx);
         let n_blocks = self.model_info.borrow().blocks.len();
         for block_id in 0..n_blocks {
-            self.set_indel_x_and_factor_n_for_root(block_id);
+            let x = self.get_indel_x_for_root(block_id);
+            self.set_node_values(root_idx, block_id, x, 0.0);
         }
         self.model_info.borrow_mut().valid[usize::from(root_idx)] = true;
     }
 
-    fn set_internal(&self, node_idx: &NodeIdx) {
+    fn set_non_root(&self, node_idx: &NodeIdx) {
         let node_id = usize::from(node_idx);
         if self.model_info.borrow().valid[node_id] {
             return;
@@ -343,25 +343,8 @@ impl<AA: AncestralAlignment> TKF92IndelCost<AA> {
         self.reset_cached_factors(node_idx);
         let n_blocks = self.model_info.borrow().blocks.len();
         for block_id in 0..n_blocks {
-            self.set_indel_x_and_factor_n_for_non_root(node_idx, block_id);
-        }
-
-        if let Some(parent_idx) = self.phylo.tree.parent(node_idx) {
-            self.model_info.borrow_mut().valid[usize::from(parent_idx)] = false;
-        }
-        self.model_info.borrow_mut().valid[node_id] = true;
-    }
-
-    fn set_leaf(&self, node_idx: &NodeIdx) {
-        let node_id = usize::from(node_idx);
-        if self.model_info.borrow().valid[node_id] {
-            return;
-        }
-        self.reset_cached_factors(node_idx);
-        let n_blocks = self.model_info.borrow().blocks.len();
-        for block_id in 0..n_blocks {
-            // println!("block id = {block_id}");
-            self.set_indel_x_and_factor_n_for_non_root(node_idx, block_id);
+            let (x, factor_n) = self.get_indel_x_and_factor_n_for_non_root(node_idx, block_id);
+            self.set_node_values(node_idx, block_id, x, factor_n);
         }
 
         if let Some(parent_idx) = self.phylo.tree.parent(node_idx) {
@@ -382,29 +365,10 @@ impl<AA: AncestralAlignment> TKF92IndelCost<AA> {
         self.model_info.borrow_mut().factor_n[node_id] = None;
     }
 
-    fn set_indel_x_and_factor_n_for_root(&self, block_id: usize) {
-        let mut x = self.get_indel_x_for_root(block_id);
-        let mut factor_n = 0.0;
-        // this is the same as in set_indel_x_and_prob_for_not_root
-        let root_idx = self.phylo.tree.root;
-        let root_id = usize::from(root_idx);
-        self.model_info.borrow_mut().node_x[(root_id, block_id)] = x;
-        self.model_info.borrow_mut().node_factor_n[(root_id, block_id)] = 0.0;
-        for child in &self.phylo.tree.node(&root_idx).children {
-            let child_id = usize::from(child);
-            x *= self.model_info.borrow().aggregated_x[(child_id, block_id)];
-            factor_n += self.model_info.borrow().factor_ns[(child_id, block_id)];
-        }
-        self.model_info.borrow_mut().factor_ns[(root_id, block_id)] = factor_n;
-        self.model_info.borrow_mut().aggregated_x[(root_id, block_id)] = x;
-    }
-
-    fn set_indel_x_and_factor_n_for_non_root(&self, node_idx: &NodeIdx, block_id: usize) {
-        let (mut x, mut factor_n) = self.get_indel_x_and_factor_n_for_non_root(node_idx, block_id);
+    fn set_node_values(&self, node_idx: &NodeIdx, block_id: usize, mut x: f64, mut factor_n: f64) {
         let node_id = usize::from(node_idx);
         self.model_info.borrow_mut().node_x[(node_id, block_id)] = x;
         self.model_info.borrow_mut().node_factor_n[(node_id, block_id)] = factor_n;
-        // this is the same as in set_indel_x_and_prob_for_root
         for child in &self.phylo.tree.node(node_idx).children {
             let child_id = usize::from(child);
             x *= self.model_info.borrow().aggregated_x[(child_id, block_id)];
@@ -438,7 +402,6 @@ impl<AA: AncestralAlignment> TKF92IndelCost<AA> {
         let mut factor_n = 0.0;
         let mut x: f64 = 1.0;
         let site = self.model_info.borrow().blocks[block_id] - 1;
-        // println!("before getting stuff in et_indel_x_and_factor_n_for_not_root");
         let parent_is_gap = match parent_idx {
             Internal(_) => self.phylo.msa.ancestral_map(&parent_idx)[site].is_none(),
             Leaf(_) => self.phylo.msa.leaf_map(&parent_idx)[site].is_none(),
@@ -449,7 +412,6 @@ impl<AA: AncestralAlignment> TKF92IndelCost<AA> {
         };
 
         let time = self.phylo.tree.node(node_idx).blen;
-        // println!("time in et_indel_x_and_factor_n_for_not_root= {time}");
 
         if block_id == 0 {
             self.model_info.borrow_mut().last_event_deletion[node_id] = false;
@@ -465,7 +427,7 @@ impl<AA: AncestralAlignment> TKF92IndelCost<AA> {
             x *= *self.model_info.borrow_mut().n0[node_id].get_or_insert_with(|| n0(mu, beta));
             self.model_info.borrow_mut().last_event_deletion[node_id] = true;
         } else if !parent_is_gap && !current_is_gap {
-            // homolog
+            // homologue
             x *= *self.model_info.borrow_mut().h1[node_id]
                 .get_or_insert_with(|| h1(lambda, mu, beta, time));
             self.model_info.borrow_mut().last_event_deletion[node_id] = false;
@@ -477,7 +439,7 @@ impl<AA: AncestralAlignment> TKF92IndelCost<AA> {
                     *self.model_info.borrow_mut().factor_n[node_id].get_or_insert_with(|| {
                         let mut factor_n = log_n1(lambda, mu, beta, time);
                         factor_n -= (lambda * beta).ln();
-                        // since last event was deletion n0 must be defined
+                        // since last event was a deletion n0 is not None
                         factor_n -= n0_option.unwrap().ln();
                         factor_n
                     });
