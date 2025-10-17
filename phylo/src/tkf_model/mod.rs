@@ -19,14 +19,35 @@ use crate::Result;
 
 static DUMMY_FREQS: LazyLock<DVector<f64>> = LazyLock::new(|| DVector::<f64>::zeros(0));
 
+#[allow(clippy::upper_case_acronyms)]
+pub trait TKF: Clone + Display {
+    fn lambda(&self) -> f64;
+    fn mu(&self) -> f64;
+    fn params(&self) -> &[f64];
+    fn set_param(&mut self, i: usize, v: f64) -> bool;
+    fn insertion_prob_at_root(&self) -> f64;
+    fn insertion_prob_at_non_root(&self, beta: f64) -> f64;
+    fn block_prob(&self, x: f64, block_len: usize) -> f64;
+    fn get_blocks<AA: AncestralAlignment>(msa: &AA) -> Vec<usize>;
+}
+
 #[derive(Clone, Debug, PartialEq)]
-pub struct TKF92IndelModel {
+pub struct TKF91IndelModel {
     params: Vec<f64>,
 }
 
-impl TKF92IndelModel {
-    // TODO: it might be better for model optimisation to have parameter lambda and scale s = mu/lambda,
-    // because of the constraint that mu > lambda.
+impl Display for TKF91IndelModel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "TKF91 with lambda = {}, mu = {}",
+            self.lambda(),
+            self.mu(),
+        )
+    }
+}
+
+impl TKF for TKF91IndelModel {
     fn lambda(&self) -> f64 {
         self.params[0]
     }
@@ -35,30 +56,145 @@ impl TKF92IndelModel {
         self.params[1]
     }
 
+    fn params(&self) -> &[f64] {
+        &self.params
+    }
+
+    /// Sets the parameter if it is valid then returns true, otherwise the parameter is not changed
+    /// and false is returned.
+    /// This assumes that the other parameter is valid
+    fn set_param(&mut self, i: usize, v: f64) -> bool {
+        if i > 1 {
+            return false;
+        }
+        if i == 0 {
+            // lambda
+            if v > 0.0 && v < self.mu() {
+                self.params[0] = v;
+                return true;
+            }
+        } else if i == 1 {
+            // mu
+            if v > self.lambda() {
+                self.params[1] = v;
+                return true;
+            }
+        }
+        false
+    }
+
+    fn insertion_prob_at_root(&self) -> f64 {
+        self.lambda() / self.mu()
+    }
+
+    fn insertion_prob_at_non_root(&self, beta: f64) -> f64 {
+        self.lambda() * beta
+    }
+
+    fn block_prob(&self, x: f64, block_len: usize) -> f64 {
+        if x == 1.0 {
+            0.0
+        } else {
+            (block_len as f64) * x.ln()
+        }
+    }
+
+    fn get_blocks<AA: AncestralAlignment>(msa: &AA) -> Vec<usize> {
+        (0..msa.len()).collect()
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct TKF92IndelModel {
+    // TODO: it might be better for model optimisation to have parameter lambda and scale s = mu/lambda,
+    // because of the constraint that mu > lambda.
+    params: Vec<f64>,
+}
+
+impl TKF92IndelModel {
     fn r(&self) -> f64 {
         self.params[2]
+    }
+}
+
+impl TKF for TKF92IndelModel {
+    fn lambda(&self) -> f64 {
+        self.params[0]
+    }
+
+    fn mu(&self) -> f64 {
+        self.params[1]
     }
 
     fn params(&self) -> &[f64] {
         &self.params
     }
 
-    /// Returns true if the parameter is in its valid range,
-    /// assuming that the other parameters of the model are valid.
-    fn valid_param(&self, i: usize, v: f64) -> bool {
+    /// Sets the parameter if it is valid then returns true, otherwise the parameter is not changed
+    /// and false is returned.
+    /// This assumes that the other parameters are valid
+    fn set_param(&mut self, i: usize, v: f64) -> bool {
         if i > 2 {
             return false;
         }
         if i == 0 {
             // lambda
-            v > 0.0 && v < self.mu()
+            if v > 0.0 && v < self.mu() {
+                self.params[0] = v;
+                return true;
+            }
         } else if i == 1 {
             // mu
-            v > self.lambda()
+            if v > self.lambda() {
+                self.params[1] = v;
+                return true;
+            }
         } else {
-            // r in [0, 1)
-            (0.0..1.0).contains(&v)
+            // r
+            if (0.0..1.0).contains(&v) {
+                self.params[2] = v;
+                return true;
+            }
         }
+        false
+    }
+
+    fn insertion_prob_at_root(&self) -> f64 {
+        self.lambda() / self.mu() * (1.0 - self.r()) / self.r()
+    }
+
+    fn insertion_prob_at_non_root(&self, beta: f64) -> f64 {
+        self.lambda() * beta * (1.0 - self.r()) / self.r()
+    }
+
+    fn block_prob(&self, x: f64, block_len: usize) -> f64 {
+        if x == 1.0 {
+            0.0
+        } else {
+            x.ln() + (block_len as f64 - 1.0) * (1.0 + x).ln() + (block_len as f64) * self.r().ln()
+        }
+    }
+
+    fn get_blocks<AA: AncestralAlignment>(msa: &AA) -> Vec<usize> {
+        let mut blocks: HashSet<usize> = HashSet::new();
+        for map in msa
+            .ancestral_maps()
+            .values()
+            .chain(msa.leaf_maps().values())
+        {
+            let mut last = map[0].is_some();
+            for (i, c) in map.iter().skip(1).enumerate() {
+                let current: bool = c.is_some();
+                if current != last {
+                    blocks.insert(i + 1);
+                }
+                last = current;
+            }
+            blocks.insert(map.len());
+        }
+        let mut blocks: Vec<usize> = blocks.iter().copied().collect();
+        blocks.sort();
+        blocks
     }
 }
 
@@ -66,7 +202,7 @@ impl Display for TKF92IndelModel {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "TKF92 (only the indel process) with lambda = {}, mu = {}, r = {}",
+            "TKF92 with lambda = {}, mu = {}, r = {}",
             self.lambda(),
             self.mu(),
             self.r(),
@@ -77,7 +213,7 @@ impl Display for TKF92IndelModel {
 /// For a detailed explanation of the TKF92 model and how the probabilities are calculated see:
 /// <coming paper>.
 #[derive(Clone, Debug)]
-struct TKF92IndelModelInfo {
+struct TKFIndelModelInfo {
     /// aggregated_x\[node, block] = the product of the xs of all the edges in the subtree below
     /// <node> (including the x of <node> itself) for the block with id <block>.
     aggregated_x: DMatrix<f64>,
@@ -127,13 +263,13 @@ struct TKF92IndelModelInfo {
     valid: Vec<bool>,
 }
 
-impl TKF92IndelModelInfo {
-    fn new<AA: AncestralAlignment>(phylo: &PhyloInfo<AA>) -> TKF92IndelModelInfo {
-        let blocks = get_blocks(&phylo.msa);
+impl TKFIndelModelInfo {
+    fn new<AA: AncestralAlignment, T: TKF>(phylo: &PhyloInfo<AA>) -> TKFIndelModelInfo {
+        let blocks = T::get_blocks(&phylo.msa);
         let block_lens = get_block_lens(&blocks);
         let n_blocks = blocks.len();
         let n_nodes = phylo.tree.len();
-        TKF92IndelModelInfo {
+        TKFIndelModelInfo {
             aggregated_x: DMatrix::<f64>::zeros(n_nodes, n_blocks),
             node_x: DMatrix::<f64>::zeros(n_nodes, n_blocks),
             node_factor_n: DMatrix::<f64>::zeros(n_nodes, n_blocks),
@@ -151,15 +287,15 @@ impl TKF92IndelModelInfo {
     }
 }
 #[derive(Debug)]
-pub struct TKF92IndelCost<AA: AncestralAlignment> {
-    model: TKF92IndelModel,
+pub struct TKFIndelCost<AA: AncestralAlignment, T: TKF> {
+    model: T,
     phylo: PhyloInfo<AA>,
-    model_info: RefCell<TKF92IndelModelInfo>,
+    model_info: RefCell<TKFIndelModelInfo>,
 }
 
-impl<AA: AncestralAlignment + Clone> Clone for TKF92IndelCost<AA> {
+impl<AA: AncestralAlignment + Clone, T: TKF> Clone for TKFIndelCost<AA, T> {
     fn clone(&self) -> Self {
-        TKF92IndelCost {
+        TKFIndelCost {
             model: self.model.clone(),
             phylo: self.phylo.clone(),
             model_info: RefCell::new(self.model_info.borrow().clone()),
@@ -167,11 +303,10 @@ impl<AA: AncestralAlignment + Clone> Clone for TKF92IndelCost<AA> {
     }
 }
 
-pub struct TKF92IndelCostBuilder<AA: AncestralAlignment> {
-    lambda: f64,
-    mu: f64,
-    r: f64,
-    phylo: PhyloInfo<AA>,
+impl<AA: AncestralAlignment, T: TKF> Display for TKFIndelCost<AA, T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.model)
+    }
 }
 
 fn valid_tkf_indel_parameters(lambda: f64, mu: f64, r: f64) -> Vec<f64> {
@@ -214,6 +349,37 @@ fn valid_tkf_indel_parameters(lambda: f64, mu: f64, r: f64) -> Vec<f64> {
     vec![valid_lambda, valid_mu, valid_r]
 }
 
+pub struct TKF91IndelCostBuilder<AA: AncestralAlignment> {
+    lambda: f64,
+    mu: f64,
+    phylo: PhyloInfo<AA>,
+}
+
+impl<AA: AncestralAlignment> TKF91IndelCostBuilder<AA> {
+    pub fn new(lambda: f64, mu: f64, phylo: PhyloInfo<AA>) -> Self {
+        Self { lambda, mu, phylo }
+    }
+
+    pub fn build(self) -> Result<TKFIndelCost<AA, TKF91IndelModel>> {
+        let model = TKF91IndelModel {
+            params: valid_tkf_indel_parameters(self.lambda, self.mu, 0.0),
+        };
+        let info = TKFIndelModelInfo::new::<_, TKF91IndelModel>(&self.phylo);
+        Ok(TKFIndelCost {
+            model,
+            phylo: self.phylo.clone(),
+            model_info: RefCell::new(info),
+        })
+    }
+}
+
+pub struct TKF92IndelCostBuilder<AA: AncestralAlignment> {
+    lambda: f64,
+    mu: f64,
+    r: f64,
+    phylo: PhyloInfo<AA>,
+}
+
 impl<AA: AncestralAlignment> TKF92IndelCostBuilder<AA> {
     pub fn new(lambda: f64, mu: f64, r: f64, phylo: PhyloInfo<AA>) -> Self {
         Self {
@@ -224,45 +390,76 @@ impl<AA: AncestralAlignment> TKF92IndelCostBuilder<AA> {
         }
     }
 
-    pub fn build(self) -> Result<TKF92IndelCost<AA>> {
-        let tkf92_model = TKF92IndelModel {
+    pub fn build(self) -> Result<TKFIndelCost<AA, TKF92IndelModel>> {
+        let model = TKF92IndelModel {
             params: valid_tkf_indel_parameters(self.lambda, self.mu, self.r),
         };
-        let tkf92_info = TKF92IndelModelInfo::new(&self.phylo);
-        Ok(TKF92IndelCost {
-            model: tkf92_model,
+        let info = TKFIndelModelInfo::new::<_, TKF92IndelModel>(&self.phylo);
+        Ok(TKFIndelCost {
+            model,
             phylo: self.phylo.clone(),
-            model_info: RefCell::new(tkf92_info),
+            model_info: RefCell::new(info),
         })
     }
 }
 #[derive(Clone, Debug)]
-pub struct TKF92Cost<Q: QMatrix + Display, AA: AncestralAlignment> {
+pub struct TKFCost<Q: QMatrix + Display, T: TKF, AA: AncestralAlignment> {
     // TODO: if we have just the sum of the two costs like this, we need to keep track of the
     // phylo (which is tree and alignment) twice, which might be too big of a downside, since the
     // cost is copied often. Alternatively we could implement the substitution cost inside the
     // tkf92 cost, which would duplicate some code.
-    indel_cost: TKF92IndelCost<AA>,
+    indel_cost: TKFIndelCost<AA, T>,
     subst_cost: SubstitutionCost<Q, AA>,
     combined_parameters: Vec<f64>,
 }
 
-impl<AA: AncestralAlignment> Display for TKF92IndelCost<AA> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.model)
-    }
-}
-
-impl<Q: QMatrix, AA: AncestralAlignment> Display for TKF92Cost<Q, AA> {
+impl<Q: QMatrix, T: TKF, AA: AncestralAlignment> Display for TKFCost<Q, T, AA> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "TKF92 with lambda = {}, mu = {}, r = {}, Q = {}",
-            self.indel_cost.model.lambda(),
-            self.indel_cost.model.mu(),
-            self.indel_cost.model.r(),
-            self.subst_cost.model.qmatrix
+            "{} and {}",
+            self.indel_cost.model, self.subst_cost.model.qmatrix
         )
+    }
+}
+
+pub struct TKF91CostBuilder<Q: QMatrix, AA: AncestralAlignment> {
+    lambda: f64,
+    mu: f64,
+    subst_model: SubstModel<Q>,
+    phylo: PhyloInfo<AA>,
+}
+
+impl<Q: QMatrix, AA: AncestralAlignment> TKF91CostBuilder<Q, AA> {
+    pub fn new(lambda: f64, mu: f64, subst_model: SubstModel<Q>, phylo: PhyloInfo<AA>) -> Self {
+        Self {
+            lambda,
+            mu,
+            subst_model,
+            phylo,
+        }
+    }
+
+    pub fn build(self) -> Result<TKFCost<Q, TKF91IndelModel, AA>> {
+        if self.phylo.msa.alphabet() != self.subst_model.alphabet() {
+            bail!("Alphabet mismatch between model and alignment");
+        }
+
+        let model = TKF91IndelModel {
+            params: valid_tkf_indel_parameters(self.lambda, self.mu, 0.0),
+        };
+        let info = TKFIndelModelInfo::new::<_, TKF91IndelModel>(&self.phylo);
+        let tkf_cost = TKFIndelCost {
+            model,
+            phylo: self.phylo.clone(),
+            model_info: RefCell::new(info),
+        };
+        let combined_parameters = [tkf_cost.model.params(), self.subst_model.params()].concat();
+        Ok(TKFCost {
+            indel_cost: tkf_cost,
+            subst_cost: SCB::new(self.subst_model, self.phylo).build().unwrap(),
+            combined_parameters,
+        })
     }
 }
 
@@ -291,37 +488,36 @@ impl<Q: QMatrix, AA: AncestralAlignment> TKF92CostBuilder<Q, AA> {
         }
     }
 
-    pub fn build(self) -> Result<TKF92Cost<Q, AA>> {
+    pub fn build(self) -> Result<TKFCost<Q, TKF92IndelModel, AA>> {
         if self.phylo.msa.alphabet() != self.subst_model.alphabet() {
             bail!("Alphabet mismatch between model and alignment");
         }
 
-        let tkf92_model = TKF92IndelModel {
+        let model = TKF92IndelModel {
             params: valid_tkf_indel_parameters(self.lambda, self.mu, self.r),
         };
-        let tkf92_info = TKF92IndelModelInfo::new(&self.phylo);
-        let tkf92_cost = TKF92IndelCost {
-            model: tkf92_model,
+        let info = TKFIndelModelInfo::new::<_, TKF92IndelModel>(&self.phylo);
+        let tkf_cost = TKFIndelCost {
+            model,
             phylo: self.phylo.clone(),
-            model_info: RefCell::new(tkf92_info),
+            model_info: RefCell::new(info),
         };
-        let combined_parameters = [tkf92_cost.model.params(), self.subst_model.params()].concat();
-        Ok(TKF92Cost {
-            indel_cost: tkf92_cost,
+        let combined_parameters = [tkf_cost.model.params(), self.subst_model.params()].concat();
+        Ok(TKFCost {
+            indel_cost: tkf_cost,
             subst_cost: SCB::new(self.subst_model, self.phylo).build().unwrap(),
             combined_parameters,
         })
     }
 }
 
-impl<AA: AncestralAlignment> ModelSearchCost for TKF92IndelCost<AA> {
+impl<AA: AncestralAlignment, T: TKF> ModelSearchCost for TKFIndelCost<AA, T> {
     fn cost(&self) -> f64 {
         self.logl()
     }
 
     fn set_param(&mut self, i: usize, v: f64) {
-        if self.model.valid_param(i, v) {
-            self.model.params[i] = v;
+        if self.model.set_param(i, v) {
             self.model_info.borrow_mut().valid.fill(false);
         }
     }
@@ -346,18 +542,19 @@ impl<AA: AncestralAlignment> ModelSearchCost for TKF92IndelCost<AA> {
     }
 }
 
-impl<Q: QMatrix, AA: AncestralAlignment> ModelSearchCost for TKF92Cost<Q, AA> {
+impl<Q: QMatrix, T: TKF, AA: AncestralAlignment> ModelSearchCost for TKFCost<Q, T, AA> {
     fn cost(&self) -> f64 {
         self.indel_cost.cost() + self.subst_cost.cost()
     }
 
     fn set_param(&mut self, i: usize, v: f64) {
         self.combined_parameters[i] = v;
-        if i < 3 {
+        let num_params_indel_model = self.indel_cost.model.params().len();
+        if i < num_params_indel_model {
             self.indel_cost.set_param(i, v);
             return;
         }
-        let i = i - 3;
+        let i = i - num_params_indel_model;
         self.subst_cost.set_param(i, v);
     }
 
@@ -378,7 +575,7 @@ impl<Q: QMatrix, AA: AncestralAlignment> ModelSearchCost for TKF92Cost<Q, AA> {
     }
 }
 
-impl<AA: AncestralAlignment> TKF92IndelCost<AA> {
+impl<AA: AncestralAlignment, T: TKF> TKFIndelCost<AA, T> {
     fn logl(&self) -> f64 {
         for node_idx in self.phylo.tree.postorder() {
             match node_idx {
@@ -397,11 +594,9 @@ impl<AA: AncestralAlignment> TKF92IndelCost<AA> {
 
         let l: f64 = self.model.lambda();
         let m = self.model.mu();
-        let r = self.model.r();
         let root_id = usize::from(self.phylo.tree.root);
         let mut logl = 0.0;
         logl += (1.0 - l / m).ln();
-        logl += self.phylo.msa.len() as f64 * r.ln();
         for node in self.phylo.tree.postorder() {
             if node == &self.phylo.tree.root {
                 continue;
@@ -412,10 +607,7 @@ impl<AA: AncestralAlignment> TKF92IndelCost<AA> {
             let block_len = self.model_info.borrow().block_lens[block_id];
             logl += self.model_info.borrow().factor_ns[(root_id, block_id)];
             let x = self.model_info.borrow().aggregated_x[(root_id, block_id)];
-            if x != 1.0 {
-                logl += x.ln();
-                logl += (block_len as f64 - 1.0) * (1.0 + x).ln();
-            }
+            logl += self.model.block_prob(x, block_len);
         }
         logl
     }
@@ -425,8 +617,6 @@ impl<AA: AncestralAlignment> TKF92IndelCost<AA> {
         if self.model_info.borrow().valid[usize::from(root_idx)] {
             return;
         }
-        // this call should not be necessary because at the root we do not use any cached
-        // values, but it does not hurt.
         self.reset_cached_factors(root_idx);
         let n_blocks = self.model_info.borrow().blocks.len();
         for block_id in 0..n_blocks {
@@ -480,15 +670,11 @@ impl<AA: AncestralAlignment> TKF92IndelCost<AA> {
     }
 
     fn get_indel_x_for_root(&self, block_id: usize) -> f64 {
-        let l = self.model.lambda();
-        let m = self.model.mu();
-        let r = self.model.r();
-
         let root_idx = &self.phylo.tree.root;
         if self.phylo.msa.ancestral_map(root_idx)[self.model_info.borrow().blocks[block_id] - 1]
             .is_some()
         {
-            return l / m * (1.0 - r) / r;
+            return self.model.insertion_prob_at_root();
         }
         1.0
     }
@@ -520,7 +706,6 @@ impl<AA: AncestralAlignment> TKF92IndelCost<AA> {
 
         let lambda = self.model.lambda();
         let mu = self.model.mu();
-        let r = self.model.r();
         let beta = self.model_info.borrow().beta[node_id];
 
         if !parent_is_gap && current_is_gap {
@@ -546,7 +731,7 @@ impl<AA: AncestralAlignment> TKF92IndelCost<AA> {
                     });
             }
             x *= *self.model_info.borrow_mut().insertion[node_id]
-                .get_or_insert_with(|| lambda * beta * (1.0 - r) / r);
+                .get_or_insert_with(|| self.model.insertion_prob_at_non_root(beta));
             self.model_info.borrow_mut().last_event_deletion[node_id] = false;
         }
         (x, factor_n)
@@ -582,28 +767,6 @@ fn get_block_lens(blocks: &[usize]) -> Vec<usize> {
         };
     }
     block_lens
-}
-
-fn get_blocks<AA: AncestralAlignment>(msa: &AA) -> Vec<usize> {
-    let mut blocks: HashSet<usize> = HashSet::new();
-    for map in msa
-        .ancestral_maps()
-        .values()
-        .chain(msa.leaf_maps().values())
-    {
-        let mut last = map[0].is_some();
-        for (i, c) in map.iter().skip(1).enumerate() {
-            let current: bool = c.is_some();
-            if current != last {
-                blocks.insert(i + 1);
-            }
-            last = current;
-        }
-        blocks.insert(map.len());
-    }
-    let mut blocks: Vec<usize> = blocks.iter().copied().collect();
-    blocks.sort();
-    blocks
 }
 
 #[cfg(test)]

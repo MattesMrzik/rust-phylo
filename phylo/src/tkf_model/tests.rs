@@ -1,5 +1,3 @@
-use std::cell::RefCell;
-
 use approx::assert_relative_eq;
 
 use crate::alignment::{Alignment, AncestralAlignment, Mapping, Sequences, MASA};
@@ -30,11 +28,11 @@ pub(crate) fn get_mapping_for_any_node<'a, AA: AncestralAlignment>(
 }
 
 #[cfg(test)]
-fn tkf_indel_logl_without_aggregation<AA: AncestralAlignment>(
+fn tkf92_indel_logl_without_aggregation<AA: AncestralAlignment>(
     model: &TKF92IndelModel,
     phylo: &PhyloInfo<AA>,
 ) -> f64 {
-    let blocks = get_blocks(&phylo.msa);
+    let blocks = TKF92IndelModel::get_blocks(&phylo.msa);
     let tree = &phylo.tree;
     let l = model.lambda();
     let m = model.mu();
@@ -155,7 +153,7 @@ fn tkf_h1() {
 }
 
 #[test]
-fn tkf_get_blocks() {
+fn tkf92_get_blocks() {
     // arrange
     let tree = tree!("((A0:1.0,B1:1.0)I1:1.0);");
     let seqs = Sequences::new(vec![
@@ -167,10 +165,72 @@ fn tkf_get_blocks() {
     let msa = MASA::from_aligned_with_ancestral(seqs, &tree).unwrap();
 
     // act
-    let blocks = get_blocks(&msa);
+    let blocks = TKF92IndelModel::get_blocks(&msa);
     let block_lens = get_block_lens(&blocks);
     assert_eq!(blocks, vec![1, 3, 4, 5]);
     assert_eq!(block_lens, vec![1, 2, 1, 1]);
+}
+
+#[cfg(test)]
+fn tkf_set_lambda_and_mu<T: TKF>(model: &mut T) {
+    let initial_lambda = model.lambda();
+    let initial_mu = model.mu();
+    // lambda
+    assert!(!model.set_param(0, -1.0));
+    assert_eq!(model.lambda(), initial_lambda);
+    assert!(!model.set_param(0, 0.0));
+    assert_eq!(model.lambda(), initial_lambda);
+    assert!(model.set_param(0, initial_mu - 0.001));
+    assert_eq!(model.lambda(), initial_mu - 0.001);
+    assert!(!model.set_param(0, initial_mu));
+    assert_eq!(model.lambda(), initial_mu - 0.001);
+    assert!(!model.set_param(0, 2.1));
+    assert_eq!(model.lambda(), initial_mu - 0.001);
+    // mu
+    model.set_param(0, initial_lambda); // reset lambda
+    assert!(!model.set_param(1, -0.1));
+    assert_eq!(model.mu(), initial_mu);
+    assert!(!model.set_param(1, 0.0));
+    assert_eq!(model.mu(), initial_mu);
+    assert!(!model.set_param(1, initial_lambda));
+    assert_eq!(model.mu(), initial_mu);
+    assert!(model.set_param(1, initial_lambda + 0.001));
+    assert_eq!(model.mu(), initial_lambda + 0.001);
+    assert!(model.set_param(1, initial_lambda + 100.0));
+    assert_eq!(model.mu(), initial_lambda + 100.0);
+}
+
+#[cfg(test)]
+fn tkf_set_r(model: &mut TKF92IndelModel) {
+    let initial_r = model.r();
+    assert!(!model.set_param(2, -0.1));
+    assert_eq!(model.r(), initial_r);
+    assert!(model.set_param(2, 0.0));
+    assert_eq!(model.r(), 0.0);
+    assert!(model.set_param(2, 0.5));
+    assert_eq!(model.r(), 0.5);
+    assert!(model.set_param(2, 0.9999));
+    assert_eq!(model.r(), 0.9999);
+    assert!(!model.set_param(2, 1.0));
+    assert_eq!(model.r(), 0.9999);
+    assert!(!model.set_param(2, 2.0));
+    assert_eq!(model.r(), 0.9999);
+}
+#[test]
+fn tkf_set_param() {
+    // TKF91
+    let mut tkf91_indel_model = TKF91IndelModel {
+        params: vec![1.0, 2.0],
+    };
+    tkf_set_lambda_and_mu(&mut tkf91_indel_model);
+    assert!(!tkf91_indel_model.set_param(2, 0.5)); // no r parameter
+
+    // TKF92
+    let mut tkf92_indel_model = TKF92IndelModel {
+        params: vec![1.0, 2.0, 0.3],
+    };
+    tkf_set_lambda_and_mu(&mut tkf92_indel_model);
+    tkf_set_r(&mut tkf92_indel_model);
 }
 
 #[test]
@@ -221,7 +281,36 @@ fn tkf_get_and_set_params() {
 }
 
 #[test]
-fn tkf_indel_fmt() {
+fn tkf91_model_fmt() {
+    // arrange
+    let tkf_indel_model = TKF91IndelModel {
+        params: vec![1.1, 2.0, 3.0],
+    };
+
+    // act
+    let fmt = format!("{}", tkf_indel_model);
+
+    // assert
+    assert_eq!(fmt, "TKF91 with lambda = 1.1, mu = 2");
+}
+
+#[test]
+fn tkf91_cost_fmt() {
+    // arrange
+    let subst_model = SubstModel::<JC69>::new(&[], &[]);
+    let tkf_cost = TKF91CostBuilder::new(1.0, 2.0, subst_model, setup_test_phylo(dna_alphabet()))
+        .build()
+        .unwrap();
+
+    // act
+    let fmt = format!("{}", tkf_cost);
+
+    // assert
+    assert_eq!(fmt, "TKF91 with lambda = 1, mu = 2 and JC69");
+}
+
+#[test]
+fn tkf92_model_fmt() {
     // arrange
     let tkf_indel_model = TKF92IndelModel {
         params: vec![1.1, 2.0, 3.0],
@@ -231,14 +320,11 @@ fn tkf_indel_fmt() {
     let fmt = format!("{}", tkf_indel_model);
 
     // assert
-    assert_eq!(
-        fmt,
-        "TKF92 (only the indel process) with lambda = 1.1, mu = 2, r = 3"
-    );
+    assert_eq!(fmt, "TKF92 with lambda = 1.1, mu = 2, r = 3");
 }
 
 #[test]
-fn tkf_fmt() {
+fn tkf92_cost_fmt() {
     // arrange
     let subst_model = SubstModel::<JC69>::new(&[], &[]);
     let tkf_cost =
@@ -250,7 +336,7 @@ fn tkf_fmt() {
     let fmt = format!("{}", tkf_cost);
 
     // assert
-    assert_eq!(fmt, "TKF92 with lambda = 1, mu = 2, r = 0.3, Q = JC69");
+    assert_eq!(fmt, "TKF92 with lambda = 1, mu = 2, r = 0.3 and JC69");
 }
 
 #[test]
@@ -285,19 +371,13 @@ fn tkf_indel_logl_() {
     let lambda = 0.1;
     let mu = 0.2;
     let r = 0.3;
-    let tkf_model = TKF92IndelModel {
-        params: vec![lambda, mu, r],
-    };
-    let model_info = RefCell::new(TKF92IndelModelInfo::new(&phylo));
-    let tkf_cost = TKF92IndelCost {
-        model: tkf_model,
-        phylo,
-        model_info,
-    };
+    let tkf92_cost = TKF92IndelCostBuilder::new(lambda, mu, r, phylo)
+        .build()
+        .unwrap();
 
     // act
-    let logl = tkf_cost.logl();
-    let half_manual = tkf_indel_logl_without_aggregation(&tkf_cost.model, &tkf_cost.phylo);
+    let logl = tkf92_cost.logl();
+    let half_manual = tkf92_indel_logl_without_aggregation(&tkf92_cost.model, &tkf92_cost.phylo);
     let mut manual_calculation = 0.0;
     manual_calculation += (1.0 - lambda / mu).ln();
     manual_calculation += m * r.ln();
@@ -397,8 +477,10 @@ fn tkf_logl_with_substitution() {
     // act
     let logl = tkf_cost.cost();
     let subst_logl = subst_cost.cost();
-    let tkf_logl =
-        tkf_indel_logl_without_aggregation(&tkf_cost.indel_cost.model, &tkf_cost.indel_cost.phylo);
+    let tkf_logl = tkf92_indel_logl_without_aggregation(
+        &tkf_cost.indel_cost.model,
+        &tkf_cost.indel_cost.phylo,
+    );
 
     // assert
     assert_relative_eq!(logl, subst_logl + tkf_logl, epsilon = 1e-12);
@@ -447,12 +529,12 @@ fn tkf_indel_history_doesnt_change_felsenstein() {
     let tkf_log_1 = tkf_cost1.cost();
     let tkf_log_2 = tkf_cost2.cost();
     let tkf_indel_cost_1 = tkf_cost1.indel_cost.clone().cost();
-    let tkf_indel_cost_without_agg_1 = tkf_indel_logl_without_aggregation(
+    let tkf_indel_cost_without_agg_1 = tkf92_indel_logl_without_aggregation(
         &tkf_cost1.indel_cost.model,
         &tkf_cost1.indel_cost.phylo,
     );
     let tkf_indel_cost_2 = tkf_cost2.indel_cost.clone().cost();
-    let tkf_indel_cost_without_agg_2 = tkf_indel_logl_without_aggregation(
+    let tkf_indel_cost_without_agg_2 = tkf92_indel_logl_without_aggregation(
         &tkf_cost2.indel_cost.model,
         &tkf_cost2.indel_cost.phylo,
     );
