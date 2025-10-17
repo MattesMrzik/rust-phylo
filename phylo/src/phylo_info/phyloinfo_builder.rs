@@ -257,7 +257,6 @@ pub(crate) fn set_missing_tree_node_ids(tree: &Tree) -> Result<Tree> {
     let mut count = 0;
     for node_idx in tree.postorder() {
         let id = tree.node_id(node_idx);
-        info!("Node {node_idx} has id '{id}'");
         if id.is_empty() {
             let mut new_id = format!("I{count}");
             while !seen_user_set_ids.insert(new_id.clone()) {

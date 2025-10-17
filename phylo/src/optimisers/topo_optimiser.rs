@@ -53,7 +53,6 @@ where
     R: RandomSource,
 {
     pub fn new(cost: C, move_opti: MO, rng: &'a R) -> Self {
-        // TODO check here that the model is compatible with the alphabet
         Self {
             move_opti,
             c: cost,
