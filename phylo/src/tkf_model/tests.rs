@@ -6,6 +6,7 @@ use crate::likelihood::ModelSearchCost;
 use crate::phylo_info::PhyloInfo;
 use crate::substitution_models::{QMatrixMaker, SubstModel, SubstitutionCostBuilder as SCB};
 use crate::substitution_models::{BLOSUM, GTR, HIVB, HKY, JC69, K80, TN93, WAG};
+use crate::tkf_model::reestimation::Reestimator;
 use crate::tree::NodeIdx::{self, Internal, Leaf};
 use crate::{frequencies, record_wo_desc as record, tree};
 
@@ -636,4 +637,28 @@ fn tkf_modify_model_params_costs_match() {
     modify_model_params_costs_match_template::<WAG>(protein_alphabet(), Submodel::TKFIndel);
     modify_model_params_costs_match_template::<BLOSUM>(protein_alphabet(), Submodel::TKFIndel);
     modify_model_params_costs_match_template::<HIVB>(protein_alphabet(), Submodel::TKFIndel);
+}
+
+#[test]
+fn tkf_reestimate() {
+    let phylo = setup_test_phylo(dna_alphabet());
+    let subst_model = SubstModel::<GTR>::new(&[0.1, 0.2, 0.3, 0.4], &[0.5, 0.6, 0.7, 0.8, 0.9]);
+    let tkf_cost = TKF92CostBuilder::new(1.0, 2.0, 0.3, subst_model.clone(), phylo)
+        .build()
+        .unwrap();
+    let mut reestimator = Reestimator::new(&tkf_cost);
+    // to calc model_info tmp nodes values
+    tkf_cost.cost();
+    let (new_mappings, best_logl) = reestimator
+        .reestimate(&tkf_cost.indel_cost.phylo.tree.by_id("I3").idx)
+        .unwrap();
+    let mut phylo = setup_test_phylo(dna_alphabet());
+    for (node_idx, map) in new_mappings {
+        phylo.msa.update_ancestral_map(&node_idx, map);
+    }
+    let tkf_cost = TKF92CostBuilder::new(1.0, 2.0, 0.3, subst_model, phylo)
+        .build()
+        .unwrap();
+    let new_logl = tkf_cost.cost();
+    assert_eq!(best_logl, new_logl);
 }

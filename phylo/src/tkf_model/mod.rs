@@ -17,6 +17,8 @@ use crate::substitution_models::{
 use crate::tree::NodeIdx::{self, Internal, Leaf};
 use crate::Result;
 
+pub mod reestimation;
+
 static DUMMY_FREQS: LazyLock<DVector<f64>> = LazyLock::new(|| DVector::<f64>::zeros(0));
 
 #[allow(clippy::upper_case_acronyms)]
@@ -674,7 +676,8 @@ impl<AA: AncestralAlignment, T: TKF> TKFIndelCost<AA, T> {
         if self.phylo.msa.ancestral_map(root_idx)[self.model_info.borrow().blocks[block_id] - 1]
             .is_some()
         {
-            return self.model.insertion_prob_at_root();
+            return *self.model_info.borrow_mut().insertion[usize::from(root_idx)]
+                .get_or_insert_with(|| self.model.insertion_prob_at_root());
         }
         1.0
     }
@@ -757,6 +760,7 @@ fn n0(m: f64, b: f64) -> f64 {
 fn log_n1(l: f64, m: f64, b: f64, t: f64) -> f64 {
     ((1.0 - (-m * t).exp() - m * b) * (1.0 - l * b)).ln()
 }
+
 fn get_block_lens(blocks: &[usize]) -> Vec<usize> {
     let mut block_lens = vec![0; blocks.len()];
     for (i, block) in blocks.iter().enumerate() {
