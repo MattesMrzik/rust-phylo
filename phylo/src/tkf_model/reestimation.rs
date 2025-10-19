@@ -1,11 +1,8 @@
-use std::fmt::Display;
-
 use anyhow::bail;
 use itertools::Itertools;
 
 use crate::alignment::{AncestralAlignment, Mapping};
-use crate::substitution_models::QMatrix;
-use crate::tkf_model::{h1, log_i1, log_n1, n0, TKFCost, TKF};
+use crate::tkf_model::{h1, log_i1, log_n1, n0, TKFIndelCost, TKF};
 use crate::tree::NodeIdx::{self, Internal, Leaf};
 use crate::Result;
 
@@ -53,17 +50,17 @@ impl QuartetEdges {
             insertion_at_root: None,
         }
     }
-    fn new<AA: AncestralAlignment>(
+    fn new(
         v1: NodeIdx,
         v2: NodeIdx,
         t2: NodeIdx,
         t3: NodeIdx,
         t4: NodeIdx,
-        cost: &TKFCost<impl QMatrix, impl TKF, AA>,
+        cost: &TKFIndelCost<impl AncestralAlignment, impl TKF>,
     ) -> Self {
-        let phylo = &cost.indel_cost.phylo;
-        let model_info = cost.indel_cost.model_info.borrow();
-        let model = &cost.indel_cost.model;
+        let phylo = &cost.phylo;
+        let model_info = cost.model_info.borrow();
+        let model = &cost.model;
         // TODO: or is it better to have references here (then i need life times)?
         let t2_mapping = get_map_from_any_node(&phylo.msa, &t2).clone();
         let t3_mapping = get_map_from_any_node(&phylo.msa, &t3).clone();
@@ -95,7 +92,6 @@ impl QuartetEdges {
             None => Some(model.insertion_prob_at_root()),
             Some(_) => None,
         };
-        println!("insertion at root = {insertion_at_root:?}");
         QuartetEdges {
             edges: [v1, v2, t2, t3, t4],
             node_mappings: [t2_mapping, t3_mapping, t4_mapping],
@@ -146,17 +142,17 @@ enum Action {
 /// Reestimatator for ancestral wild card sequences at internal nodes after NNI.
 /// Assumes that only the topology has changed, not the branch lengths.
 #[derive(Clone)]
-pub struct Reestimator<'a, Q: QMatrix + Display, T: TKF, AA: AncestralAlignment> {
+pub struct Reestimator<'a, T: TKF, AA: AncestralAlignment> {
     dp_table: Vec<[f64; DP_ASSIGNMENT_AND_EVENTS_SIZE]>,
     backtracking_table: Vec<[usize; DP_ASSIGNMENT_AND_EVENTS_SIZE]>, // pointers to prev gamma argmax,
-    cost: &'a TKFCost<Q, T, AA>,
+    cost: &'a TKFIndelCost<AA, T>,
     quartet_edges: QuartetEdges,
     // TODO: add randomizer to choose between argmaxes or do stochastic backtracking
 }
 
-impl<'a, Q: QMatrix + Display, T: TKF, AA: AncestralAlignment> Reestimator<'a, Q, T, AA> {
-    pub(crate) fn new(cost: &'a TKFCost<Q, T, AA>) -> Self {
-        let num_blocks = cost.indel_cost.model_info.borrow().blocks.len();
+impl<'a, T: TKF, AA: AncestralAlignment> Reestimator<'a, T, AA> {
+    pub(crate) fn new(cost: &'a TKFIndelCost<AA, T>) -> Self {
+        let num_blocks = cost.model_info.borrow().blocks.len();
         Reestimator {
             dp_table: vec![[f64::NEG_INFINITY; DP_ASSIGNMENT_AND_EVENTS_SIZE]; num_blocks],
             backtracking_table: vec![[0; DP_ASSIGNMENT_AND_EVENTS_SIZE]; num_blocks],
@@ -169,33 +165,28 @@ impl<'a, Q: QMatrix + Display, T: TKF, AA: AncestralAlignment> Reestimator<'a, Q
         &mut self,
         v2_idx: &NodeIdx,
     ) -> Result<(Vec<(NodeIdx, Mapping)>, f64)> {
-        if v2_idx == &self.cost.indel_cost.phylo.tree.root {
+        if v2_idx == &self.cost.phylo.tree.root {
             bail!("Reestimation can only be performed on internal nodes.");
         }
         if let Leaf(_) = v2_idx {
             bail!("Reestimation can only be performed on internal nodes.");
         }
-        for node in self.cost.indel_cost.phylo.tree.postorder() {
-            if !self.cost.indel_cost.model_info.borrow().valid[usize::from(*node)] {
+        for node in self.cost.phylo.tree.postorder() {
+            if !self.cost.model_info.borrow().valid[usize::from(*node)] {
                 bail!("Reestimation can only be performed on a cost where internal nodes tmp values are valid");
             }
         }
         self.quartet_edges = self.get_quartet(v2_idx);
         self.fill_dp_table();
-        self.print_dp_table();
         Ok(self.max_mappings())
     }
 
     fn fill_dp_table(&mut self) {
-        println!(
-            "Filling DP table for reestimation at node {:?}",
-            self.quartet_edges.v2()
-        );
-        let root = &self.cost.indel_cost.phylo.tree.root;
+        let root = &self.cost.phylo.tree.root;
         if self.quartet_edges.v2() == root {
             return;
         }
-        let n_blocks = self.cost.indel_cost.model_info.borrow().blocks.len();
+        let n_blocks = self.cost.model_info.borrow().blocks.len();
         for block_id in 0..n_blocks {
             for assignment in self.possible_assignments_of_nni_edge(block_id) {
                 let actions = self.actions_for_assignment(assignment, block_id);
@@ -293,7 +284,7 @@ impl<'a, Q: QMatrix + Display, T: TKF, AA: AncestralAlignment> Reestimator<'a, Q
                 Action::Homolog => choices[i] = vec![false],
                 // If the current action is nothing, then we can pass through the previous event
                 Action::Nothing => {
-                    if is_first_block || edge == &self.cost.indel_cost.phylo.tree.root {
+                    if is_first_block || edge == &self.cost.phylo.tree.root {
                         choices[i] = vec![false];
                     } else {
                         choices[i] = vec![false, true];
@@ -305,7 +296,7 @@ impl<'a, Q: QMatrix + Display, T: TKF, AA: AncestralAlignment> Reestimator<'a, Q
     }
 
     fn get_quartet(&self, v2_idx: &NodeIdx) -> QuartetEdges {
-        let tree = &self.cost.indel_cost.phylo.tree;
+        let tree = &self.cost.phylo.tree;
         let v1_idx = tree.node(v2_idx).parent.unwrap();
         let t2_idx = tree.sibling(v2_idx).unwrap();
         let children_of_v2 = &tree.node(v2_idx).children;
@@ -315,8 +306,8 @@ impl<'a, Q: QMatrix + Display, T: TKF, AA: AncestralAlignment> Reestimator<'a, Q
     }
 
     fn factor_n_for_block(&self, block_id: usize) -> f64 {
-        let root_id = usize::from(self.cost.indel_cost.phylo.tree.root);
-        let mut factor_n = self.cost.indel_cost.model_info.borrow().factor_ns[(root_id, block_id)];
+        let root_id = usize::from(self.cost.phylo.tree.root);
+        let mut factor_n = self.cost.model_info.borrow().factor_ns[(root_id, block_id)];
         factor_n -= self.quartet_factor_n_pre_reestimation(block_id);
         // the factor n of the new quartet is added during dp filling in max_over_previous
         factor_n
@@ -325,43 +316,26 @@ impl<'a, Q: QMatrix + Display, T: TKF, AA: AncestralAlignment> Reestimator<'a, Q
     fn quartet_factor_n_pre_reestimation(&self, block_id: usize) -> f64 {
         let mut factor_n = 0.0;
         for node in self.quartet_edges.edges() {
-            factor_n *= self.cost.indel_cost.model_info.borrow().node_factor_n
-                [(usize::from(*node), block_id)];
+            factor_n += self.cost.model_info.borrow().node_factor_n[(usize::from(*node), block_id)];
         }
         factor_n
     }
 
     fn integrated_x(&self, actions: &[Action; N_EDGES_IN_QUARTET], block_id: usize) -> f64 {
-        let root_id = usize::from(self.cost.indel_cost.phylo.tree.root);
-        let block_len = self.cost.indel_cost.model_info.borrow().block_lens[block_id];
+        let root_id = usize::from(self.cost.phylo.tree.root);
+        let block_len = self.cost.model_info.borrow().block_lens[block_id];
 
-        let mut x = self.cost.indel_cost.model_info.borrow().aggregated_x[(root_id, block_id)];
-        println!(
-            "aggregated x before reestimation for block {}: {}",
-            block_id, x
-        );
+        let mut x = self.cost.model_info.borrow().aggregated_x[(root_id, block_id)];
         x /= self.quartet_x_pre_reestimation(block_id);
-        println!(
-            "aggregated x after removing prev quartet for block {}: {}",
-            block_id, x
-        );
         x *= self.quartet_x(actions);
-        println!(
-            "aggregated x after adding new quartet for block {}: {}",
-            block_id, x
-        );
-        self.cost.indel_cost.model.block_prob(x, block_len)
+        self.cost.model.block_prob(x, block_len)
     }
 
     fn quartet_x_pre_reestimation(&self, block_id: usize) -> f64 {
         let mut x = 1.0;
         for node in self.quartet_edges.edges() {
-            x *= self.cost.indel_cost.model_info.borrow().node_x[(usize::from(*node), block_id)];
+            x *= self.cost.model_info.borrow().node_x[(usize::from(*node), block_id)];
         }
-        println!(
-            "quartet x before reestimation for block {}: {}",
-            block_id, x
-        );
         x
     }
 
@@ -369,7 +343,7 @@ impl<'a, Q: QMatrix + Display, T: TKF, AA: AncestralAlignment> Reestimator<'a, Q
         let mut x = 1.0;
         // Here it is assumed that the blens have not changed, only the topology.
         for (i, node) in self.quartet_edges.edges().iter().enumerate() {
-            if node == &self.cost.indel_cost.phylo.tree.root && actions[i] == Action::Insertion {
+            if node == &self.cost.phylo.tree.root && actions[i] == Action::Insertion {
                 x *= self.quartet_edges.insertion_at_root.unwrap();
             } else {
                 x *= match actions[i] {
@@ -380,7 +354,6 @@ impl<'a, Q: QMatrix + Display, T: TKF, AA: AncestralAlignment> Reestimator<'a, Q
                 };
             }
         }
-        println!("quartet x for actions {:?}: {}", actions, x);
         x
     }
 
@@ -388,7 +361,7 @@ impl<'a, Q: QMatrix + Display, T: TKF, AA: AncestralAlignment> Reestimator<'a, Q
     /// all possible [assignment for v1, assignment for v2] combinations that
     /// follow Dollo's principle.
     fn possible_assignments_of_nni_edge(&self, block_id: usize) -> Vec<[bool; 2]> {
-        let site = self.cost.indel_cost.model_info.borrow().blocks[block_id] - 1;
+        let site = self.cost.model_info.borrow().blocks[block_id] - 1;
 
         let t1_is_char = match &self.quartet_edges.t1_mapping {
             Some(mapping) => mapping[site].is_some(),
@@ -425,7 +398,7 @@ impl<'a, Q: QMatrix + Display, T: TKF, AA: AncestralAlignment> Reestimator<'a, Q
         assignment: [bool; 2],
         block_id: usize,
     ) -> [Action; N_EDGES_IN_QUARTET] {
-        let site = self.cost.indel_cost.model_info.borrow().blocks[block_id] - 1;
+        let site = self.cost.model_info.borrow().blocks[block_id] - 1;
         let mut actions = [Action::Nothing; N_EDGES_IN_QUARTET];
         let v1_has_char = assignment[0];
         let v2_has_char = assignment[1];
@@ -443,11 +416,7 @@ impl<'a, Q: QMatrix + Display, T: TKF, AA: AncestralAlignment> Reestimator<'a, Q
     }
 
     fn backtrack(&self) -> (Vec<[bool; 2]>, f64) {
-        println!(
-            "Backtracking DP table for reestimation at node {:?}",
-            self.quartet_edges.v2()
-        );
-        let n_blocks = self.cost.indel_cost.model_info.borrow().blocks.len();
+        let n_blocks = self.cost.model_info.borrow().blocks.len();
         let mut assignments = vec![[false, false]; n_blocks];
         let mut max = f64::NEG_INFINITY;
         let mut max_index: Option<usize> = None;
@@ -457,37 +426,29 @@ impl<'a, Q: QMatrix + Display, T: TKF, AA: AncestralAlignment> Reestimator<'a, Q
                 max_index = Some(index);
             }
         }
-        if max_index.is_none() {
-            // println!("no max in dp table last col found");
-        }
         let last_argmax = max_index.unwrap();
         let last_max = max;
 
-        // println!("last argmax {:?}", Self::index_to_bools(last_argmax));
         let (assignment, _) = index_to_bools(last_argmax);
         let mut came_from = self.backtracking_table[n_blocks - 1][last_argmax];
-        // println!("came from {:?}", Self::index_to_bools(came_from));
         assignments[n_blocks - 1] = assignment;
         // go back the path
         for block_id in (0..(n_blocks - 1)).rev() {
-            // println!("backtracing block {}", block_id);
             let (assignment, _) = index_to_bools(came_from);
             assignments[block_id] = assignment;
             if block_id > 0 {
                 came_from = self.backtracking_table[block_id][came_from];
             }
         }
-        let l = self.cost.indel_cost.model.lambda();
-        let m = self.cost.indel_cost.model.mu();
+        let l = self.cost.model.lambda();
+        let m = self.cost.model.mu();
         let mut const_per_alignment: f64 = (1.0 - l / m).ln();
-        for node in self.cost.indel_cost.phylo.tree.postorder() {
-            if node == &self.cost.indel_cost.phylo.tree.root {
+        for node in self.cost.phylo.tree.postorder() {
+            if node == &self.cost.phylo.tree.root {
                 continue;
             }
-            const_per_alignment += log_i1(
-                l,
-                self.cost.indel_cost.model_info.borrow_mut().beta[usize::from(node)],
-            );
+            const_per_alignment +=
+                log_i1(l, self.cost.model_info.borrow_mut().beta[usize::from(node)]);
         }
 
         (assignments, last_max + const_per_alignment)
@@ -496,7 +457,7 @@ impl<'a, Q: QMatrix + Display, T: TKF, AA: AncestralAlignment> Reestimator<'a, Q
     fn mapping_from_vec(&self, assignments: &[[bool; 2]]) -> Vec<(NodeIdx, Mapping)> {
         let mut mappings = vec![vec![]; 2];
         let mut counts = [0; 2];
-        let block_lens = &self.cost.indel_cost.model_info.borrow().block_lens;
+        let block_lens = &self.cost.model_info.borrow().block_lens;
         // for i in 0..self.cost.model_info.borrow().blocks.len() {
         for (i, assignment) in assignments.iter().enumerate() {
             for node in 0..2 {
@@ -524,8 +485,7 @@ impl<'a, Q: QMatrix + Display, T: TKF, AA: AncestralAlignment> Reestimator<'a, Q
     }
 
     pub fn print_dp_table(&self) {
-        println!("dp table");
-        for block_id in 0..self.cost.indel_cost.model_info.borrow().blocks.len() {
+        for block_id in 0..self.cost.model_info.borrow().blocks.len() {
             for (index, &value) in self.dp_table[block_id].iter().enumerate() {
                 if value != f64::NEG_INFINITY {
                     println!(
@@ -585,7 +545,7 @@ pub trait Foo {
     fn foo(&mut self, node: &NodeIdx);
 }
 
-impl<'a, Q: QMatrix + Display, T: TKF, AA: AncestralAlignment> Foo for Reestimator<'a, Q, T, AA> {
+impl<'a, T: TKF, AA: AncestralAlignment> Foo for Reestimator<'a, T, AA> {
     fn foo(&mut self, node: &NodeIdx) {
         let _ = self.reestimate(node);
     }

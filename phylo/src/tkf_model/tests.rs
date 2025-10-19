@@ -641,24 +641,35 @@ fn tkf_modify_model_params_costs_match() {
 
 #[test]
 fn tkf_reestimate() {
-    let phylo = setup_test_phylo(dna_alphabet());
-    let subst_model = SubstModel::<GTR>::new(&[0.1, 0.2, 0.3, 0.4], &[0.5, 0.6, 0.7, 0.8, 0.9]);
-    let tkf_cost = TKF92CostBuilder::new(1.0, 2.0, 0.3, subst_model.clone(), phylo)
+    let tree = tree!("(((A1:2.0,B2:2.0)I3:0.3,C4:2.0)R5:1.0);");
+    let msa = MASA::from_aligned_with_ancestral(
+        Sequences::new(vec![
+            record!("A1", b"--GTGGA---"),
+            record!("B2", b"-------NNA"),
+            record!("I3", b"--T-------"),
+            record!("C4", b"AGG-------"),
+            record!("R5", b"--A-------"),
+        ]),
+        &tree,
+    )
+    .unwrap();
+    let mut phylo = PhyloInfo { msa, tree };
+
+    let tkf_cost = TKF92IndelCostBuilder::new(1.0, 2.0, 0.3, phylo.clone())
         .build()
         .unwrap();
     let mut reestimator = Reestimator::new(&tkf_cost);
     // to calc model_info tmp nodes values
     tkf_cost.cost();
     let (new_mappings, best_logl) = reestimator
-        .reestimate(&tkf_cost.indel_cost.phylo.tree.by_id("I3").idx)
+        .reestimate(&tkf_cost.phylo.tree.by_id("I3").idx)
         .unwrap();
-    let mut phylo = setup_test_phylo(dna_alphabet());
     for (node_idx, map) in new_mappings {
         phylo.msa.update_ancestral_map(&node_idx, map);
     }
-    let tkf_cost = TKF92CostBuilder::new(1.0, 2.0, 0.3, subst_model, phylo)
+    let tkf_cost = TKF92IndelCostBuilder::new(1.0, 2.0, 0.3, phylo)
         .build()
         .unwrap();
     let new_logl = tkf_cost.cost();
-    assert_eq!(best_logl, new_logl);
+    assert_relative_eq!(best_logl, new_logl, epsilon = 1e-12);
 }
