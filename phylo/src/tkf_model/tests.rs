@@ -28,6 +28,68 @@ pub(crate) fn get_mapping_for_any_node<'a, AA: AncestralAlignment>(
 }
 
 #[cfg(test)]
+fn tkf91_indel_logl_without_aggregation<AA: AncestralAlignment>(
+    model: &TKF91IndelModel,
+    phylo: &PhyloInfo<AA>,
+) -> f64 {
+    let tree = &phylo.tree;
+    let l = model.lambda();
+    let m = model.mu();
+
+    // for the root
+    let mut prob: f64 = (1.0 - l / m).ln();
+
+    let mut last_event_deletion = vec![false; tree.len()];
+    for i in 0..phylo.msa.len() {
+        let mut x = 1.0;
+        if get_mapping_for_any_node(&phylo.msa, &phylo.tree.root)[i].is_some() {
+            // the eq seq at the root has a fragment
+            x *= l / m;
+        }
+        for node_idx in tree.postorder() {
+            // skipping the root of the tree because it has no parent and therefore also no
+            // mutations probabilities
+            if node_idx == &tree.root {
+                continue;
+            }
+            let node_id_value = usize::from(node_idx);
+
+            let time = tree.node(node_idx).blen;
+            let parent_id = &tree.node(node_idx).parent.unwrap();
+            let parent_is_gap = get_mapping_for_any_node(&phylo.msa, parent_id)[i].is_none();
+            let current_is_gap = get_mapping_for_any_node(&phylo.msa, node_idx)[i].is_none();
+
+            let b = b(l, m, time);
+            if i == 0 {
+                prob += log_i1(l, b);
+            }
+            if parent_is_gap && current_is_gap {
+                continue;
+            } else if !parent_is_gap && !current_is_gap {
+                // homolog block
+                x *= h1(l, m, b, time);
+                last_event_deletion[node_id_value] = false;
+            } else if !parent_is_gap && current_is_gap {
+                // deletion
+                x *= n0(m, b);
+                last_event_deletion[node_id_value] = true;
+            } else if parent_is_gap && !current_is_gap {
+                // insertion
+                if last_event_deletion[node_id_value] {
+                    prob += log_n1(l, m, b, time);
+                    prob -= (l * b).ln();
+                    prob -= n0(m, b).ln();
+                }
+                x *= l * b;
+                last_event_deletion[node_id_value] = false;
+            }
+        }
+        prob += x.ln();
+    }
+    prob
+}
+
+#[cfg(test)]
 fn tkf92_indel_logl_without_aggregation<AA: AncestralAlignment>(
     model: &TKF92IndelModel,
     phylo: &PhyloInfo<AA>,
@@ -153,6 +215,23 @@ fn tkf_h1() {
 }
 
 #[test]
+fn tkf91_get_blocks() {
+    // arrange
+    let tree = tree!("((A0:1.0,B1:1.0)I1:1.0);");
+    let seqs = Sequences::new(vec![
+        record!("A0", b"AAAB-D"),
+        record!("B1", b"--ARAW"),
+        record!("I1", b"AAAA-A"),
+    ]);
+    let msa = MASA::from_aligned_with_ancestral(seqs, &tree).unwrap();
+    // act
+    let blocks = TKF91IndelModel::get_blocks(&msa);
+    let block_lens = get_block_lens(&blocks);
+    assert_eq!(blocks, (1..msa.len() + 1).collect::<Vec<usize>>());
+    assert_eq!(block_lens, vec![1; 6]);
+}
+
+#[test]
 fn tkf92_get_blocks() {
     // arrange
     let tree = tree!("((A0:1.0,B1:1.0)I1:1.0);");
@@ -205,8 +284,8 @@ fn tkf_set_r(model: &mut TKF92IndelModel) {
     let initial_r = model.r();
     assert!(!model.set_param(2, -0.1));
     assert_eq!(model.r(), initial_r);
-    assert!(model.set_param(2, 0.0));
-    assert_eq!(model.r(), 0.0);
+    assert!(!model.set_param(2, 0.0));
+    assert_eq!(model.r(), initial_r);
     assert!(model.set_param(2, 0.5));
     assert_eq!(model.r(), 0.5);
     assert!(model.set_param(2, 0.9999));
@@ -217,18 +296,23 @@ fn tkf_set_r(model: &mut TKF92IndelModel) {
     assert_eq!(model.r(), 0.9999);
 }
 #[test]
-fn tkf_set_param() {
-    // TKF91
+fn tkf91_set_param() {
+    // arrange
     let mut tkf91_indel_model = TKF91IndelModel {
         params: vec![1.0, 2.0],
     };
+    // act & assert
     tkf_set_lambda_and_mu(&mut tkf91_indel_model);
     assert!(!tkf91_indel_model.set_param(2, 0.5)); // no r parameter
+}
 
-    // TKF92
+#[test]
+fn tkf92_set_param() {
+    // arrange
     let mut tkf92_indel_model = TKF92IndelModel {
         params: vec![1.0, 2.0, 0.3],
     };
+    // act & assert
     tkf_set_lambda_and_mu(&mut tkf92_indel_model);
     tkf_set_r(&mut tkf92_indel_model);
 }
@@ -280,6 +364,42 @@ fn tkf_get_and_set_params() {
     );
 }
 
+#[cfg(test)]
+fn validate_lambda_mu(l: f64, m: f64, l_expected: f64, m_expected: f64) {
+    let cost = TKF91IndelCostBuilder::new(l, m, setup_test_phylo(dna_alphabet()))
+        .build()
+        .unwrap();
+    assert_eq!(cost.model.lambda(), l_expected);
+    assert_eq!(cost.model.mu(), m_expected);
+    let cost = TKF92IndelCostBuilder::new(l, m, 0.1, setup_test_phylo(dna_alphabet()))
+        .build()
+        .unwrap();
+    assert_eq!(cost.model.lambda(), l_expected);
+    assert_eq!(cost.model.mu(), m_expected);
+}
+
+#[cfg(test)]
+fn validate_r(r: f64, r_expected: f64) {
+    let cost = TKF92IndelCostBuilder::new(1.0, 2.0, r, setup_test_phylo(dna_alphabet()))
+        .build()
+        .unwrap();
+    assert_eq!(cost.model.r(), r_expected);
+}
+
+#[test]
+fn tkf_validate_params_for_builder() {
+    validate_lambda_mu(-1.0, -2.0, DEFAULT_LAMBDA, DEFAULT_MU);
+    validate_lambda_mu(0.0, 2.0, DEFAULT_LAMBDA_MU_RATIO * 2.0, 2.0);
+    validate_lambda_mu(2.0, -0.1, 2.0, 2.0 / DEFAULT_LAMBDA_MU_RATIO);
+    validate_lambda_mu(2.0, 1.9999, 2.0, 2.0 / DEFAULT_LAMBDA_MU_RATIO);
+    validate_lambda_mu(1.2, 1.21, 1.2, 1.21);
+    validate_r(-0.5, DEFAULT_R);
+    validate_r(0.0, DEFAULT_R);
+    validate_r(1.0, DEFAULT_R);
+    validate_r(1.5, DEFAULT_R);
+    validate_r(0.1, 0.1);
+}
+
 #[test]
 fn tkf91_model_fmt() {
     // arrange
@@ -295,6 +415,20 @@ fn tkf91_model_fmt() {
 }
 
 #[test]
+fn tkf91_indel_cost_fmt() {
+    // arrange
+    let tkf_indel_cost = TKF91IndelCostBuilder::new(1.0, 2.0, setup_test_phylo(dna_alphabet()))
+        .build()
+        .unwrap();
+
+    // act
+    let fmt = format!("{}", tkf_indel_cost);
+
+    // assert
+    assert_eq!(fmt, "TKF91 with lambda = 1, mu = 2");
+}
+
+#[test]
 fn tkf91_cost_fmt() {
     // arrange
     let subst_model = SubstModel::<JC69>::new(&[], &[]);
@@ -307,6 +441,21 @@ fn tkf91_cost_fmt() {
 
     // assert
     assert_eq!(fmt, "TKF91 with lambda = 1, mu = 2 and JC69");
+}
+
+#[test]
+fn tkf92_indel_cost_fmt() {
+    // arrange
+    let tkf_indel_cost =
+        TKF92IndelCostBuilder::new(1.0, 2.0, 0.3, setup_test_phylo(dna_alphabet()))
+            .build()
+            .unwrap();
+
+    // act
+    let fmt = format!("{}", tkf_indel_cost);
+
+    // assert
+    assert_eq!(fmt, "TKF92 with lambda = 1, mu = 2, r = 0.3");
 }
 
 #[test]
@@ -352,7 +501,85 @@ fn tkf_get_and_set_freqs() {
 }
 
 #[test]
-fn tkf_indel_logl_() {
+fn tkf91_indel_logl_() {
+    // arrange
+    let tree = tree!("(((A1:2.0,B2:2.0)I3:0.3,C4:2.0)R5:1.0);");
+    let seqs = Sequences::new(vec![
+        record!("A1", b"--NNNNN---"),
+        record!("B2", b"-------NNN"),
+        record!("I3", b"--N-------"),
+        record!("C4", b"NNN-------"),
+        record!("R5", b"--N-------"),
+    ]);
+    let msa = MASA::from_aligned_with_ancestral(seqs, &tree).unwrap();
+    let m = msa.len() as f64;
+    let phylo = PhyloInfo {
+        msa,
+        tree: tree.clone(),
+    };
+    let lambda = 0.1;
+    let mu = 0.2;
+    let tkf91_cost = TKF91IndelCostBuilder::new(lambda, mu, phylo)
+        .build()
+        .unwrap();
+
+    // act
+    let logl = tkf91_cost.logl();
+    let half_manual = tkf91_indel_logl_without_aggregation(&tkf91_cost.model, &tkf91_cost.phylo);
+    let mut manual_calculation = 0.0;
+    manual_calculation += (1.0 - lambda / mu).ln();
+    // immortal links
+    manual_calculation += log_i1(lambda, b(lambda, mu, tree.by_id("A1").blen));
+    manual_calculation += log_i1(lambda, b(lambda, mu, tree.by_id("B2").blen));
+    manual_calculation += log_i1(lambda, b(lambda, mu, tree.by_id("I3").blen));
+    manual_calculation += log_i1(lambda, b(lambda, mu, tree.by_id("C4").blen));
+    // first block
+    let x = lambda * b(lambda, mu, tree.by_id("C4").blen);
+    manual_calculation += x.ln() * 2.0;
+    // second block
+    let mut x = lambda / mu;
+    x *= h1(
+        lambda,
+        mu,
+        b(lambda, mu, tree.by_id("C4").blen),
+        tree.by_id("C4").blen,
+    );
+    x *= h1(
+        lambda,
+        mu,
+        b(lambda, mu, tree.by_id("A1").blen),
+        tree.by_id("A1").blen,
+    );
+    x *= h1(
+        lambda,
+        mu,
+        b(lambda, mu, tree.by_id("I3").blen),
+        tree.by_id("I3").blen,
+    );
+    x *= n0(mu, b(lambda, mu, tree.by_id("B2").blen));
+    manual_calculation += x.ln();
+    // third block
+    let x = lambda * b(lambda, mu, tree.by_id("C4").blen);
+    manual_calculation += x.ln() * 4.0;
+    // fourth block
+    let x = lambda * b(lambda, mu, tree.by_id("B2").blen);
+    manual_calculation += x.ln() * 3.0;
+    manual_calculation += log_n1(
+        lambda,
+        mu,
+        b(lambda, mu, tree.by_id("B2").blen),
+        tree.by_id("B2").blen,
+    );
+    manual_calculation -= n0(mu, b(lambda, mu, tree.by_id("B2").blen)).ln();
+    manual_calculation -= (lambda * b(lambda, mu, tree.by_id("B2").blen)).ln();
+
+    // assert
+    assert_relative_eq!(logl, manual_calculation);
+    assert_relative_eq!(logl, half_manual);
+}
+
+#[test]
+fn tkf92_indel_logl_() {
     // arrange
     let tree = tree!("(((A1:2.0,B2:2.0)I3:0.3,C4:2.0)R5:1.0);");
     let seqs = Sequences::new(vec![
@@ -438,31 +665,50 @@ fn tkf_cost_builder_fails() {
     let subst_model = SubstModel::<GTR>::new(&[0.1, 0.3, 0.4, 0.2], &[1.2, 0.5, 5.0, 1.0, 1.0]);
 
     // act
-    let tkf_cost = TKF92CostBuilder::new(0.1, 0.2, 0.3, subst_model, phylo)
+    let tkf91_cost = TKF91CostBuilder::new(0.1, 0.2, subst_model.clone(), phylo.clone())
+        .build()
+        .unwrap_err()
+        .to_string();
+    let tkf92_cost = TKF92CostBuilder::new(0.1, 0.2, 0.3, subst_model, phylo)
         .build()
         .unwrap_err()
         .to_string();
 
     // assert
-    assert_eq!(tkf_cost, "Alphabet mismatch between model and alignment");
+    assert_eq!(tkf91_cost, "Alphabet mismatch between model and alignment");
+    assert_eq!(tkf92_cost, "Alphabet mismatch between model and alignment");
 }
 
 #[test]
-fn tkf_logl_with_substitution() {
+fn tkf91_logl_with_substitution() {
     // arrange
-    let tree = tree!("(((A1:2.0,B2:2.0)I3:0.3,C4:2.0)R5:1.0);");
-    let seqs = Sequences::new(vec![
-        record!("A1", b"--GTGGA---"),
-        record!("B2", b"-------NNA"),
-        record!("I3", b"--T-------"),
-        record!("C4", b"AGG-------"),
-        record!("R5", b"--A-------"),
-    ]);
-    let msa = MASA::from_aligned_with_ancestral(seqs, &tree).unwrap();
-    let phylo = PhyloInfo {
-        msa,
-        tree: tree.clone(),
-    };
+    let phylo = setup_test_phylo(dna_alphabet());
+    let subst_model = SubstModel::<GTR>::new(&[0.1, 0.3, 0.4, 0.2], &[1.2, 0.5, 5.0, 1.0, 1.0]);
+    let subst_cost = SCB::new(subst_model.clone(), phylo.clone())
+        .build()
+        .unwrap();
+    let lambda = 0.1;
+    let mu = 0.2;
+    let tkf_cost = TKF91CostBuilder::new(lambda, mu, subst_model, phylo)
+        .build()
+        .unwrap();
+
+    // act
+    let logl = tkf_cost.cost();
+    let subst_logl = subst_cost.cost();
+    let tkf_logl = tkf91_indel_logl_without_aggregation(
+        &tkf_cost.indel_cost.model,
+        &tkf_cost.indel_cost.phylo,
+    );
+
+    // assert
+    assert_relative_eq!(logl, subst_logl + tkf_logl, epsilon = 1e-12);
+}
+
+#[test]
+fn tkf92_logl_with_substitution() {
+    // arrange
+    let phylo = setup_test_phylo(dna_alphabet());
     let subst_model = SubstModel::<GTR>::new(&[0.1, 0.3, 0.4, 0.2], &[1.2, 0.5, 5.0, 1.0, 1.0]);
     let subst_cost = SCB::new(subst_model.clone(), phylo.clone())
         .build()

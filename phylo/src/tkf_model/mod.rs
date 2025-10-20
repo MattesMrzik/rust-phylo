@@ -18,6 +18,10 @@ use crate::tree::NodeIdx::{self, Internal, Leaf};
 use crate::Result;
 
 static DUMMY_FREQS: LazyLock<DVector<f64>> = LazyLock::new(|| DVector::<f64>::zeros(0));
+static DEFAULT_LAMBDA: f64 = 1.0;
+static DEFAULT_MU: f64 = 1.1;
+static DEFAULT_LAMBDA_MU_RATIO: f64 = 0.9;
+static DEFAULT_R: f64 = 0.5;
 
 #[allow(clippy::upper_case_acronyms)]
 pub trait TKF: Clone + Display {
@@ -100,7 +104,7 @@ impl TKF for TKF91IndelModel {
     }
 
     fn get_blocks<AA: AncestralAlignment>(msa: &AA) -> Vec<usize> {
-        (0..msa.len()).collect()
+        (1..msa.len() + 1).collect()
     }
 }
 
@@ -151,7 +155,7 @@ impl TKF for TKF92IndelModel {
             }
         } else {
             // r
-            if (0.0..1.0).contains(&v) {
+            if v > 0.0 && v < 1.0 {
                 self.params[2] = v;
                 return true;
             }
@@ -314,37 +318,37 @@ fn valid_tkf_indel_parameters(lambda: f64, mu: f64, r: f64) -> Vec<f64> {
     let mut valid_mu = mu;
     let mut valid_r = r;
     if lambda <= 0.0 && mu <= 0.0 {
-        warn!("Both lambda and mu must be positive. Setting lambda to 1 and mu to 1.1");
-        valid_lambda = 1.0;
-        valid_mu = 1.1;
-    }
-    if lambda <= 0.0 {
         warn!(
-            "Tried to set lambda to invalid value {}. It must be in (0, mu) with mu = {}. Setting lambda to 0.9*mu = {}",
-            lambda, mu, 0.9*mu
+            "Both lambda and mu must be positive. Setting lambda to {} and mu to {}.",
+            DEFAULT_LAMBDA, DEFAULT_MU
         );
-        valid_lambda = 0.9 * mu;
-    }
-    if mu <= 0.0 {
+        valid_lambda = DEFAULT_LAMBDA;
+        valid_mu = DEFAULT_MU;
+    } else if lambda <= 0.0 {
         warn!(
-            "Tried to set mu to invalid value {}. It must be in (lambda, inf) with lambda = {}. Setting mu to 1.1*lambda = {}",
-            mu, lambda, 1.1*lambda
+            "Tried to set lambda to invalid value {}. It must be in (0, mu) with mu = {}. Setting lambda to {}*mu = {}",
+            lambda, mu, DEFAULT_LAMBDA_MU_RATIO, DEFAULT_LAMBDA_MU_RATIO * mu
         );
-        valid_mu = 1.1 * lambda;
-    }
-    if lambda >= mu {
+        valid_lambda = DEFAULT_LAMBDA_MU_RATIO * mu;
+    } else if mu <= lambda {
         warn!(
-            "Tried to set mu to invalid value {}. It must be in (lambda, inf) with lambda = {}. Setting mu to 1.1*lambda = {}",
-            mu, lambda, 1.1*lambda
+            "Tried to set mu to invalid value {}. It must be in (lambda, infinity) with lambda = {}. Setting mu to lambda/{} = {}",
+            mu, lambda, DEFAULT_LAMBDA_MU_RATIO, lambda / DEFAULT_LAMBDA_MU_RATIO
         );
-        valid_mu = 1.1 * lambda;
+        valid_mu = lambda / DEFAULT_LAMBDA_MU_RATIO;
     }
-    if !(0.0..1.0).contains(&r) {
+    if r == 0.0 {
+        warn!(
+            "Tried to set r to invalid value 0. It must be in (0, 1). Setting r to {}. Hint: r = 0 yields special case: TKF91 model, consider using that instead.",
+             DEFAULT_R
+        );
+        valid_r = DEFAULT_R;
+    } else if !(0.0..1.0).contains(&r) {
         warn!(
             "Tried to set r to invalid value {}. It must be in [0, 1). Setting r to 0.5",
             r
         );
-        valid_r = 0.5;
+        valid_r = DEFAULT_R;
     }
     vec![valid_lambda, valid_mu, valid_r]
 }
@@ -674,7 +678,8 @@ impl<AA: AncestralAlignment, T: TKF> TKFIndelCost<AA, T> {
         if self.phylo.msa.ancestral_map(root_idx)[self.model_info.borrow().blocks[block_id] - 1]
             .is_some()
         {
-            return self.model.insertion_prob_at_root();
+            return *self.model_info.borrow_mut().insertion[usize::from(root_idx)]
+                .get_or_insert_with(|| self.model.insertion_prob_at_root());
         }
         1.0
     }
