@@ -4,8 +4,8 @@ use approx::relative_eq;
 use log::warn;
 
 use crate::alphabets::{protein_alphabet, Alphabet, AMINOACID_INDEX};
-use crate::likelihood::ParamRange;
 use crate::frequencies;
+use crate::likelihood::ParamRange;
 use crate::substitution_models::{FreqVector, QMatrix, QMatrixMaker, SubstMatrix};
 
 pub(crate) mod protein_generics;

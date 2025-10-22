@@ -198,7 +198,7 @@ impl<Q: QMatrix, A: Alignment> ModelSearchCost for SubstitutionCost<Q, A> {
     }
 
     fn param_count(&self) -> usize {
-        self.model.qmatrix.param_count() 
+        self.model.qmatrix.param_count()
     }
 
     fn param_range(&self, param: usize) -> crate::likelihood::ParamRange {

@@ -518,7 +518,11 @@ fn pip_gtr_vs_gtr_params() {
     let o = ModelOptimiser::new(c, FrequencyOptimisation::Fixed)
         .run()
         .unwrap();
-    assert_relative_eq!(pip_o.cost.model.params()[2..], o.cost.model.params(), epsilon = 1e-2);
+    assert_relative_eq!(
+        pip_o.cost.model.params()[2..],
+        o.cost.model.params(),
+        epsilon = 1e-2
+    );
 }
 
 #[test]

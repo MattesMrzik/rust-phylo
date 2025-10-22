@@ -98,7 +98,7 @@ impl<C: ModelSearchCost + Display + Clone> ModelOptimiser<C> {
 
     fn single_optimisation_iteration(&mut self) -> Result<f64> {
         let mut curr_cost = self.c.cost();
-        for param  in 0..self.c.param_count() {
+        for param in 0..self.c.param_count() {
             let start_value = self.c.param(param);
             debug!("Optimising parameter {param:?} from value {start_value} with cost {curr_cost}");
             let param_opt = self.opt_parameter(param, start_value)?;

@@ -280,7 +280,7 @@ impl<Q: QMatrix, M: Alignment> ModelSearchCost for PIPCost<Q, M> {
     }
 
     fn param(&self, param: usize) -> f64 {
-        self.model.params()[param] 
+        self.model.params()[param]
     }
 
     fn set_param(&mut self, param: usize, value: f64) {
@@ -289,12 +289,12 @@ impl<Q: QMatrix, M: Alignment> ModelSearchCost for PIPCost<Q, M> {
     }
 
     fn param_count(&self) -> usize {
-       self.model.params.len() 
+        self.model.params.len()
     }
 
     fn param_range(&self, param: usize) -> ParamRange {
-        self.model.param_range(param)    }
-
+        self.model.param_range(param)
+    }
 
     fn set_freqs(&mut self, freqs: FreqVector) {
         self.model.set_freqs(freqs);
