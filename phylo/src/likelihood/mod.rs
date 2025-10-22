@@ -1,6 +1,8 @@
 use crate::substitution_models::FreqVector;
 use crate::tree::Tree;
 
+pub type ParamRange = (f64, f64);
+
 pub trait TreeSearchCost {
     // The optimisers will maximise the cost, so if the cost should be minimised instead, it should be negated.
     // The likelihood or the log-likelihood are maximised, the parsimony score is minimised.
@@ -20,8 +22,11 @@ pub trait ModelSearchCost {
     // The optimisers will maximise the cost, so if the cost should be minimised instead, it should be negated.
     // The likelihood or the log-likelihood are maximised, the parsimony score is minimised.
     fn cost(&self) -> f64;
+    fn param(&self, param: usize) -> f64;
     fn set_param(&mut self, param: usize, value: f64);
-    fn params(&self) -> &[f64];
+    fn param_count(&self) -> usize;
+    /// Returns the valid range for the given parameter (index), interval is inclusive.
+    fn param_range(&self, param: usize) -> ParamRange;
     fn set_freqs(&mut self, freqs: FreqVector);
     fn empirical_freqs(&self) -> FreqVector;
     fn freqs(&self) -> &FreqVector;

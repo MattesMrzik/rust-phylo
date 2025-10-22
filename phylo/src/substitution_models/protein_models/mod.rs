@@ -4,6 +4,7 @@ use approx::relative_eq;
 use log::warn;
 
 use crate::alphabets::{protein_alphabet, Alphabet, AMINOACID_INDEX};
+use crate::likelihood::ParamRange;
 use crate::frequencies;
 use crate::substitution_models::{FreqVector, QMatrix, QMatrixMaker, SubstMatrix};
 
@@ -81,6 +82,12 @@ macro_rules! define_protein_model {
                 }
                 self.freqs = freqs;
                 self.q = make_protein_q(&self.exchangeability, &self.freqs);
+            }
+            fn param_count(&self) -> usize {
+                0
+            }
+            fn param_range(&self, _: usize) -> ParamRange {
+                (0.0, 0.0)
             }
             fn set_param(&mut self, _: usize, _: f64) {}
             fn params(&self) -> &[f64] {
