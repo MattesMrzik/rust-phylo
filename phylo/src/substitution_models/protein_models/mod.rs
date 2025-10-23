@@ -87,6 +87,7 @@ macro_rules! define_protein_model {
                 0
             }
             fn param_range(&self, _: usize) -> ParamRange {
+                // these models have no parameters, return dummy range
                 (0.0, 0.0)
             }
             fn set_param(&mut self, _: usize, _: f64) {}
