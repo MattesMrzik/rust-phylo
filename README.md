@@ -37,7 +37,7 @@ MSRV detected using [`cargo-msrv`]( https://github.com/foresterre/cargo-msrv ).
 
 ### Example
 
-[comment]: # (WARNING: If you change the code below, please also update the test "example_main_from_readme" accordingly!)
+<!-- WARNING: If you change the code below, please also update the test "phylo/src/optimisers/topo_optimiser_tests.rs:example_main_from_readme" accordingly!) -->
 
 ```rust
 use std::path::Path;
