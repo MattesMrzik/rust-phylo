@@ -49,7 +49,7 @@ pub trait QMatrix: Debug + Clone + Display {
         self.params()[param]
     }
     fn set_param(&mut self, param: usize, value: f64);
-    /// Returns the valid range for the given parameter (index), interval is inclusive.
+    /// Returns the valid range for a model parameter \[min, max], inclusive.
     fn param_range(&self, param: usize) -> ParamRange;
     fn freqs(&self) -> &FreqVector;
     fn set_freqs(&mut self, freqs: FreqVector);

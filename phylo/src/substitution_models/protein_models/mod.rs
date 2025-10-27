@@ -5,7 +5,7 @@ use log::warn;
 
 use crate::alphabets::{protein_alphabet, Alphabet, AMINOACID_INDEX};
 use crate::frequencies;
-use crate::likelihood::ParamRange;
+use crate::likelihood::{ParamRange, PARAM_RANGE_DUMMY};
 use crate::substitution_models::{FreqVector, QMatrix, QMatrixMaker, SubstMatrix};
 
 pub(crate) mod protein_generics;
@@ -87,8 +87,7 @@ macro_rules! define_protein_model {
                 0
             }
             fn param_range(&self, _: usize) -> ParamRange {
-                // these models have no parameters, return dummy range
-                (0.0, 0.0)
+                PARAM_RANGE_DUMMY
             }
             fn set_param(&mut self, _: usize, _: f64) {}
             fn params(&self) -> &[f64] {

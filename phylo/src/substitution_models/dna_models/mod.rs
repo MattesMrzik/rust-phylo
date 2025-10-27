@@ -1,13 +1,13 @@
 use std::cmp::Ordering;
 use std::fmt::Display;
-use std::{f64, iter};
+use std::iter;
 
 use approx::relative_eq;
 use log::warn;
 
 use crate::alphabets::{dna_alphabet, Alphabet, NUCLEOTIDE_INDEX};
 use crate::frequencies;
-use crate::likelihood::ParamRange;
+use crate::likelihood::{ParamRange, PARAM_RANGE_DUMMY, PARAM_RANGE_POSITIVE};
 use crate::substitution_models::{FreqVector, QMatrix, QMatrixMaker, SubstMatrix};
 
 const DNA_N: usize = 4;
@@ -65,7 +65,7 @@ impl QMatrix for JC69 {
     }
     fn set_param(&mut self, _: usize, _: f64) {}
     fn param_range(&self, _: usize) -> ParamRange {
-        (0.0, 0.0)
+        PARAM_RANGE_DUMMY
     }
     fn freqs(&self) -> &FreqVector {
         &self.freqs
@@ -134,7 +134,7 @@ impl QMatrix for K80 {
         k80_q(&mut self.q, value);
     }
     fn param_range(&self, _: usize) -> ParamRange {
-        (f64::EPSILON, f64::MAX)
+        PARAM_RANGE_POSITIVE
     }
     fn freqs(&self) -> &FreqVector {
         &self.freqs
@@ -230,7 +230,7 @@ impl QMatrix for HKY {
         hky_q(&mut self.q, &self.freqs, self.kappa[0])
     }
     fn param_range(&self, _: usize) -> ParamRange {
-        (f64::EPSILON, f64::MAX)
+        PARAM_RANGE_POSITIVE
     }
     fn freqs(&self) -> &FreqVector {
         &self.freqs
@@ -342,7 +342,7 @@ impl QMatrix for TN93 {
         tn93_q(&mut self.q, &self.freqs, &self.params)
     }
     fn param_range(&self, _: usize) -> ParamRange {
-        (f64::EPSILON, f64::MAX)
+        PARAM_RANGE_POSITIVE
     }
     fn freqs(&self) -> &FreqVector {
         &self.freqs
@@ -457,7 +457,7 @@ impl QMatrix for GTR {
         gtr_q(&mut self.q, &self.freqs, &self.params)
     }
     fn param_range(&self, _: usize) -> ParamRange {
-        (f64::EPSILON, f64::MAX)
+        PARAM_RANGE_POSITIVE
     }
     fn freqs(&self) -> &FreqVector {
         &self.freqs

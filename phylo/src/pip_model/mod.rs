@@ -14,7 +14,7 @@ use nalgebra::{DMatrix, DVector};
 use crate::alignment::{Alignment, Mapping};
 use crate::alphabets::{Alphabet, GAP};
 use crate::evolutionary_models::EvoModel;
-use crate::likelihood::{ModelSearchCost, ParamRange, TreeSearchCost};
+use crate::likelihood::{ModelSearchCost, ParamRange, TreeSearchCost, PARAM_RANGE_POSITIVE};
 use crate::phylo_info::PhyloInfo;
 use crate::substitution_models::{FreqVector, QMatrix, QMatrixMaker, SubstMatrix};
 use crate::tree::{
@@ -64,7 +64,7 @@ impl<Q: QMatrix> PIPModel<Q> {
     }
 
     fn param_range(&self, _: usize) -> ParamRange {
-        (f64::EPSILON, f64::MAX)
+        PARAM_RANGE_POSITIVE
     }
 }
 
