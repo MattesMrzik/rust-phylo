@@ -40,8 +40,6 @@ MSRV detected using [`cargo-msrv`]( https://github.com/foresterre/cargo-msrv ).
 <!-- WARNING: If you change the code below, please also update the test "phylo/src/optimisers/topo_optimiser_tests.rs:example_main_from_readme" accordingly!) -->
 
 ```rust
-use std::path::Path;
-
 use phylo::likelihood::TreeSearchCost;
 use phylo::optimisers::TopologyOptimiser;
 use phylo::phylo_info::PhyloInfoBuilder;

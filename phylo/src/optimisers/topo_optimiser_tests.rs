@@ -880,13 +880,10 @@ fn max_iter() {
     assert_eq!(result.initial_cost, unopt_cost);
 }
 
-// Warning: If you change this test, please also update the example in the README.md file!
-// Additionally: use "use crate::..." in this test here, but "use phylo::..." in the README.md
-// file, and remove the main().unwrap() when copying this to the README.md file.
+// Warning: If you change this test, please also update the example in the README.md file
+// accordingly!
 #[test]
 fn example_main_from_readme() {
-    use std::path::Path;
-
     use crate::likelihood::TreeSearchCost;
     use crate::optimisers::TopologyOptimiser;
     use crate::phylo_info::PhyloInfoBuilder;
@@ -894,7 +891,7 @@ fn example_main_from_readme() {
 
     fn main() -> std::result::Result<(), anyhow::Error> {
         // Note: This example uses test data from the repository
-        let info = PhyloInfoBuilder::new(Path::new("./examples/data/K80.fasta")).build()?;
+        let info = PhyloInfoBuilder::new("./examples/data/K80.fasta").build()?;
         let k80 = SubstModel::<K80>::new(&[], &[4.0, 1.0]);
         let c = SubstitutionCostBuilder::new(k80, info).build()?;
         let unopt_cost = c.cost();
