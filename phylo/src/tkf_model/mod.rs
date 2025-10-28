@@ -1,9 +1,9 @@
 use std::cell::RefCell;
 use std::fmt::Display;
-use std::sync::LazyLock;
 
 use anyhow::bail;
 use hashbrown::HashSet;
+use lazy_static::lazy_static;
 use log::warn;
 use nalgebra::{DMatrix, DVector};
 
@@ -17,7 +17,10 @@ use crate::substitution_models::{
 use crate::tree::NodeIdx::{self, Internal, Leaf};
 use crate::Result;
 
-static DUMMY_FREQS: LazyLock<DVector<f64>> = LazyLock::new(|| DVector::<f64>::zeros(0));
+lazy_static! {
+    static ref DUMMY_FREQS: DVector<f64> = DVector::<f64>::zeros(0);
+}
+
 static DEFAULT_LAMBDA: f64 = 1.0;
 static DEFAULT_MU: f64 = 1.1;
 static DEFAULT_LAMBDA_MU_RATIO: f64 = 0.9;
@@ -552,7 +555,6 @@ impl<Q: QMatrix, T: TKF, AA: AncestralAlignment> ModelSearchCost for TKFCost<Q, 
     }
 
     fn set_param(&mut self, i: usize, v: f64) {
-        self.combined_parameters[i] = v;
         let num_params_indel_model = self.indel_cost.model.params().len();
         if i < num_params_indel_model {
             self.indel_cost.set_param(i, v);
@@ -560,6 +562,11 @@ impl<Q: QMatrix, T: TKF, AA: AncestralAlignment> ModelSearchCost for TKFCost<Q, 
         }
         let i = i - num_params_indel_model;
         self.subst_cost.set_param(i, v);
+        self.combined_parameters = [
+            self.indel_cost.model.params(),
+            self.subst_cost.model.params(),
+        ]
+        .concat();
     }
 
     fn params(&self) -> &[f64] {
@@ -581,9 +588,11 @@ impl<Q: QMatrix, T: TKF, AA: AncestralAlignment> ModelSearchCost for TKFCost<Q, 
 
 impl<AA: AncestralAlignment, T: TKF> TKFIndelCost<AA, T> {
     fn logl(&self) -> f64 {
+        println!("{}", self.phylo.tree.to_newick());
         for node_idx in self.phylo.tree.postorder() {
             match node_idx {
                 Internal(_) => {
+                    println!("{:?}, {node_idx}", self.phylo.msa.ancestral_map(node_idx));
                     if self.phylo.tree.root == *node_idx {
                         self.set_root();
                     } else {
@@ -611,6 +620,7 @@ impl<AA: AncestralAlignment, T: TKF> TKFIndelCost<AA, T> {
             let block_len = self.model_info.borrow().block_lens[block_id];
             logl += self.model_info.borrow().factor_ns[(root_id, block_id)];
             let x = self.model_info.borrow().aggregated_x[(root_id, block_id)];
+            println!("root x for block {} is {}", block_id, x);
             logl += self.model.block_prob(x, block_len);
         }
         logl
@@ -654,6 +664,16 @@ impl<AA: AncestralAlignment, T: TKF> TKFIndelCost<AA, T> {
         let mu = self.model.mu();
         let t = self.phylo.tree.node(node_idx).blen;
         self.model_info.borrow_mut().beta[node_id] = b(lambda, mu, t);
+        if self.model_info.borrow().beta[node_id] <= 0.0 {
+            panic!(
+                "Beta value is non-positive at node {}: beta = {}, lambda = {}, mu = {}, time = {}",
+                self.phylo.tree.node(node_idx).id,
+                self.model_info.borrow().beta[node_id],
+                lambda,
+                mu,
+                t
+            );
+        }
         self.model_info.borrow_mut().n0[node_id] = None;
         self.model_info.borrow_mut().h1[node_id] = None;
         self.model_info.borrow_mut().insertion[node_id] = None;
@@ -663,10 +683,20 @@ impl<AA: AncestralAlignment, T: TKF> TKFIndelCost<AA, T> {
     fn set_node_values(&self, node_idx: &NodeIdx, block_id: usize, mut x: f64, mut factor_n: f64) {
         let node_id = usize::from(node_idx);
         self.model_info.borrow_mut().node_x[(node_id, block_id)] = x;
+        println!(
+            "node x is zero {} at node {}",
+            x,
+            self.phylo.tree.node(node_idx).id
+        );
         self.model_info.borrow_mut().node_factor_n[(node_id, block_id)] = factor_n;
         for child in &self.phylo.tree.node(node_idx).children {
             let child_id = usize::from(child);
             x *= self.model_info.borrow().aggregated_x[(child_id, block_id)];
+            println!(
+                "child x is {} at node {}",
+                x,
+                self.phylo.tree.node(child).id
+            );
             factor_n += self.model_info.borrow().factor_ns[(child_id, block_id)];
         }
         self.model_info.borrow_mut().factor_ns[(node_id, block_id)] = factor_n;

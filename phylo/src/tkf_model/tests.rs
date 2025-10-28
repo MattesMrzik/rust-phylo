@@ -1,9 +1,13 @@
+use std::fs::{self};
+use std::io::{BufWriter, Write};
+use std::path::{Path, PathBuf};
+
 use approx::assert_relative_eq;
 
 use crate::alignment::{Alignment, AncestralAlignment, Mapping, Sequences, MASA};
 use crate::alphabets::{dna_alphabet, protein_alphabet, Alphabet};
 use crate::likelihood::ModelSearchCost;
-use crate::phylo_info::PhyloInfo;
+use crate::phylo_info::{PhyloInfo, PhyloInfoBuilder};
 use crate::substitution_models::{QMatrixMaker, SubstModel, SubstitutionCostBuilder as SCB};
 use crate::substitution_models::{BLOSUM, GTR, HIVB, HKY, JC69, K80, TN93, WAG};
 use crate::tree::NodeIdx::{self, Internal, Leaf};
@@ -296,7 +300,7 @@ fn tkf_set_r(model: &mut TKF92IndelModel) {
     assert_eq!(model.r(), 0.9999);
 }
 #[test]
-fn tkf91_set_param() {
+fn tkf91_indel_set_param() {
     // arrange
     let mut tkf91_indel_model = TKF91IndelModel {
         params: vec![1.0, 2.0],
@@ -307,7 +311,7 @@ fn tkf91_set_param() {
 }
 
 #[test]
-fn tkf92_set_param() {
+fn tkf92_indel_set_param() {
     // arrange
     let mut tkf92_indel_model = TKF92IndelModel {
         params: vec![1.0, 2.0, 0.3],
@@ -354,6 +358,9 @@ fn tkf_get_and_set_params() {
     assert_eq!(tkf_cost.indel_cost.model.r(), 0.3);
     tkf_cost.set_param(2, 0.33);
     tkf_cost.set_param(5, 0.77);
+    tkf_cost.set_param(0, -5.0); // invalid, should not change
+    tkf_cost.set_param(1, 0.1); // invalid, should not change
+    tkf_cost.set_param(2, 10.0); // invalid, should not change
     assert_eq!(
         tkf_cost.params(),
         vec![1.0, 2.0, 0.33, 0.5, 0.6, 0.77, 0.8, 0.9]
@@ -512,7 +519,6 @@ fn tkf91_indel_logl_() {
         record!("R5", b"--N-------"),
     ]);
     let msa = MASA::from_aligned_with_ancestral(seqs, &tree).unwrap();
-    let m = msa.len() as f64;
     let phylo = PhyloInfo {
         msa,
         tree: tree.clone(),
@@ -882,4 +888,91 @@ fn tkf_modify_model_params_costs_match() {
     modify_model_params_costs_match_template::<WAG>(protein_alphabet(), Submodel::TKFIndel);
     modify_model_params_costs_match_template::<BLOSUM>(protein_alphabet(), Submodel::TKFIndel);
     modify_model_params_costs_match_template::<HIVB>(protein_alphabet(), Submodel::TKFIndel);
+}
+
+fn find_fasta_files(dir: &Path, files: &mut Vec<PathBuf>) {
+    for entry_result in fs::read_dir(dir).unwrap() {
+        let entry = entry_result.unwrap();
+        let path = entry.path();
+        if path.is_dir() {
+            // recurse into subdirectory
+            find_fasta_files(&path, files);
+        } else if path
+            .extension()
+            .map(|ext| ext == "fasta" || ext == "aln")
+            .unwrap_or(false)
+        {
+            files.push(path);
+        }
+    }
+}
+
+#[test]
+fn tkf_plot_r() {
+    let base_dir = Path::new("./data/benchmark-datasets/");
+    let n = 1000;
+    let output_dir = Path::new("r_out");
+    fs::create_dir_all(output_dir).unwrap();
+
+    let mut fasta_files = Vec::new();
+    find_fasta_files(base_dir, &mut fasta_files);
+
+    for path in fasta_files {
+        let file_name = path.file_stem().unwrap().to_string_lossy(); // file name without extension
+
+        // i want the two folder names above the file
+        let folder_one_up_name = path
+            .parent()
+            .and_then(|p| p.file_name())
+            .unwrap()
+            .to_str()
+            .unwrap();
+        let folder_two_up_name = path
+            .parent()
+            .and_then(|p| p.parent())
+            .and_then(|p| p.file_name())
+            .unwrap()
+            .to_str()
+            .unwrap();
+        println!("  Processing file: {:?}", file_name);
+
+        let out_file_name = format!(
+            "{}_{}_{}.csv",
+            folder_two_up_name, folder_one_up_name, file_name
+        );
+        println!("    Output file: {}", out_file_name);
+        let out_file = output_dir.join(out_file_name);
+        let file = fs::File::create(&out_file).unwrap();
+        let mut writer = BufWriter::new(file);
+
+        // CSV header
+        let _ = writeln!(writer, "r,logl");
+
+        let phylo = PhyloInfoBuilder::new(&path).build_with_ancestors().unwrap();
+
+        for i in 1..n {
+            let r = (i as f64) / (n as f64);
+            let tkf_indel_cost = TKF92IndelCostBuilder::new(0.1, 0.2, r, phylo.clone())
+                .build()
+                .unwrap();
+            let logl = tkf_indel_cost.logl();
+
+            let _ = writeln!(writer, "{},{}", r, logl);
+        }
+
+        let _ = writer.flush();
+    }
+}
+
+#[test]
+fn tkf_test_single_benchmark_file() {
+    let path = Path::new("./data/benchmark-datasets/dna/easy/wickd3a_7771.processed.fasta");
+    let phylo = PhyloInfoBuilder::new(path)
+        .build_with_ancestors_strip(Some((824, 825)))
+        .unwrap();
+    let tkf_indel_cost = TKF92IndelCostBuilder::new(0.1, 0.2, 0.3, phylo)
+        .build()
+        .unwrap();
+    let logl = tkf_indel_cost.logl();
+    println!("Log-likelihood: {}", logl);
 }

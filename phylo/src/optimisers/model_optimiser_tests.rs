@@ -12,6 +12,7 @@ use crate::substitution_models::{
     dna_models::*, protein_models::*, FreqVector, QMatrix, QMatrixMaker, SubstModel,
     SubstitutionCostBuilder as SCB,
 };
+use crate::tkf_model::TKF92CostBuilder;
 
 #[test]
 fn likelihood_improves_k80() {
@@ -567,4 +568,38 @@ fn stop_condition_epsilon() {
     assert_eq!(result.cost.cost(), result.final_cost);
     let mut costs = result.costs;
     assert!(costs.pop().unwrap() - costs.pop().unwrap() < epsilon);
+}
+
+// test opti with and withtout freq optimisation
+// can i also test that tk92 is always better because i can make r towars zero to get tkf91?
+#[test]
+fn tkf_model_opti() {
+    let fldr = Path::new("./data/sim");
+    let info = PIB::with_attrs(fldr.join("K80/K80.fasta"), fldr.join("tree.newick"))
+        .build_with_ancestors()
+        .unwrap();
+    let subst_model = SubstModel::<HKY>::new(&[], &[2.0]);
+    let c = TKF92CostBuilder::new(0.8, 1.0, 0.3, subst_model.clone(), info)
+        .build()
+        .unwrap();
+
+    let initial_llik = c.cost();
+    let o = ModelOptimiser::new(c.clone(), FrequencyOptimisation::Fixed)
+        .run()
+        .unwrap();
+    let intermediate_cost = o.final_cost;
+    assert_eq!(initial_llik, o.initial_cost);
+    assert_eq!(subst_model.freqs(), o.cost.freqs());
+    assert_eq!(o.final_cost, o.cost.cost());
+    assert_ne!(c.params(), o.cost.params());
+    assert!(o.initial_cost < o.final_cost);
+
+    let o = ModelOptimiser::new(o.cost.clone(), FrequencyOptimisation::Empirical)
+        .run()
+        .unwrap();
+    assert_eq!(intermediate_cost, o.initial_cost);
+    assert_eq!(o.final_cost, o.cost.cost());
+    assert_ne!(c.params(), o.cost.params());
+    assert_ne!(subst_model.freqs(), o.cost.freqs());
+    assert!(o.initial_cost < o.final_cost);
 }
