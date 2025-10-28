@@ -49,7 +49,7 @@ pub trait QMatrix: Debug + Clone + Display {
         self.params()[param]
     }
     fn set_param(&mut self, param: usize, value: f64);
-    /// Returns the valid range for a model parameter \[min, max], inclusive.
+    /// Returns the valid range for a model parameter [min, max], inclusive.
     fn param_range(&self, param: usize) -> ParamRange;
     fn freqs(&self) -> &FreqVector;
     fn set_freqs(&mut self, freqs: FreqVector);
@@ -188,6 +188,10 @@ impl<Q: QMatrix, A: Alignment> ModelSearchCost for SubstitutionCost<Q, A> {
         self.logl(&self.info)
     }
 
+    fn param_count(&self) -> usize {
+        self.model.qmatrix.param_count()
+    }
+
     fn param(&self, param: usize) -> f64 {
         self.model.qmatrix.param(param)
     }
@@ -197,11 +201,7 @@ impl<Q: QMatrix, A: Alignment> ModelSearchCost for SubstitutionCost<Q, A> {
         self.tmp.borrow_mut().node_models_valid.fill(false);
     }
 
-    fn param_count(&self) -> usize {
-        self.model.qmatrix.param_count()
-    }
-
-    fn param_range(&self, param: usize) -> crate::likelihood::ParamRange {
+    fn param_range(&self, param: usize) -> ParamRange {
         self.model.qmatrix.param_range(param)
     }
 

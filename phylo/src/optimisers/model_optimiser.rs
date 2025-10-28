@@ -130,6 +130,7 @@ impl<C: ModelSearchCost + Display + Clone> ModelOptimiser<C> {
         let range = self.c.param_range(param);
         let min = range.0;
         let max = range.1.min(start_value * 100.0);
+        debug_assert!(min <= start_value && start_value <= max);
         let gss = BrentOpt::new(min, max);
         let res = Executor::new(optimiser, gss)
             .configure(|_| IterState::new().param(start_value).max_iters(500))
