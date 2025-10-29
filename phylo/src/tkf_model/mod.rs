@@ -343,9 +343,9 @@ fn valid_tkf_indel_parameters(lambda: f64, mu: f64, r: f64) -> Vec<f64> {
              DEFAULT_R
         );
         valid_r = DEFAULT_R;
-    } else if !(0.0..1.0).contains(&r) {
+    } else if r <= 0.0 || r >= 1.0 {
         warn!(
-            "Tried to set r to invalid value {}. It must be in [0, 1). Setting r to 0.5",
+            "Tried to set r to invalid value {}. It must be in (0, 1). Setting r to 0.5",
             r
         );
         valid_r = DEFAULT_R;
@@ -366,7 +366,7 @@ impl<AA: AncestralAlignment> TKF91IndelCostBuilder<AA> {
 
     pub fn build(self) -> Result<TKFIndelCost<AA, TKF91IndelModel>> {
         let model = TKF91IndelModel {
-            params: valid_tkf_indel_parameters(self.lambda, self.mu, 0.0),
+            params: valid_tkf_indel_parameters(self.lambda, self.mu, DEFAULT_R)[..2].to_vec(),
         };
         let info = TKFIndelModelInfo::new::<_, TKF91IndelModel>(&self.phylo);
         Ok(TKFIndelCost {
@@ -449,7 +449,7 @@ impl<Q: QMatrix, AA: AncestralAlignment> TKF91CostBuilder<Q, AA> {
         }
 
         let model = TKF91IndelModel {
-            params: valid_tkf_indel_parameters(self.lambda, self.mu, 0.0),
+            params: valid_tkf_indel_parameters(self.lambda, self.mu, DEFAULT_R)[..2].to_vec(),
         };
         let info = TKFIndelModelInfo::new::<_, TKF91IndelModel>(&self.phylo);
         let tkf_cost = TKFIndelCost {

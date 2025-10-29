@@ -165,7 +165,7 @@ fn tkf92_indel_logl_without_aggregation<AA: AncestralAlignment>(
 
 #[test]
 fn tkf_beta() {
-    assert_relative_eq!(b(0.3, 0.5, 0.7), 0.5461782813185221)
+    assert_relative_eq!(b(0.3, 0.5, 0.7), 0.5461782813185221);
 }
 
 #[test]
@@ -176,7 +176,8 @@ fn tkf_log_i1() {
     let time = 1.0;
     let b = b(l, m, time);
     // act & assert
-    assert_relative_eq!(log_i1(l, b), -0.8172396554020775) // log((1-2(1-e^(-1))/(3-2*e^(-1)))
+    assert_relative_eq!(log_i1(l, b), -0.8172396554020775);
+    // log((1-2(1-e^(-1))/(3-2*e^(-1)))
 }
 
 #[test]
@@ -187,7 +188,7 @@ fn tkf_log_n1() {
     let time = 0.5;
     let b = b(l, m, time);
     // act & assert
-    assert_relative_eq!(log_n1(l, m, b, time), -2.732135332549935)
+    assert_relative_eq!(log_n1(l, m, b, time), -2.732135332549935);
     // log((1-e^(-1.5) - 3(1-e^(-.5))/(3-2*e^(-.5)) )* (1-2(1-e^(-.5))/(3-2*e^(-.5)))   (2(1-e^(-1))/(3-2*e^(-1)))^0)
 }
 
@@ -199,7 +200,8 @@ fn tkf_n0() {
     let time = 0.5;
     let b = b(l, m, time);
     // act & assert
-    assert_relative_eq!(n0(m, b), 0.6605755607027574) // (3(1-e^(-.5))/(3-2*e^(-.5)))
+    assert_relative_eq!(n0(m, b), 0.6605755607027574);
+    // (3(1-e^(-.5))/(3-2*e^(-.5)))
 }
 
 #[test]
@@ -210,7 +212,7 @@ fn tkf_h1() {
     let time = 1.5;
     let b = b(l, m, time);
     // act & assert
-    assert_relative_eq!(h1(l, m, b, time), 0.004350089645603061)
+    assert_relative_eq!(h1(l, m, b, time), 0.004350089645603061);
     // e^(-4.5) * (1-2(1-e^(-1.5))/(3-2*e^(-1.5)))
 }
 
@@ -684,18 +686,24 @@ fn tkf_cost_builder_fails() {
     let subst_model = SubstModel::<GTR>::new(&[0.1, 0.3, 0.4, 0.2], &[1.2, 0.5, 5.0, 1.0, 1.0]);
 
     // act
-    let tkf91_cost = TKF91CostBuilder::new(0.1, 0.2, subst_model.clone(), phylo.clone())
+    let tkf91_err_msg = TKF91CostBuilder::new(0.1, 0.2, subst_model.clone(), phylo.clone())
         .build()
         .unwrap_err()
         .to_string();
-    let tkf92_cost = TKF92CostBuilder::new(0.1, 0.2, 0.3, subst_model, phylo)
+    let tkf92_err_msg = TKF92CostBuilder::new(0.1, 0.2, 0.3, subst_model, phylo)
         .build()
         .unwrap_err()
         .to_string();
 
     // assert
-    assert_eq!(tkf91_cost, "Alphabet mismatch between model and alignment");
-    assert_eq!(tkf92_cost, "Alphabet mismatch between model and alignment");
+    assert_eq!(
+        tkf91_err_msg,
+        "Alphabet mismatch between model and alignment"
+    );
+    assert_eq!(
+        tkf92_err_msg,
+        "Alphabet mismatch between model and alignment"
+    );
 }
 
 #[test]
