@@ -13,7 +13,7 @@ use crate::parsimony_presence_absence::ParsimonyPresenceAbsence;
 use crate::phylo_info::PhyloInfo;
 use crate::random::{DefaultGenerator, RandomSource};
 use crate::tree::{build_nj_tree_w_rng, Tree};
-use crate::{record, Result};
+use crate::Result;
 
 pub struct PhyloInfoBuilder<A: Alignment, AA: AncestralAlignment> {
     sequence_file: PathBuf,
@@ -159,21 +159,10 @@ impl<A: Alignment, AA: AncestralAlignment> PhyloInfoBuilder<A, AA> {
     }
 
     pub fn build_with_ancestors(self) -> Result<PhyloInfo<AA>> {
-        self.build_with_ancestors_w_rng(&DefaultGenerator::default(), None)
+        self.build_with_ancestors_w_rng(&DefaultGenerator::default())
     }
 
-    pub fn build_with_ancestors_strip(
-        self,
-        range: Option<(usize, usize)>,
-    ) -> Result<PhyloInfo<AA>> {
-        self.build_with_ancestors_w_rng(&DefaultGenerator::default(), range)
-    }
-
-    pub fn build_with_ancestors_w_rng(
-        self,
-        rng: &impl RandomSource,
-        range: Option<(usize, usize)>,
-    ) -> Result<PhyloInfo<AA>> {
+    pub fn build_with_ancestors_w_rng(self, rng: &impl RandomSource) -> Result<PhyloInfo<AA>> {
         let sequences = self.read_sequences()?;
         let mut tree = match &self.tree_file {
             Some(tree_file) => self.read_tree(tree_file)?,
@@ -188,27 +177,7 @@ impl<A: Alignment, AA: AncestralAlignment> PhyloInfoBuilder<A, AA> {
                 info!(
                     "Aligned sequences without ancestral sequences. Inferring ancestral sequences"
                 );
-                let stripped_seqs = if let Some((start, end)) = range {
-                    let seq_len = sequences.s.first().unwrap().seq().len();
-                    if end > seq_len || start >= end {
-                        bail!(
-                            "Invalid range ({start}, {end}) for sequences of length {} ",
-                            seq_len
-                        );
-                    }
-                    info!("Stripping sequences to range ({start}, {end})");
-                    let mut new_records = Vec::new();
-                    for s in sequences.s {
-                        let new_seq = s.seq()[start..end].to_vec();
-                        let new_record = record!(s.id(), s.desc(), &new_seq);
-
-                        new_records.push(new_record);
-                    }
-                    Sequences::with_alphabet(new_records, sequences.alphabet)
-                } else {
-                    sequences.clone()
-                };
-                AA::from_aligned(stripped_seqs, &tree)
+                AA::from_aligned(sequences, &tree)
             } else {
                 info!("Sequences are not aligned, aligning");
                 let leaf_msa = self

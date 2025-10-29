@@ -452,9 +452,8 @@ impl AncestralAlignment for MASA {
         &self.ancestral_maps
     }
 
-    // This is needed bc in TKF92 we need to re-estimate the ancestral maps after
-    // a tree move is applied. Alternatively, we could keep track of the changes
-    // in the TKF model info and output this at the end.
+    // This is needed because with the TKF models we need to re-estimate the ancestral maps after
+    // a tree move is applied.
     fn update_ancestral_map(&mut self, node_idx: &NodeIdx, map: Mapping) {
         if let Some(anc_map) = self.ancestral_maps.get_mut(node_idx) {
             *anc_map = map;

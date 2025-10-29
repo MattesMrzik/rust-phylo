@@ -28,9 +28,11 @@ static DEFAULT_R: f64 = 0.5;
 
 #[allow(clippy::upper_case_acronyms)]
 pub trait TKF: Clone + Display {
+    // TODO: it might be better for model optimisation to have parameter lambda and scale s = mu/lambda,
+    // because of the constraint that mu > lambda.
     fn lambda(&self) -> f64;
     fn mu(&self) -> f64;
-    /// TKF91 has 2 parameters: lambda and mu, TKF92 has 3 parameters: lambda, mu and r.
+    // TKF91 has 2 parameters: lambda and mu, TKF92 has 3 parameters: lambda, mu and r.
     fn params(&self) -> &[f64];
     fn set_param(&mut self, i: usize, v: f64) -> bool;
     fn insertion_prob_at_root(&self) -> f64;
@@ -42,17 +44,6 @@ pub trait TKF: Clone + Display {
 #[derive(Clone, Debug, PartialEq)]
 pub struct TKF91IndelModel {
     params: Vec<f64>,
-}
-
-impl Display for TKF91IndelModel {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "TKF91 with lambda = {}, mu = {}",
-            self.lambda(),
-            self.mu(),
-        )
-    }
 }
 
 impl TKF for TKF91IndelModel {
@@ -112,10 +103,19 @@ impl TKF for TKF91IndelModel {
     }
 }
 
+impl Display for TKF91IndelModel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "TKF91 with lambda = {}, mu = {}",
+            self.lambda(),
+            self.mu(),
+        )
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct TKF92IndelModel {
-    // TODO: it might be better for model optimisation to have parameter lambda and scale s = mu/lambda,
-    // because of the constraint that mu > lambda.
     params: Vec<f64>,
 }
 
@@ -138,8 +138,8 @@ impl TKF for TKF92IndelModel {
         &self.params
     }
 
-    /// Sets the parameter if it is valid then returns true, otherwise the parameter is not changed
-    /// and false is returned.
+    /// Sets the parameter if it is valid then returns true,
+    /// otherwise the parameter is not changed and false is returned.
     /// This assumes that the other parameters are valid
     fn set_param(&mut self, i: usize, v: f64) -> bool {
         if i > 2 {
@@ -222,18 +222,18 @@ impl Display for TKF92IndelModel {
 /// <coming paper>.
 #[derive(Clone, Debug)]
 struct TKFIndelModelInfo {
-    /// aggregated_x[node, block] = the product of the xs of all the edges in the subtree below
+    /// aggregated_x[(node, block)] = the product of the xs of all the edges in the subtree below
     /// <node> (including the x of <node> itself) for the block with id <block>.
     aggregated_x: DMatrix<f64>,
 
-    /// node_x[node, block] = the x value for the edge above <node> for the block with id <block>.
+    /// node_x[(node, block)] = the x value for the edge above <node> for the block with id <block>.
     node_x: DMatrix<f64>,
 
-    /// node_factor_n[node, block] = the factor_n value for the edge above <node> for the block
+    /// node_factor_n[(node, block)] = the factor_n value for the edge above <node> for the block
     /// with id <block>.
     node_factor_n: DMatrix<f64>,
 
-    /// factor_ns[node, block] = n1/ (n0 * lambda * beta(v.blen)) if there is a node <v> in the
+    /// factor_ns[(node, block)] = n1/ (n0 * lambda * beta(v.blen)) if there is a node <v> in the
     /// subtree rooted in <node> where the current event is an insertion and the previous one was a deletion.
     factor_ns: DMatrix<f64>,
 
@@ -728,8 +728,6 @@ impl<AA: AncestralAlignment, T: TKF> TKFIndelCost<AA, T> {
             Leaf(_) => self.phylo.msa.leaf_map(node_idx)[site].is_none(),
         };
 
-        let time = self.phylo.tree.node(node_idx).blen;
-
         if block_id == 0 {
             self.model_info.borrow_mut().last_event_deletion[node_id] = false;
         }
@@ -737,15 +735,16 @@ impl<AA: AncestralAlignment, T: TKF> TKFIndelCost<AA, T> {
         let lambda = self.model.lambda();
         let mu = self.model.mu();
         let beta = self.model_info.borrow().beta[node_id];
+        let blen = self.phylo.tree.node(node_idx).blen;
 
         if !parent_is_gap && current_is_gap {
             // deletion
             x *= *self.model_info.borrow_mut().n0[node_id].get_or_insert_with(|| n0(mu, beta));
             self.model_info.borrow_mut().last_event_deletion[node_id] = true;
         } else if !parent_is_gap && !current_is_gap {
-            // homologue
+            // homolog
             x *= *self.model_info.borrow_mut().h1[node_id]
-                .get_or_insert_with(|| h1(lambda, mu, beta, time));
+                .get_or_insert_with(|| h1(lambda, mu, beta, blen));
             self.model_info.borrow_mut().last_event_deletion[node_id] = false;
         } else if parent_is_gap && !current_is_gap {
             // insertion
@@ -753,7 +752,7 @@ impl<AA: AncestralAlignment, T: TKF> TKFIndelCost<AA, T> {
                 let n0_option = self.model_info.borrow().n0[node_id];
                 factor_n +=
                     *self.model_info.borrow_mut().factor_n[node_id].get_or_insert_with(|| {
-                        let mut factor_n = log_n1(lambda, mu, beta, time);
+                        let mut factor_n = log_n1(lambda, mu, beta, blen);
                         factor_n -= (lambda * beta).ln();
                         // since last event was a deletion n0 is not None
                         factor_n -= n0_option.unwrap().ln();
