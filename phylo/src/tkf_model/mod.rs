@@ -260,7 +260,7 @@ struct TKFIndelModelInfo {
     /// The lengths of the blocks.
     block_lens: Vec<usize>,
 
-    /// last_event_deletion[node] = true if the last event was a deletion for a that <node>.
+    /// last_event_deletion[node] = true if the last event was a deletion for that <node>.
     last_event_deletion: Vec<bool>,
 
     /// valid[node] = true if the intermediate values for that <node> are valid.
