@@ -251,7 +251,7 @@ struct TKFIndelModelInfo {
     /// values for factor_n that can be reused.
     factor_n: Vec<Option<f64>>,
 
-    /// beta[node] = beta(node.blen)).
+    /// beta[node] = beta(node.blen).
     beta: Vec<f64>,
 
     /// The right exclusive interval borders of the blocks.
