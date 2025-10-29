@@ -264,7 +264,7 @@ pub(crate) fn set_missing_tree_node_ids(tree: &Tree) -> Result<Tree> {
                 new_id = format!("I{count}");
             }
             tree_with_all_ids.nodes[usize::from(node_idx)].id = new_id;
-            info!("Set missing id of node {node_idx} to I{count}");
+            info!("Set missing id of node {node_idx} to {new_id}");
         } else if !seen_user_set_ids.insert(id.to_string()) {
             bail!("Duplicate id ({id}) found in the leaves of the tree");
         }
