@@ -9,7 +9,7 @@ use nalgebra::{DMatrix, DVector};
 
 use crate::alignment::AncestralAlignment;
 use crate::evolutionary_models::EvoModel;
-use crate::likelihood::ModelSearchCost;
+use crate::likelihood::{ModelSearchCost, PARAM_RANGE_UNIT_INTERVAL_EXCLUSIVE};
 use crate::phylo_info::PhyloInfo;
 use crate::substitution_models::{
     FreqVector, QMatrix, SubstModel, SubstitutionCost, SubstitutionCostBuilder as SCB,
@@ -30,6 +30,7 @@ static DEFAULT_R: f64 = 0.5;
 pub trait TKF: Clone + Display {
     fn lambda(&self) -> f64;
     fn mu(&self) -> f64;
+    /// TKF91 has 2 parameters: lambda and mu, TKF92 has 3 parameters: lambda, mu and r.
     fn params(&self) -> &[f64];
     fn set_param(&mut self, i: usize, v: f64) -> bool;
     fn insertion_prob_at_root(&self) -> f64;
@@ -221,40 +222,36 @@ impl Display for TKF92IndelModel {
 /// <coming paper>.
 #[derive(Clone, Debug)]
 struct TKFIndelModelInfo {
-    /// aggregated_x\[node, block] = the product of the xs of all the edges in the subtree below
+    /// aggregated_x[node, block] = the product of the xs of all the edges in the subtree below
     /// <node> (including the x of <node> itself) for the block with id <block>.
     aggregated_x: DMatrix<f64>,
 
-    /// node_x\[node, block] = the x value for the edge above <node> for the block with id <block>.
-    // TODO: this could be optimized to only store the values for the dirty nodes. Then, we would
-    // have to determine these values not during the cost calculation but during the tree update.
+    /// node_x[node, block] = the x value for the edge above <node> for the block with id <block>.
     node_x: DMatrix<f64>,
 
-    /// node_factor_n\[node, block] = the factor_n value for the edge above <node> for the block
+    /// node_factor_n[node, block] = the factor_n value for the edge above <node> for the block
     /// with id <block>.
-    // TODO: this could be optimized to only store the values for the dirty nodes. Then, we would
-    // have to determine these values not during the cost calculation but during the tree update.
     node_factor_n: DMatrix<f64>,
 
-    /// factor_ns\[node, block] = n1/ (n0 * lambda * beta(v.blen)) if there is a node <v> in the subtree
-    /// where the current event is an insertion and the previous one was a deletion.
+    /// factor_ns[node, block] = n1/ (n0 * lambda * beta(v.blen)) if there is a node <v> in the
+    /// subtree rooted in <node> where the current event is an insertion and the previous one was a deletion.
     factor_ns: DMatrix<f64>,
 
-    /// n0\[node] = n0(node.blen), may hold already computed values for n0 that can be reused.
+    /// n0[node] = n0(node.blen), may hold previously computed values for n0 that can be reused.
     n0: Vec<Option<f64>>,
 
-    /// h1\[node] = h1(node.blen), may hold already computed values for h1 that can be reused.
+    /// h1[node] = h1(node.blen), may hold previously computed values for h1 that can be reused.
     h1: Vec<Option<f64>>,
 
-    /// insertion\[node] = l * beta * (1.0 - r) / r, may hold already computed values for insertion
+    /// insertion[node] = l * beta[node] * (1.0 - r) / r, may hold previously computed values for insertion
     /// that can be reused.
     insertion: Vec<Option<f64>>,
 
-    /// factor_n\[node] = n1/ (n0 * lambda * beta(node.blen)), may hold already computed values for factor_n that can be
-    /// reused.
+    /// factor_n[node] = n1/ (n0 * lambda * beta(node.blen)), may hold previously computed
+    /// values for factor_n that can be reused.
     factor_n: Vec<Option<f64>>,
 
-    /// beta\[usize::from(node)] = beta(node.blen)).
+    /// beta[node] = beta(node.blen)).
     beta: Vec<f64>,
 
     /// The right exclusive interval borders of the blocks.
@@ -263,10 +260,10 @@ struct TKFIndelModelInfo {
     /// The lengths of the blocks.
     block_lens: Vec<usize>,
 
-    /// last_event_deletion\[usize::from(node)] = true if the last event was a deletion for a that <node>.
+    /// last_event_deletion[node] = true if the last event was a deletion for a that <node>.
     last_event_deletion: Vec<bool>,
 
-    /// valid\[usize::from(node)] = true if the intermediate values for that <node> are valid.
+    /// valid[node] = true if the intermediate values for that <node> are valid.
     valid: Vec<bool>,
 }
 
@@ -417,7 +414,6 @@ pub struct TKFCost<Q: QMatrix + Display, T: TKF, AA: AncestralAlignment> {
     // tkf92 cost, which would duplicate some code.
     indel_cost: TKFIndelCost<AA, T>,
     subst_cost: SubstitutionCost<Q, AA>,
-    combined_parameters: Vec<f64>,
 }
 
 impl<Q: QMatrix, T: TKF, AA: AncestralAlignment> Display for TKFCost<Q, T, AA> {
@@ -461,11 +457,9 @@ impl<Q: QMatrix, AA: AncestralAlignment> TKF91CostBuilder<Q, AA> {
             phylo: self.phylo.clone(),
             model_info: RefCell::new(info),
         };
-        let combined_parameters = [tkf_cost.model.params(), self.subst_model.params()].concat();
         Ok(TKFCost {
             indel_cost: tkf_cost,
             subst_cost: SCB::new(self.subst_model, self.phylo).build().unwrap(),
-            combined_parameters,
         })
     }
 }
@@ -509,11 +503,9 @@ impl<Q: QMatrix, AA: AncestralAlignment> TKF92CostBuilder<Q, AA> {
             phylo: self.phylo.clone(),
             model_info: RefCell::new(info),
         };
-        let combined_parameters = [tkf_cost.model.params(), self.subst_model.params()].concat();
         Ok(TKFCost {
             indel_cost: tkf_cost,
             subst_cost: SCB::new(self.subst_model, self.phylo).build().unwrap(),
-            combined_parameters,
         })
     }
 }
@@ -523,14 +515,27 @@ impl<AA: AncestralAlignment, T: TKF> ModelSearchCost for TKFIndelCost<AA, T> {
         self.logl()
     }
 
+    fn param_count(&self) -> usize {
+        self.model.params().len()
+    }
+
+    fn param(&self, param: usize) -> f64 {
+        self.model.params()[param]
+    }
+
     fn set_param(&mut self, i: usize, v: f64) {
         if self.model.set_param(i, v) {
             self.model_info.borrow_mut().valid.fill(false);
         }
     }
 
-    fn params(&self) -> &[f64] {
-        self.model.params()
+    fn param_range(&self, param: usize) -> crate::likelihood::ParamRange {
+        match param {
+            0 => (f64::EPSILON, self.model.mu()),
+            1 => (self.model.lambda(), f64::MAX),
+            2 => PARAM_RANGE_UNIT_INTERVAL_EXCLUSIVE,
+            _ => panic!("Invalid parameter index for TKF model: {}", param),
+        }
     }
 
     fn set_freqs(&mut self, _: FreqVector) {}
@@ -554,23 +559,36 @@ impl<Q: QMatrix, T: TKF, AA: AncestralAlignment> ModelSearchCost for TKFCost<Q, 
         self.indel_cost.cost() + self.subst_cost.cost()
     }
 
+    fn param_count(&self) -> usize {
+        self.indel_cost.model.params().len() + self.subst_cost.model.qmatrix.params().len()
+    }
+
+    fn param(&self, param: usize) -> f64 {
+        let num_params_indel_model = self.indel_cost.param_count();
+        if param < num_params_indel_model {
+            return self.indel_cost.param(param);
+        }
+        let param = param - num_params_indel_model;
+        self.subst_cost.param(param)
+    }
+
     fn set_param(&mut self, i: usize, v: f64) {
-        let num_params_indel_model = self.indel_cost.model.params().len();
+        let num_params_indel_model = self.indel_cost.param_count();
         if i < num_params_indel_model {
             self.indel_cost.set_param(i, v);
             return;
         }
         let i = i - num_params_indel_model;
         self.subst_cost.set_param(i, v);
-        self.combined_parameters = [
-            self.indel_cost.model.params(),
-            self.subst_cost.model.params(),
-        ]
-        .concat();
     }
 
-    fn params(&self) -> &[f64] {
-        &self.combined_parameters
+    fn param_range(&self, param: usize) -> crate::likelihood::ParamRange {
+        let num_params_indel_model = self.indel_cost.param_count();
+        if param < num_params_indel_model {
+            return self.indel_cost.param_range(param);
+        }
+        let param = param - num_params_indel_model;
+        self.subst_cost.param_range(param)
     }
 
     fn set_freqs(&mut self, freqs: FreqVector) {
@@ -588,11 +606,9 @@ impl<Q: QMatrix, T: TKF, AA: AncestralAlignment> ModelSearchCost for TKFCost<Q, 
 
 impl<AA: AncestralAlignment, T: TKF> TKFIndelCost<AA, T> {
     fn logl(&self) -> f64 {
-        println!("{}", self.phylo.tree.to_newick());
         for node_idx in self.phylo.tree.postorder() {
             match node_idx {
                 Internal(_) => {
-                    println!("{:?}, {node_idx}", self.phylo.msa.ancestral_map(node_idx));
                     if self.phylo.tree.root == *node_idx {
                         self.set_root();
                     } else {
@@ -620,7 +636,6 @@ impl<AA: AncestralAlignment, T: TKF> TKFIndelCost<AA, T> {
             let block_len = self.model_info.borrow().block_lens[block_id];
             logl += self.model_info.borrow().factor_ns[(root_id, block_id)];
             let x = self.model_info.borrow().aggregated_x[(root_id, block_id)];
-            println!("root x for block {} is {}", block_id, x);
             logl += self.model.block_prob(x, block_len);
         }
         logl
@@ -664,16 +679,6 @@ impl<AA: AncestralAlignment, T: TKF> TKFIndelCost<AA, T> {
         let mu = self.model.mu();
         let t = self.phylo.tree.node(node_idx).blen;
         self.model_info.borrow_mut().beta[node_id] = b(lambda, mu, t);
-        if self.model_info.borrow().beta[node_id] <= 0.0 {
-            panic!(
-                "Beta value is non-positive at node {}: beta = {}, lambda = {}, mu = {}, time = {}",
-                self.phylo.tree.node(node_idx).id,
-                self.model_info.borrow().beta[node_id],
-                lambda,
-                mu,
-                t
-            );
-        }
         self.model_info.borrow_mut().n0[node_id] = None;
         self.model_info.borrow_mut().h1[node_id] = None;
         self.model_info.borrow_mut().insertion[node_id] = None;
@@ -683,20 +688,10 @@ impl<AA: AncestralAlignment, T: TKF> TKFIndelCost<AA, T> {
     fn set_node_values(&self, node_idx: &NodeIdx, block_id: usize, mut x: f64, mut factor_n: f64) {
         let node_id = usize::from(node_idx);
         self.model_info.borrow_mut().node_x[(node_id, block_id)] = x;
-        println!(
-            "node x is zero {} at node {}",
-            x,
-            self.phylo.tree.node(node_idx).id
-        );
         self.model_info.borrow_mut().node_factor_n[(node_id, block_id)] = factor_n;
         for child in &self.phylo.tree.node(node_idx).children {
             let child_id = usize::from(child);
             x *= self.model_info.borrow().aggregated_x[(child_id, block_id)];
-            println!(
-                "child x is {} at node {}",
-                x,
-                self.phylo.tree.node(child).id
-            );
             factor_n += self.model_info.borrow().factor_ns[(child_id, block_id)];
         }
         self.model_info.borrow_mut().factor_ns[(node_id, block_id)] = factor_n;

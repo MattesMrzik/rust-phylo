@@ -576,9 +576,8 @@ fn stop_condition_epsilon() {
     assert!(costs.pop().unwrap() - costs.pop().unwrap() < epsilon);
 }
 
-// test opti with and withtout freq optimisation
-// can i also test that tk92 is always better because i can make r towars zero to get tkf91?
 #[test]
+#[cfg_attr(feature = "ci_coverage", ignore)]
 fn tkf_model_opti() {
     let fldr = Path::new("./data/sim");
     let info = PIB::with_attrs(fldr.join("K80/K80.fasta"), fldr.join("tree.newick"))
@@ -597,7 +596,9 @@ fn tkf_model_opti() {
     assert_eq!(initial_llik, o.initial_cost);
     assert_eq!(subst_model.freqs(), o.cost.freqs());
     assert_eq!(o.final_cost, o.cost.cost());
-    assert_ne!(c.params(), o.cost.params());
+    for param in 0..c.param_count() {
+        assert_ne!(c.param(param), o.cost.param(param));
+    }
     assert!(o.initial_cost < o.final_cost);
 
     let o = ModelOptimiser::new(o.cost.clone(), FrequencyOptimisation::Empirical)
@@ -605,7 +606,9 @@ fn tkf_model_opti() {
         .unwrap();
     assert_eq!(intermediate_cost, o.initial_cost);
     assert_eq!(o.final_cost, o.cost.cost());
-    assert_ne!(c.params(), o.cost.params());
+    for param in 0..c.param_count() {
+        assert_ne!(c.param(param), o.cost.param(param));
+    }
     assert_ne!(subst_model.freqs(), o.cost.freqs());
     assert!(o.initial_cost < o.final_cost);
 }

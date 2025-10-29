@@ -179,11 +179,9 @@ impl<A: Alignment, AA: AncestralAlignment> PhyloInfoBuilder<A, AA> {
             Some(tree_file) => self.read_tree(tree_file)?,
             None => {
                 info!("Building NJ tree from sequences");
-                println!("Building NJ tree from sequences");
                 build_nj_tree_w_rng(&sequences, rng)?
             }
         };
-        println!("done with tree");
         let msa = if sequences.len() == tree.n {
             tree = set_missing_tree_node_ids(&tree)?;
             if sequences.aligned {
@@ -199,13 +197,11 @@ impl<A: Alignment, AA: AncestralAlignment> PhyloInfoBuilder<A, AA> {
                         );
                     }
                     info!("Stripping sequences to range ({start}, {end})");
-                    println!("Stripping sequences to range ({start}, {end})");
                     let mut new_records = Vec::new();
                     for s in sequences.s {
                         let new_seq = s.seq()[start..end].to_vec();
                         let new_record = record!(s.id(), s.desc(), &new_seq);
 
-                        println!("new record {new_record}");
                         new_records.push(new_record);
                     }
                     Sequences::with_alphabet(new_records, sequences.alphabet)
@@ -215,7 +211,6 @@ impl<A: Alignment, AA: AncestralAlignment> PhyloInfoBuilder<A, AA> {
                 AA::from_aligned(stripped_seqs, &tree)
             } else {
                 info!("Sequences are not aligned, aligning");
-                println!("Sequences are not aligned, aligning");
                 let leaf_msa = self
                     .aligner
                     .unwrap_or(Box::new(ParsimonyAligner::default()))
