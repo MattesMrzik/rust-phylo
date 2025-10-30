@@ -6,6 +6,7 @@ use crate::likelihood::ModelSearchCost;
 use crate::phylo_info::PhyloInfo;
 use crate::substitution_models::{QMatrixMaker, SubstModel, SubstitutionCostBuilder as SCB};
 use crate::substitution_models::{BLOSUM, GTR, HIVB, HKY, JC69, K80, TN93, WAG};
+use crate::tkf_model::tkf92::TKF92IndelModel;
 use crate::tree::NodeIdx::{self, Internal, Leaf};
 use crate::{frequencies, record_wo_desc as record, tree};
 
@@ -98,7 +99,7 @@ fn tkf92_indel_logl_without_aggregation<AA: AncestralAlignment>(
     let tree = &phylo.tree;
     let l = model.lambda();
     let m = model.mu();
-    let r = model.r();
+    let r = model.params()[2];
 
     // for the root
     let mut prob: f64 = (1.0 - l / m).ln();
@@ -300,9 +301,12 @@ fn tkf_set_r(model: &mut TKF92IndelModel) {
 #[test]
 fn tkf91_indel_set_param() {
     // arrange
-    let mut tkf91_indel_model = TKF91IndelModel {
-        params: vec![1.0, 2.0],
-    };
+    let mut tkf91_indel_model =
+        TKF91IndelCostBuilder::new(1.0, 2.0, setup_test_phylo(dna_alphabet()))
+            .build()
+            .unwrap()
+            .model;
+
     // act & assert
     tkf_set_lambda_and_mu(&mut tkf91_indel_model);
     assert!(!tkf91_indel_model.set_param(2, 0.5)); // no r parameter
@@ -311,9 +315,12 @@ fn tkf91_indel_set_param() {
 #[test]
 fn tkf92_indel_set_param() {
     // arrange
-    let mut tkf92_indel_model = TKF92IndelModel {
-        params: vec![1.0, 2.0, 0.3],
-    };
+    let mut tkf92_indel_model =
+        TKF92IndelCostBuilder::new(1.0, 2.0, 0.3, setup_test_phylo(dna_alphabet()))
+            .build()
+            .unwrap()
+            .model;
+
     // act & assert
     tkf_set_lambda_and_mu(&mut tkf92_indel_model);
     tkf_set_r(&mut tkf92_indel_model);
@@ -425,9 +432,10 @@ fn tkf_validate_params_for_builder() {
 #[test]
 fn tkf91_model_fmt() {
     // arrange
-    let tkf_indel_model = TKF91IndelModel {
-        params: vec![1.1, 2.0, 3.0],
-    };
+    let tkf_indel_model = TKF91IndelCostBuilder::new(1.1, 2.0, setup_test_phylo(dna_alphabet()))
+        .build()
+        .unwrap()
+        .model;
 
     // act
     let fmt = format!("{}", tkf_indel_model);
@@ -483,15 +491,17 @@ fn tkf92_indel_cost_fmt() {
 #[test]
 fn tkf92_model_fmt() {
     // arrange
-    let tkf_indel_model = TKF92IndelModel {
-        params: vec![1.1, 2.0, 3.0],
-    };
+    let tkf_indel_model =
+        TKF92IndelCostBuilder::new(1.1, 2.0, 0.3, setup_test_phylo(dna_alphabet()))
+            .build()
+            .unwrap()
+            .model;
 
     // act
     let fmt = format!("{}", tkf_indel_model);
 
     // assert
-    assert_eq!(fmt, "TKF92 with lambda = 1.1, mu = 2, r = 3");
+    assert_eq!(fmt, "TKF92 with lambda = 1.1, mu = 2, r = 0.3");
 }
 
 #[test]
