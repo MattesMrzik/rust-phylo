@@ -218,9 +218,8 @@ fn calc_spr_cost_with_blen_opt<C: TreeSearchCost + Clone + Display>(
     cost_fn.update_tree(new_tree.clone());
 
     let mut move_cost = cost_fn.cost();
-    // If the move_cost is already better, then we dont need to call the blen optimiser
-    // since we do this anyway after the best move for a move location is applied in
-    // the topo_optimiser.
+    // Branch length optimisation is skipped if the model does not support branch lengths
+    // or if the move_cost is already better since we apply the move as is.
     if cost_fn.blen_optimisation() && move_cost <= base_cost {
         // reoptimise branch length at the regraft location
         let blen_opt = optimise_branch(&cost_fn, &regraft)?;

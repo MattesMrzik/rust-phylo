@@ -14,7 +14,7 @@ use crate::parsimony::{BasicParsimonyCost, DolloParsimonyCost};
 use crate::pip_model::PIPCost;
 use crate::random::RandomSource;
 use crate::substitution_models::{QMatrix, SubstitutionCost};
-use crate::tkf_model::{TKFCost, TKFIndelCost, TKF};
+use crate::tkf_model::{TKFCost, TKFIndelCost, TKFModel as TKFM};
 use crate::tree::NodeIdx;
 use crate::Result;
 
@@ -31,8 +31,8 @@ impl<S: ParsimonyScoring, A: Alignment> Compatible<SprOptimiser> for DolloParsim
 impl<S: ParsimonyScoring, A: Alignment> Compatible<NniOptimiser> for DolloParsimonyCost<S, A> {}
 impl<A: Alignment> Compatible<SprOptimiser> for BasicParsimonyCost<A> {}
 impl<A: Alignment> Compatible<NniOptimiser> for BasicParsimonyCost<A> {}
-impl<AA: AncestralAlignment, T: TKF> Compatible<NniOptimiser> for TKFIndelCost<AA, T> {}
-impl<Q: QMatrix, T: TKF, AA: AncestralAlignment> Compatible<NniOptimiser> for TKFCost<Q, T, AA> {}
+impl<AA: AncestralAlignment, T: TKFM> Compatible<NniOptimiser> for TKFIndelCost<AA, T> {}
+impl<Q: QMatrix, T: TKFM, AA: AncestralAlignment> Compatible<NniOptimiser> for TKFCost<Q, T, AA> {}
 
 pub struct TopologyOptimiser<'a, MO, C, R>
 where

@@ -253,7 +253,7 @@ fn tkf92_get_blocks() {
 }
 
 #[cfg(test)]
-fn tkf_set_lambda_and_mu<T: TKF>(model: &mut T) {
+fn tkf_set_lambda_and_mu<T: TKFModel>(model: &mut T) {
     let initial_lambda = model.lambda();
     let initial_mu = model.mu();
     // lambda
@@ -523,7 +523,7 @@ fn tkf_get_and_set_freqs() {
 }
 
 #[test]
-fn tkf91_indel_logl_() {
+fn tkf91_indel_logl() {
     // arrange
     let tree = tree!("(((A1:2.0,B2:2.0)I3:0.3,C4:2.0)R5:1.0);");
     let seqs = Sequences::new(vec![
@@ -600,7 +600,7 @@ fn tkf91_indel_logl_() {
 }
 
 #[test]
-fn tkf92_indel_logl_() {
+fn tkf92_indel_logl() {
     // arrange
     let tree = tree!("(((A1:2.0,B2:2.0)I3:0.3,C4:2.0)R5:1.0);");
     let seqs = Sequences::new(vec![
