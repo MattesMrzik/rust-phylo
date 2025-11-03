@@ -1,6 +1,7 @@
 use std::cell::RefCell;
 use std::fmt::Display;
 
+use fixedbitset::FixedBitSet;
 use lazy_static::lazy_static;
 use nalgebra::{DMatrix, DVector};
 
@@ -66,19 +67,25 @@ struct TKFIndelModelInfo {
     /// subtree rooted in <node> where the current event is an insertion and the previous one was a deletion.
     factor_ns: DMatrix<f64>,
 
-    /// n0[node] = n0(node.blen), may hold previously computed values for n0 that can be reused.
-    n0: Vec<Option<f64>>,
+    /// n0[node] = n0(node.blen)
+    n0: Vec<f64>,
 
-    /// h1[node] = h1(node.blen), may hold previously computed values for h1 that can be reused.
-    h1: Vec<Option<f64>>,
+    /// h1[node] = h1(node.blen)
+    h1: Vec<f64>,
 
-    /// insertion[node] = l * beta[node] * (1.0 - r) / r, may hold previously computed values for insertion
+    /// insertion[node], may hold previously computed values for insertion
     /// that can be reused.
-    insertion: Vec<Option<f64>>,
+    insertion: Vec<f64>,
+
+    /// insertion_value_valid[node] = true if insertion[node] holds a valid value.
+    insertion_value_valid: FixedBitSet,
 
     /// factor_n[node] = n1/ (n0 * lambda * beta(node.blen)), may hold previously computed
     /// values for factor_n that can be reused.
-    factor_n: Vec<Option<f64>>,
+    factor_n: Vec<f64>,
+
+    /// factor_n_value_valid[node] = true if factor_n[node] holds a valid value.
+    factor_n_value_valid: FixedBitSet,
 
     /// beta[node] = beta(node.blen)).
     beta: Vec<f64>,
@@ -87,10 +94,10 @@ struct TKFIndelModelInfo {
     blocks: Vec<usize>,
 
     /// The lengths of the blocks.
-    block_lens: Vec<usize>,
+    block_lengths: Vec<usize>,
 
     /// last_event_deletion[node] = true if the last event was a deletion for a that <node>.
-    last_event_deletion: Vec<bool>,
+    previous_action_deletion: Vec<bool>,
 
     /// valid[node] = true if the intermediate values for that <node> are valid.
     valid: Vec<bool>,
@@ -99,7 +106,7 @@ struct TKFIndelModelInfo {
 impl TKFIndelModelInfo {
     fn new<AA: AncestralAlignment, T: TKFModel>(phylo: &PhyloInfo<AA>) -> TKFIndelModelInfo {
         let blocks = T::get_blocks(&phylo.msa);
-        let block_lens = get_block_lens(&blocks);
+        let block_lengths = get_block_lengths(&blocks);
         let n_blocks = blocks.len();
         let n_nodes = phylo.tree.len();
         TKFIndelModelInfo {
@@ -107,14 +114,16 @@ impl TKFIndelModelInfo {
             node_x: DMatrix::<f64>::zeros(n_nodes, n_blocks),
             node_factor_n: DMatrix::<f64>::zeros(n_nodes, n_blocks),
             factor_ns: DMatrix::<f64>::zeros(n_nodes, n_blocks),
-            n0: vec![None; n_nodes],
-            h1: vec![None; n_nodes],
-            insertion: vec![None; n_nodes],
-            factor_n: vec![None; n_nodes],
+            n0: vec![0.0; n_nodes],
+            h1: vec![0.0; n_nodes],
+            insertion: vec![0.0; n_nodes],
+            insertion_value_valid: FixedBitSet::with_capacity(n_nodes),
+            factor_n: vec![0.0; n_nodes],
+            factor_n_value_valid: FixedBitSet::with_capacity(n_nodes),
             beta: vec![0.0; n_nodes],
             blocks,
-            block_lens,
-            last_event_deletion: vec![false; n_nodes],
+            block_lengths,
+            previous_action_deletion: vec![false; n_nodes],
             valid: vec![false; n_nodes],
         }
     }
@@ -172,7 +181,7 @@ impl<AA: AncestralAlignment, T: TKFModel> TKFIndelCost<AA, T> {
             logl += log_i1(l, self.model_info.borrow_mut().beta[usize::from(node)]);
         }
         for block_id in 0..self.model_info.borrow().blocks.len() {
-            let block_len = self.model_info.borrow().block_lens[block_id];
+            let block_len = self.model_info.borrow().block_lengths[block_id];
             logl += self.model_info.borrow().factor_ns[(root_id, block_id)];
             let x = self.model_info.borrow().aggregated_x[(root_id, block_id)];
             logl += self.model.block_prob(x, block_len);
@@ -219,10 +228,10 @@ impl<AA: AncestralAlignment, T: TKFModel> TKFIndelCost<AA, T> {
         let node_id = usize::from(node_idx);
         match action {
             Action::Deletion => {
-                self.model_info.borrow_mut().last_event_deletion[node_id] = true;
+                self.model_info.borrow_mut().previous_action_deletion[node_id] = true;
             }
             Action::Insertion | Action::Homolog => {
-                self.model_info.borrow_mut().last_event_deletion[node_id] = false;
+                self.model_info.borrow_mut().previous_action_deletion[node_id] = false;
             }
             Action::Nothing => {}
         }
@@ -232,13 +241,21 @@ impl<AA: AncestralAlignment, T: TKFModel> TKFIndelCost<AA, T> {
         let node_id = usize::from(node_idx);
         let lambda = self.model.lambda();
         let mu = self.model.mu();
-        let t = self.phylo.tree.node(node_idx).blen;
-        self.model_info.borrow_mut().beta[node_id] = b(lambda, mu, t);
-        self.model_info.borrow_mut().n0[node_id] = None;
-        self.model_info.borrow_mut().h1[node_id] = None;
-        self.model_info.borrow_mut().insertion[node_id] = None;
-        self.model_info.borrow_mut().factor_n[node_id] = None;
-        self.model_info.borrow_mut().last_event_deletion[node_id] = false;
+        let blen = self.phylo.tree.node(node_idx).blen;
+        let beta = b(lambda, mu, blen);
+        self.model_info.borrow_mut().beta[node_id] = beta;
+        self.model_info.borrow_mut().n0[node_id] = n0(mu, beta);
+        self.model_info.borrow_mut().h1[node_id] = h1(lambda, mu, beta, blen);
+        self.model_info.borrow_mut().previous_action_deletion[node_id] = false;
+        self.model_info
+            .borrow_mut()
+            .insertion_value_valid
+            .set(node_id, false);
+        self.model_info
+            .borrow_mut()
+            .factor_n_value_valid
+            .set(node_id, false);
+        self.model_info.borrow_mut().valid[node_id] = false;
     }
 
     fn set_node_values(&self, node_idx: &NodeIdx, block_id: usize, mut x: f64, mut factor_n: f64) {
@@ -256,18 +273,32 @@ impl<AA: AncestralAlignment, T: TKFModel> TKFIndelCost<AA, T> {
 
     fn get_indel_x_for_root(&self, block_id: usize) -> f64 {
         let root_idx = &self.phylo.tree.root;
-        if self.phylo.msa.ancestral_map(root_idx)[self.model_info.borrow().blocks[block_id] - 1]
-            .is_some()
-        {
-            return *self.model_info.borrow_mut().insertion[usize::from(root_idx)]
-                .get_or_insert_with(|| self.model.insertion_prob_at_root());
+        let site = self.model_info.borrow().blocks[block_id] - 1;
+        let char_at_root = self.phylo.msa.ancestral_map(root_idx)[site].is_some();
+        if char_at_root {
+            if self
+                .model_info
+                .borrow()
+                .insertion_value_valid
+                .contains(usize::from(root_idx))
+            {
+                return self.model_info.borrow().insertion[usize::from(root_idx)];
+            } else {
+                let insertion_prob = self.model.insertion_prob_at_root();
+                self.model_info.borrow_mut().insertion[usize::from(root_idx)] = insertion_prob;
+                self.model_info
+                    .borrow_mut()
+                    .insertion_value_valid
+                    .set(usize::from(root_idx), true);
+                return insertion_prob;
+            }
         }
         1.0
     }
 
     fn get_action(&self, node_idx: &NodeIdx, block_id: usize) -> Action {
         if block_id == 0 {
-            self.model_info.borrow_mut().last_event_deletion[usize::from(node_idx)] = false;
+            self.model_info.borrow_mut().previous_action_deletion[usize::from(node_idx)] = false;
         }
         let parent_idx = self.phylo.tree.node(node_idx).parent.unwrap();
         let site = self.model_info.borrow().blocks[block_id] - 1;
@@ -292,7 +323,7 @@ impl<AA: AncestralAlignment, T: TKFModel> TKFIndelCost<AA, T> {
 
     fn get_factor_n_for_non_root(&self, node_idx: &NodeIdx, action: Action) -> f64 {
         if matches!(action, Action::Insertion)
-            && self.model_info.borrow().last_event_deletion[usize::from(node_idx)]
+            && self.model_info.borrow().previous_action_deletion[usize::from(node_idx)]
         {
             let node_id = usize::from(node_idx);
             let lambda = self.model.lambda();
@@ -301,13 +332,25 @@ impl<AA: AncestralAlignment, T: TKFModel> TKFIndelCost<AA, T> {
             let blen = self.phylo.tree.node(node_idx).blen;
 
             let n0_option = self.model_info.borrow().n0[node_id];
-            *self.model_info.borrow_mut().factor_n[node_id].get_or_insert_with(|| {
+            if self
+                .model_info
+                .borrow()
+                .factor_n_value_valid
+                .contains(node_id)
+            {
+                return self.model_info.borrow().factor_n[node_id];
+            } else {
                 let mut factor_n = log_n1(lambda, mu, beta, blen);
                 factor_n -= (lambda * beta).ln();
                 // since last event was a deletion n0 is not None
-                factor_n -= n0_option.unwrap().ln();
+                factor_n -= n0_option.ln();
+                self.model_info.borrow_mut().factor_n[node_id] = factor_n;
+                self.model_info
+                    .borrow_mut()
+                    .factor_n_value_valid
+                    .set(node_id, true);
                 factor_n
-            })
+            }
         } else {
             0.0
         }
@@ -315,19 +358,29 @@ impl<AA: AncestralAlignment, T: TKFModel> TKFIndelCost<AA, T> {
 
     fn get_indel_x_for_non_root(&self, node_idx: &NodeIdx, action: Action) -> f64 {
         let node_id = usize::from(node_idx);
-        let lambda = self.model.lambda();
-        let mu = self.model.mu();
         let beta = self.model_info.borrow().beta[node_id];
-        let blen = self.phylo.tree.node(node_idx).blen;
 
         match action {
-            Action::Deletion => {
-                *self.model_info.borrow_mut().n0[node_id].get_or_insert_with(|| n0(mu, beta))
+            Action::Deletion => self.model_info.borrow_mut().n0[node_id],
+            Action::Homolog => self.model_info.borrow().h1[node_id],
+            Action::Insertion => {
+                if self
+                    .model_info
+                    .borrow()
+                    .insertion_value_valid
+                    .contains(node_id)
+                {
+                    self.model_info.borrow().insertion[node_id]
+                } else {
+                    let insertion_prob = self.model.insertion_prob_at_non_root(beta);
+                    self.model_info.borrow_mut().insertion[node_id] = insertion_prob;
+                    self.model_info
+                        .borrow_mut()
+                        .insertion_value_valid
+                        .set(node_id, true);
+                    insertion_prob
+                }
             }
-            Action::Homolog => *self.model_info.borrow_mut().h1[node_id]
-                .get_or_insert_with(|| h1(lambda, mu, beta, blen)),
-            Action::Insertion => *self.model_info.borrow_mut().insertion[node_id]
-                .get_or_insert_with(|| self.model.insertion_prob_at_non_root(beta)),
             Action::Nothing => 1.0,
         }
     }
@@ -362,8 +415,7 @@ impl<AA: AncestralAlignment, T: TKFModel> ModelSearchCost for TKFIndelCost<AA, T
 
     fn empirical_freqs(&self) -> FreqVector {
         // TODO: At the time of writing this, this method is only used to set the frequencies of
-        // the model, but the TKF92IndelCost does not have frequencies. So we could just return
-        // a dummy vector here.
+        // the model, but the TKF92IndelCost does not have frequencies.
         self.phylo.freqs()
     }
 
@@ -448,8 +500,10 @@ fn log_i1(lambda: f64, beta: f64) -> f64 {
     (1.0 - lambda * beta).ln()
 }
 
+// TKF beta function
 fn b(lambda: f64, mu: f64, time: f64) -> f64 {
-    (1.0 - ((lambda - mu) * time).exp()) / (mu - lambda * ((lambda - mu) * time).exp())
+    let exp_term = ((lambda - mu) * time).exp();
+    (1.0 - exp_term) / (mu - lambda * exp_term)
 }
 
 fn h1(lambda: f64, mu: f64, beta: f64, time: f64) -> f64 {
@@ -466,7 +520,7 @@ fn log_n1(lambda: f64, mu: f64, beta: f64, time: f64) -> f64 {
 
 /// Given the right exclusive block borders, returns the lengths of the blocks.
 /// For example, given [3, 5, 8], the block lengths are [3, 2, 3].
-fn get_block_lens(blocks: &[usize]) -> Vec<usize> {
+fn get_block_lengths(blocks: &[usize]) -> Vec<usize> {
     let mut block_lens = vec![0; blocks.len()];
     for (i, block) in blocks.iter().enumerate() {
         block_lens[i] = if i == 0 {

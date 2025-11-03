@@ -28,6 +28,10 @@ enum TKF92Parameters {
 #[derive(Clone, Debug, PartialEq)]
 pub struct TKF92IndelModel {
     params: Vec<f64>,
+    /// precomputed r.ln()
+    log_r: f64,
+    /// precomputed (1 - r)/r
+    one_minus_r_over_r: f64,
 }
 
 impl TKF92IndelModel {
@@ -70,6 +74,8 @@ impl TKFModel for TKF92IndelModel {
             TKF92Parameters::R => {
                 if value > 0.0 && value < 1.0 {
                     self.params[usize::from(TKF92Parameters::R)] = value;
+                    self.log_r = value.ln();
+                    self.one_minus_r_over_r = (1.0 - value) / value;
                     return true;
                 }
             }
@@ -89,18 +95,18 @@ impl TKFModel for TKF92IndelModel {
     }
 
     fn insertion_prob_at_root(&self) -> f64 {
-        self.lambda() / self.mu() * (1.0 - self.r()) / self.r()
+        self.lambda() / self.mu() * self.one_minus_r_over_r
     }
 
     fn insertion_prob_at_non_root(&self, beta: f64) -> f64 {
-        self.lambda() * beta * (1.0 - self.r()) / self.r()
+        self.lambda() * beta * self.one_minus_r_over_r
     }
 
     fn block_prob(&self, x: f64, block_len: usize) -> f64 {
         if x == 1.0 {
             0.0
         } else {
-            x.ln() + (block_len as f64 - 1.0) * (1.0 + x).ln() + (block_len as f64) * self.r().ln()
+            x.ln() + (block_len as f64 - 1.0) * (1.0 + x).ln() + (block_len as f64) * self.log_r
         }
     }
 
@@ -116,9 +122,9 @@ impl TKFModel for TKF92IndelModel {
         {
             let mut previous_is_char = map[0].is_some();
             for (i, c) in map.iter().skip(1).enumerate() {
-                let current_is_char: bool = c.is_some();
+                let current_is_char = c.is_some();
                 // whenever there is a change from gap to not gap or vice versa, we have a block border
-                if previous_is_char != current_is_char {
+                if previous_is_char ^ current_is_char {
                     blocks.insert(i + 1);
                 }
                 previous_is_char = current_is_char;
@@ -181,6 +187,8 @@ impl<AA: AncestralAlignment> TKF92IndelCostBuilder<AA> {
         let r = validate_r(self.r);
         let model = TKF92IndelModel {
             params: vec![lambda, mu, r],
+            log_r: r.ln(),
+            one_minus_r_over_r: (1.0 - r) / r,
         };
         let info = TKFIndelModelInfo::new::<_, TKF92IndelModel>(&self.phylo);
         Ok(TKFIndelCost {
@@ -225,6 +233,8 @@ impl<Q: QMatrix, AA: AncestralAlignment> TKF92CostBuilder<Q, AA> {
         let r = validate_r(self.r);
         let model = TKF92IndelModel {
             params: vec![lambda, mu, r],
+            log_r: r.ln(),
+            one_minus_r_over_r: (1.0 - r) / r,
         };
         let info = TKFIndelModelInfo::new::<_, TKF92IndelModel>(&self.phylo);
         let tkf_cost = TKFIndelCost {

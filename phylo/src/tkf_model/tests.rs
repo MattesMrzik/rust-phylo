@@ -229,7 +229,7 @@ fn tkf91_get_blocks() {
     let msa = MASA::from_aligned_with_ancestral(seqs, &tree).unwrap();
     // act
     let blocks = TKF91IndelModel::get_blocks(&msa);
-    let block_lens = get_block_lens(&blocks);
+    let block_lens = get_block_lengths(&blocks);
     assert_eq!(blocks, (1..msa.len() + 1).collect::<Vec<usize>>());
     assert_eq!(block_lens, vec![1; 6]);
 }
@@ -248,7 +248,7 @@ fn tkf92_get_blocks() {
 
     // act
     let blocks = TKF92IndelModel::get_blocks(&msa);
-    let block_lens = get_block_lens(&blocks);
+    let block_lens = get_block_lengths(&blocks);
     assert_eq!(blocks, vec![1, 3, 4, 5]);
     assert_eq!(block_lens, vec![1, 2, 1, 1]);
 }
