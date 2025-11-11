@@ -510,6 +510,7 @@ fn h1(lambda: f64, mu: f64, beta: f64, time: f64) -> f64 {
     (-mu * time).exp() * (1.0 - lambda * beta)
 }
 
+#[inline]
 fn n0(mu: f64, beta: f64) -> f64 {
     mu * beta
 }

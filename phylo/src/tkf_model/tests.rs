@@ -254,52 +254,83 @@ fn tkf92_get_blocks() {
 }
 
 #[cfg(test)]
-fn tkf_set_lambda_and_mu<T: TKFModel>(model: &mut T) {
+fn tkf_set_lambda<T: TKFModel>(model: &mut T) {
     let initial_lambda = model.lambda();
     let initial_mu = model.mu();
-    // lambda
-    assert!(!model.set_param(0, -1.0));
+    let param_idx = usize::from(TKF92Parameters::Lambda);
+    assert!(!model.set_param(param_idx, -1.0));
     assert_eq!(model.lambda(), initial_lambda);
-    assert!(!model.set_param(0, 0.0));
+    assert!(!model.set_param(param_idx, 0.0));
     assert_eq!(model.lambda(), initial_lambda);
-    assert!(model.set_param(0, initial_mu - 0.001));
+    assert!(model.set_param(param_idx, initial_mu - 0.001));
     assert_eq!(model.lambda(), initial_mu - 0.001);
-    assert!(!model.set_param(0, initial_mu));
+    assert!(!model.set_param(param_idx, initial_mu));
     assert_eq!(model.lambda(), initial_mu - 0.001);
-    assert!(!model.set_param(0, 2.1));
+    assert!(!model.set_param(param_idx, 2.1));
     assert_eq!(model.lambda(), initial_mu - 0.001);
-    // mu
-    model.set_param(0, initial_lambda); // reset lambda
-    assert!(!model.set_param(1, -0.1));
+}
+
+#[cfg(test)]
+fn tkf_set_mu<T: TKFModel>(model: &mut T) {
+    let initial_lambda = model.lambda();
+    let initial_mu = model.mu();
+    let param_idx = usize::from(TKF92Parameters::Mu);
+    assert!(!model.set_param(param_idx, -0.1));
     assert_eq!(model.mu(), initial_mu);
-    assert!(!model.set_param(1, 0.0));
+    assert!(!model.set_param(param_idx, 0.0));
     assert_eq!(model.mu(), initial_mu);
-    assert!(!model.set_param(1, initial_lambda));
+    assert!(!model.set_param(param_idx, initial_lambda));
     assert_eq!(model.mu(), initial_mu);
-    assert!(model.set_param(1, initial_lambda + 0.001));
+    assert!(model.set_param(param_idx, initial_lambda + 0.001));
     assert_eq!(model.mu(), initial_lambda + 0.001);
-    assert!(model.set_param(1, initial_lambda + 100.0));
+    assert!(model.set_param(param_idx, initial_lambda + 100.0));
     assert_eq!(model.mu(), initial_lambda + 100.0);
 }
 
 #[cfg(test)]
 fn tkf_set_r(model: &mut TKF92IndelModel) {
     let initial_r = model.r();
-    assert!(!model.set_param(2, -0.1));
+    let param_idx = usize::from(TKF92Parameters::R);
+    assert!(!model.set_param(param_idx, -0.1));
     assert_eq!(model.r(), initial_r);
-    assert!(!model.set_param(2, 0.0));
+    assert!(!model.set_param(param_idx, 0.0));
     assert_eq!(model.r(), initial_r);
-    assert!(model.set_param(2, 0.5));
-    assert_eq!(model.r(), 0.5);
-    assert!(model.set_param(2, 0.9999));
+    assert!(model.set_param(param_idx, 0.9999));
     assert_eq!(model.r(), 0.9999);
-    assert!(!model.set_param(2, 1.0));
+    assert!(!model.set_param(param_idx, 1.0));
     assert_eq!(model.r(), 0.9999);
-    assert!(!model.set_param(2, 2.0));
+    assert!(!model.set_param(param_idx, 2.0));
     assert_eq!(model.r(), 0.9999);
 }
+
+#[cfg(test)]
+fn setup_test_phylo(alphabet: Alphabet) -> PhyloInfo<MASA> {
+    let tree = tree!("(((A1:2.0,B2:2.0)I3:0.3,C4:2.0)R5:1.0);");
+    let msa = MASA::from_aligned_with_ancestral(
+        Sequences::with_alphabet(
+            vec![
+                record!("A1", b"--GTGGA---"),
+                record!("B2", b"-------NNA"),
+                record!("I3", b"--T-------"),
+                record!("C4", b"AGG-------"),
+                record!("R5", b"--A-------"),
+            ],
+            alphabet,
+        ),
+        &tree,
+    )
+    .unwrap();
+    PhyloInfo { msa, tree }
+}
+
+#[cfg(test)]
+enum Submodel {
+    TKFIndel,
+    SubstitutionModel,
+}
+
 #[test]
-fn tkf91_indel_set_param() {
+fn tkf91_indel_set_param_lambda() {
     // arrange
     let mut tkf91_indel_model =
         TKF91IndelCostBuilder::new(1.0, 2.0, setup_test_phylo(dna_alphabet()))
@@ -308,12 +339,26 @@ fn tkf91_indel_set_param() {
             .model;
 
     // act & assert
-    tkf_set_lambda_and_mu(&mut tkf91_indel_model);
+    tkf_set_lambda(&mut tkf91_indel_model.clone());
     assert!(!tkf91_indel_model.set_param(2, 0.5)); // no r parameter
 }
 
 #[test]
-fn tkf92_indel_set_param() {
+fn tkf91_indel_set_param_mu() {
+    // arrange
+    let mut tkf91_indel_model =
+        TKF91IndelCostBuilder::new(1.0, 2.0, setup_test_phylo(dna_alphabet()))
+            .build()
+            .unwrap()
+            .model;
+
+    // act & assert
+    tkf_set_mu(&mut tkf91_indel_model);
+    assert!(!tkf91_indel_model.set_param(2, 0.5)); // no r parameter
+}
+
+#[test]
+fn tkf92_indel_set_param_lambda() {
     // arrange
     let mut tkf92_indel_model =
         TKF92IndelCostBuilder::new(1.0, 2.0, 0.3, setup_test_phylo(dna_alphabet()))
@@ -322,7 +367,32 @@ fn tkf92_indel_set_param() {
             .model;
 
     // act & assert
-    tkf_set_lambda_and_mu(&mut tkf92_indel_model);
+    tkf_set_lambda(&mut tkf92_indel_model);
+}
+
+#[test]
+fn tkf92_indel_set_param_mu() {
+    // arrange
+    let mut tkf92_indel_model =
+        TKF92IndelCostBuilder::new(1.0, 2.0, 0.3, setup_test_phylo(dna_alphabet()))
+            .build()
+            .unwrap()
+            .model;
+
+    // act & assert
+    tkf_set_mu(&mut tkf92_indel_model);
+}
+
+#[test]
+fn tkf92_indel_set_param_r() {
+    // arrange
+    let mut tkf92_indel_model =
+        TKF92IndelCostBuilder::new(1.0, 2.0, 0.3, setup_test_phylo(dna_alphabet()))
+            .build()
+            .unwrap()
+            .model;
+
+    // act & assert
     tkf_set_r(&mut tkf92_indel_model);
 }
 
@@ -690,17 +760,13 @@ fn tkf92_indel_logl() {
 }
 
 #[test]
-fn tkf_cost_builder_fails() {
+fn tkf91_cost_builder_fails() {
     // arrange
     let phylo = setup_test_phylo(protein_alphabet());
-    let subst_model = SubstModel::<GTR>::new(&[0.1, 0.3, 0.4, 0.2], &[1.2, 0.5, 5.0, 1.0, 1.0]);
+    let subst_model = SubstModel::<GTR>::new(&[], &[]);
 
     // act
     let tkf91_err_msg = TKF91CostBuilder::new(0.1, 0.2, subst_model.clone(), phylo.clone())
-        .build()
-        .unwrap_err()
-        .to_string();
-    let tkf92_err_msg = TKF92CostBuilder::new(0.1, 0.2, 0.3, subst_model, phylo)
         .build()
         .unwrap_err()
         .to_string();
@@ -710,6 +776,21 @@ fn tkf_cost_builder_fails() {
         tkf91_err_msg,
         "Alphabet mismatch between model and alignment"
     );
+}
+
+#[test]
+fn tkf92_cost_builder_fails() {
+    // arrange
+    let phylo = setup_test_phylo(protein_alphabet());
+    let subst_model = SubstModel::<GTR>::new(&[], &[]);
+
+    // act
+    let tkf92_err_msg = TKF92CostBuilder::new(0.1, 0.2, 0.3, subst_model.clone(), phylo.clone())
+        .build()
+        .unwrap_err()
+        .to_string();
+
+    // assert
     assert_eq!(
         tkf92_err_msg,
         "Alphabet mismatch between model and alignment"
@@ -739,7 +820,7 @@ fn tkf91_logl_with_substitution() {
     );
 
     // assert
-    assert_relative_eq!(logl, subst_logl + tkf_logl, epsilon = 1e-12);
+    assert_relative_eq!(logl, subst_logl + tkf_logl);
 }
 
 #[test]
@@ -829,33 +910,7 @@ fn tkf_indel_history_doesnt_change_felsenstein() {
 }
 
 #[cfg(test)]
-fn setup_test_phylo(alphabet: Alphabet) -> PhyloInfo<MASA> {
-    let tree = tree!("(((A1:2.0,B2:2.0)I3:0.3,C4:2.0)R5:1.0);");
-    let msa = MASA::from_aligned_with_ancestral(
-        Sequences::with_alphabet(
-            vec![
-                record!("A1", b"--GTGGA---"),
-                record!("B2", b"-------NNA"),
-                record!("I3", b"--T-------"),
-                record!("C4", b"AGG-------"),
-                record!("R5", b"--A-------"),
-            ],
-            alphabet,
-        ),
-        &tree,
-    )
-    .unwrap();
-    PhyloInfo { msa, tree }
-}
-
-#[cfg(test)]
-enum Submodel {
-    TKFIndel,
-    SubstitutionModel,
-}
-
-#[cfg(test)]
-fn modify_model_params_costs_match_template<Q: QMatrix + QMatrixMaker>(
+fn modify_tkf92_params_costs_match_template<Q: QMatrix + QMatrixMaker>(
     alphabet: Alphabet,
     model_to_change: Submodel,
 ) {
@@ -900,23 +955,29 @@ fn modify_model_params_costs_match_template<Q: QMatrix + QMatrixMaker>(
 }
 
 #[test]
-fn tkf_modify_model_params_costs_match() {
+fn tkf92_modify_subst_model_params_costs_match() {
     // For these models the substitution model has parameters
     // We test changing both the substitution model and the TKF92 parameters
-    modify_model_params_costs_match_template::<K80>(dna_alphabet(), Submodel::SubstitutionModel);
-    modify_model_params_costs_match_template::<HKY>(dna_alphabet(), Submodel::SubstitutionModel);
-    modify_model_params_costs_match_template::<TN93>(dna_alphabet(), Submodel::SubstitutionModel);
-    modify_model_params_costs_match_template::<GTR>(dna_alphabet(), Submodel::SubstitutionModel);
+    modify_tkf92_params_costs_match_template::<K80>(dna_alphabet(), Submodel::SubstitutionModel);
+    modify_tkf92_params_costs_match_template::<HKY>(dna_alphabet(), Submodel::SubstitutionModel);
+    modify_tkf92_params_costs_match_template::<TN93>(dna_alphabet(), Submodel::SubstitutionModel);
+    modify_tkf92_params_costs_match_template::<GTR>(dna_alphabet(), Submodel::SubstitutionModel);
+}
 
-    modify_model_params_costs_match_template::<K80>(dna_alphabet(), Submodel::TKFIndel);
-    modify_model_params_costs_match_template::<HKY>(dna_alphabet(), Submodel::TKFIndel);
-    modify_model_params_costs_match_template::<TN93>(dna_alphabet(), Submodel::TKFIndel);
-    modify_model_params_costs_match_template::<GTR>(dna_alphabet(), Submodel::TKFIndel);
+#[test]
+fn tkf_modify_indel_model_params_costs_match() {
+    modify_tkf92_params_costs_match_template::<K80>(dna_alphabet(), Submodel::TKFIndel);
+    modify_tkf92_params_costs_match_template::<HKY>(dna_alphabet(), Submodel::TKFIndel);
+    modify_tkf92_params_costs_match_template::<TN93>(dna_alphabet(), Submodel::TKFIndel);
+    modify_tkf92_params_costs_match_template::<GTR>(dna_alphabet(), Submodel::TKFIndel);
+}
 
+#[test]
+fn tkf_modify_indel_model_params_costs_match_no_subst_params() {
     // For these models the substitution model has no parameters
     // We only test changing the TKF92 parameters
-    modify_model_params_costs_match_template::<JC69>(dna_alphabet(), Submodel::TKFIndel);
-    modify_model_params_costs_match_template::<WAG>(protein_alphabet(), Submodel::TKFIndel);
-    modify_model_params_costs_match_template::<BLOSUM>(protein_alphabet(), Submodel::TKFIndel);
-    modify_model_params_costs_match_template::<HIVB>(protein_alphabet(), Submodel::TKFIndel);
+    modify_tkf92_params_costs_match_template::<JC69>(dna_alphabet(), Submodel::TKFIndel);
+    modify_tkf92_params_costs_match_template::<WAG>(protein_alphabet(), Submodel::TKFIndel);
+    modify_tkf92_params_costs_match_template::<BLOSUM>(protein_alphabet(), Submodel::TKFIndel);
+    modify_tkf92_params_costs_match_template::<HIVB>(protein_alphabet(), Submodel::TKFIndel);
 }

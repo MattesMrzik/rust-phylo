@@ -610,7 +610,7 @@ fn tkf_model_opti_template<C: ModelSearchCost + Clone + Display>(c: C) {
 
 #[test]
 #[cfg_attr(feature = "ci_coverage", ignore)]
-fn tkf_model_opti() {
+fn tkf91_model_opti() {
     let fldr = Path::new("./data/pip/arpip/");
     let info = PIB::with_attrs(fldr.join("msa.fasta"), fldr.join("tree.nwk"))
         .build_with_ancestors()
@@ -619,10 +619,19 @@ fn tkf_model_opti() {
     let tkf91 = TKF91CostBuilder::new(0.8, 1.0, subst_model.clone(), info.clone())
         .build()
         .unwrap();
+    tkf_model_opti_template(tkf91);
+}
+
+#[test]
+#[cfg_attr(feature = "ci_coverage", ignore)]
+fn tkf92_model_opti() {
+    let fldr = Path::new("./data/pip/arpip/");
+    let info = PIB::with_attrs(fldr.join("msa.fasta"), fldr.join("tree.nwk"))
+        .build_with_ancestors()
+        .unwrap();
+    let subst_model = SubstModel::<HKY>::new(&[], &[2.0]);
     let tkf92 = TKF92CostBuilder::new(0.8, 1.0, 0.2, subst_model, info)
         .build()
         .unwrap();
-
-    tkf_model_opti_template(tkf91);
     tkf_model_opti_template(tkf92);
 }

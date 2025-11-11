@@ -15,7 +15,7 @@ use crate::{alignment::AncestralAlignment, phylo_info::PhyloInfo, tkf_model::TKF
 
 #[derive(Debug, Eq, PartialEq, FromPrimitive, IntoPrimitive)]
 #[repr(usize)]
-enum TKF91Parameters {
+pub(crate) enum TKF91Parameters {
     Lambda = 0,
     Mu = 1,
     #[num_enum(catch_all)]
