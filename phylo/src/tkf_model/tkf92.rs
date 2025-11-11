@@ -248,3 +248,40 @@ impl<Q: QMatrix, AA: AncestralAlignment> TKF92CostBuilder<Q, AA> {
         })
     }
 }
+
+#[cfg(test)]
+mod private_tests {
+    use super::*;
+
+    #[test]
+    fn tkf92_param_range_valid_indices() {
+        let model = TKF92IndelModel {
+            params: vec![0.5, 1.0, 0.3],
+            log_r: 0.0,              // dummy
+            one_minus_r_over_r: 0.0, // dummy
+        };
+        // Lambda
+        let range = model.param_range(usize::from(TKF92Parameters::Lambda));
+        assert_eq!(range.0, f64::EPSILON);
+        assert_eq!(range.1, model.mu());
+        // Mu
+        let range = model.param_range(usize::from(TKF92Parameters::Mu));
+        assert_eq!(range.0, model.lambda());
+        assert_eq!(range.1, f64::MAX);
+        // R
+        let range = model.param_range(usize::from(TKF92Parameters::R));
+        assert_eq!(range, PARAM_RANGE_UNIT_INTERVAL_EXCLUSIVE);
+    }
+
+    #[test]
+    #[should_panic]
+    fn tkf92_param_range_invalid_index() {
+        let model = TKF92IndelModel {
+            params: vec![0.5, 1.0, 0.3],
+            log_r: 0.0,              // dummy
+            one_minus_r_over_r: 0.0, // dummy
+        };
+        // Use an invalid index
+        model.param_range(3);
+    }
+}
