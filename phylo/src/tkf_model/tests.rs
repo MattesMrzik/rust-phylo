@@ -60,7 +60,7 @@ fn tkf91_indel_logl_without_aggregation<AA: AncestralAlignment>(
             let parent_is_gap = get_mapping_for_any_node(&phylo.msa, parent_id)[i].is_none();
             let current_is_gap = get_mapping_for_any_node(&phylo.msa, node_idx)[i].is_none();
 
-            let b = b(l, m, time);
+            let b = beta(l, m, time);
             if i == 0 {
                 prob += log_i1(l, b);
             }
@@ -132,7 +132,7 @@ fn tkf92_indel_logl_without_aggregation<AA: AncestralAlignment>(
             let current_is_gap =
                 get_mapping_for_any_node(&phylo.msa, node_idx)[fragment - 1].is_none();
 
-            let b = b(l, m, time);
+            let b = beta(l, m, time);
             if i == 0 {
                 prob += log_i1(l, b);
             }
@@ -166,7 +166,7 @@ fn tkf92_indel_logl_without_aggregation<AA: AncestralAlignment>(
 
 #[test]
 fn tkf_beta() {
-    assert_relative_eq!(b(0.3, 0.5, 0.7), 0.5461782813185221);
+    assert_relative_eq!(beta(0.3, 0.5, 0.7), 0.5461782813185221);
 }
 
 #[test]
@@ -175,7 +175,7 @@ fn tkf_log_i1() {
     let l = 2.0;
     let m = 3.0;
     let time = 1.0;
-    let b = b(l, m, time);
+    let b = beta(l, m, time);
     // act & assert
     assert_relative_eq!(log_i1(l, b), -0.8172396554020775);
     // log((1-2(1-e^(-1))/(3-2*e^(-1)))
@@ -187,7 +187,7 @@ fn tkf_log_n1() {
     let l = 2.0;
     let m = 3.0;
     let time = 0.5;
-    let b = b(l, m, time);
+    let b = beta(l, m, time);
     // act & assert
     assert_relative_eq!(log_n1(l, m, b, time), -2.732135332549935);
     // log((1-e^(-1.5) - 3(1-e^(-.5))/(3-2*e^(-.5)) )* (1-2(1-e^(-.5))/(3-2*e^(-.5)))   (2(1-e^(-1))/(3-2*e^(-1)))^0)
@@ -199,7 +199,7 @@ fn tkf_n0() {
     let l = 2.0;
     let m = 3.0;
     let time = 0.5;
-    let b = b(l, m, time);
+    let b = beta(l, m, time);
     // act & assert
     assert_relative_eq!(n0(m, b), 0.6605755607027574);
     // (3(1-e^(-.5))/(3-2*e^(-.5)))
@@ -211,7 +211,7 @@ fn tkf_h1() {
     let l = 2.0;
     let m = 3.0;
     let time = 1.5;
-    let b = b(l, m, time);
+    let b = beta(l, m, time);
     // act & assert
     assert_relative_eq!(h1(l, m, b, time), 0.004350089645603061);
     // e^(-4.5) * (1-2(1-e^(-1.5))/(3-2*e^(-1.5)))
@@ -630,49 +630,49 @@ fn tkf91_indel_logl() {
     let mut manual_calculation = 0.0;
     manual_calculation += (1.0 - lambda / mu).ln();
     // immortal links
-    manual_calculation += log_i1(lambda, b(lambda, mu, tree.by_id("A1").blen));
-    manual_calculation += log_i1(lambda, b(lambda, mu, tree.by_id("B2").blen));
-    manual_calculation += log_i1(lambda, b(lambda, mu, tree.by_id("I3").blen));
-    manual_calculation += log_i1(lambda, b(lambda, mu, tree.by_id("C4").blen));
+    manual_calculation += log_i1(lambda, beta(lambda, mu, tree.by_id("A1").blen));
+    manual_calculation += log_i1(lambda, beta(lambda, mu, tree.by_id("B2").blen));
+    manual_calculation += log_i1(lambda, beta(lambda, mu, tree.by_id("I3").blen));
+    manual_calculation += log_i1(lambda, beta(lambda, mu, tree.by_id("C4").blen));
     // first block
-    let x = lambda * b(lambda, mu, tree.by_id("C4").blen);
+    let x = lambda * beta(lambda, mu, tree.by_id("C4").blen);
     manual_calculation += x.ln() * 2.0;
     // second block
     let mut x = lambda / mu;
     x *= h1(
         lambda,
         mu,
-        b(lambda, mu, tree.by_id("C4").blen),
+        beta(lambda, mu, tree.by_id("C4").blen),
         tree.by_id("C4").blen,
     );
     x *= h1(
         lambda,
         mu,
-        b(lambda, mu, tree.by_id("A1").blen),
+        beta(lambda, mu, tree.by_id("A1").blen),
         tree.by_id("A1").blen,
     );
     x *= h1(
         lambda,
         mu,
-        b(lambda, mu, tree.by_id("I3").blen),
+        beta(lambda, mu, tree.by_id("I3").blen),
         tree.by_id("I3").blen,
     );
-    x *= n0(mu, b(lambda, mu, tree.by_id("B2").blen));
+    x *= n0(mu, beta(lambda, mu, tree.by_id("B2").blen));
     manual_calculation += x.ln();
     // third block
-    let x = lambda * b(lambda, mu, tree.by_id("C4").blen);
+    let x = lambda * beta(lambda, mu, tree.by_id("C4").blen);
     manual_calculation += x.ln() * 4.0;
     // fourth block
-    let x = lambda * b(lambda, mu, tree.by_id("B2").blen);
+    let x = lambda * beta(lambda, mu, tree.by_id("B2").blen);
     manual_calculation += x.ln() * 3.0;
     manual_calculation += log_n1(
         lambda,
         mu,
-        b(lambda, mu, tree.by_id("B2").blen),
+        beta(lambda, mu, tree.by_id("B2").blen),
         tree.by_id("B2").blen,
     );
-    manual_calculation -= n0(mu, b(lambda, mu, tree.by_id("B2").blen)).ln();
-    manual_calculation -= (lambda * b(lambda, mu, tree.by_id("B2").blen)).ln();
+    manual_calculation -= n0(mu, beta(lambda, mu, tree.by_id("B2").blen)).ln();
+    manual_calculation -= (lambda * beta(lambda, mu, tree.by_id("B2").blen)).ln();
 
     // assert
     assert_relative_eq!(logl, manual_calculation);
@@ -710,49 +710,49 @@ fn tkf92_indel_logl() {
     manual_calculation += (1.0 - lambda / mu).ln();
     manual_calculation += m * r.ln();
     // immortal links
-    manual_calculation += log_i1(lambda, b(lambda, mu, tree.by_id("A1").blen));
-    manual_calculation += log_i1(lambda, b(lambda, mu, tree.by_id("B2").blen));
-    manual_calculation += log_i1(lambda, b(lambda, mu, tree.by_id("I3").blen));
-    manual_calculation += log_i1(lambda, b(lambda, mu, tree.by_id("C4").blen));
+    manual_calculation += log_i1(lambda, beta(lambda, mu, tree.by_id("A1").blen));
+    manual_calculation += log_i1(lambda, beta(lambda, mu, tree.by_id("B2").blen));
+    manual_calculation += log_i1(lambda, beta(lambda, mu, tree.by_id("I3").blen));
+    manual_calculation += log_i1(lambda, beta(lambda, mu, tree.by_id("C4").blen));
     // first block
-    let x = lambda * b(lambda, mu, tree.by_id("C4").blen) * (1.0 - r) / r;
+    let x = lambda * beta(lambda, mu, tree.by_id("C4").blen) * (1.0 - r) / r;
     manual_calculation += x.ln() + 1.0 * (1.0 + x).ln();
     // second block
     let mut x = lambda / mu * (1.0 - r) / r;
     x *= h1(
         lambda,
         mu,
-        b(lambda, mu, tree.by_id("C4").blen),
+        beta(lambda, mu, tree.by_id("C4").blen),
         tree.by_id("C4").blen,
     );
     x *= h1(
         lambda,
         mu,
-        b(lambda, mu, tree.by_id("A1").blen),
+        beta(lambda, mu, tree.by_id("A1").blen),
         tree.by_id("A1").blen,
     );
     x *= h1(
         lambda,
         mu,
-        b(lambda, mu, tree.by_id("I3").blen),
+        beta(lambda, mu, tree.by_id("I3").blen),
         tree.by_id("I3").blen,
     );
-    x *= n0(mu, b(lambda, mu, tree.by_id("B2").blen));
+    x *= n0(mu, beta(lambda, mu, tree.by_id("B2").blen));
     manual_calculation += x.ln();
     // third block
-    let x = lambda * b(lambda, mu, tree.by_id("C4").blen) * (1.0 - r) / r;
+    let x = lambda * beta(lambda, mu, tree.by_id("C4").blen) * (1.0 - r) / r;
     manual_calculation += x.ln() + 3.0 * (1.0 + x).ln();
     // fourth block
-    let x = lambda * b(lambda, mu, tree.by_id("B2").blen) * (1.0 - r) / r;
+    let x = lambda * beta(lambda, mu, tree.by_id("B2").blen) * (1.0 - r) / r;
     manual_calculation += x.ln() + 2.0 * (1.0 + x).ln();
     manual_calculation += log_n1(
         lambda,
         mu,
-        b(lambda, mu, tree.by_id("B2").blen),
+        beta(lambda, mu, tree.by_id("B2").blen),
         tree.by_id("B2").blen,
     );
-    manual_calculation -= n0(mu, b(lambda, mu, tree.by_id("B2").blen)).ln();
-    manual_calculation -= (lambda * b(lambda, mu, tree.by_id("B2").blen)).ln();
+    manual_calculation -= n0(mu, beta(lambda, mu, tree.by_id("B2").blen)).ln();
+    manual_calculation -= (lambda * beta(lambda, mu, tree.by_id("B2").blen)).ln();
 
     // assert
     assert_relative_eq!(logl, manual_calculation);

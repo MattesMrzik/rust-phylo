@@ -149,7 +149,7 @@ impl<AA: AncestralAlignment> TKF91IndelCostBuilder<AA> {
         let info = TKFIndelModelInfo::new::<_, TKF91IndelModel>(&self.phylo);
         Ok(TKFIndelCost {
             model,
-            phylo: self.phylo.clone(),
+            phylo: self.phylo,
             model_info: RefCell::new(info),
         })
     }

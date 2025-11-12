@@ -7,7 +7,7 @@ use log::warn;
 use num_enum::{FromPrimitive, IntoPrimitive};
 
 use crate::evolutionary_models::EvoModel;
-use crate::likelihood::PARAM_RANGE_UNIT_INTERVAL_EXCLUSIVE;
+use crate::likelihood::{ParamRange, PARAM_RANGE_UNIT_INTERVAL_EXCLUSIVE};
 use crate::substitution_models::{QMatrix, SubstModel, SubstitutionCostBuilder as SCB};
 use crate::tkf_model::{
     validate_lambda_and_mu, TKFCost, TKFIndelCost, TKFIndelModelInfo, DEFAULT_R,
@@ -84,7 +84,7 @@ impl TKFModel for TKF92IndelModel {
         false
     }
 
-    fn param_range(&self, idx: usize) -> crate::likelihood::ParamRange {
+    fn param_range(&self, idx: usize) -> ParamRange {
         let param = TKF92Parameters::from_primitive(idx);
         match param {
             TKF92Parameters::Lambda => (f64::EPSILON, self.mu()),

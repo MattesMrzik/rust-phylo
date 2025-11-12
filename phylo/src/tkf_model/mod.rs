@@ -26,7 +26,7 @@ pub mod tkf92;
 pub use tkf92::*;
 
 #[derive(Copy, Clone)]
-enum Action {
+enum Event {
     Insertion,
     Deletion,
     Homolog,
@@ -43,6 +43,7 @@ pub trait TKFModel: Clone + Display {
     fn params(&self) -> &[f64];
     fn set_param(&mut self, idx: usize, value: f64) -> bool;
     fn param_range(&self, idx: usize) -> ParamRange;
+    ///
     fn insertion_prob_at_root(&self) -> f64;
     fn insertion_prob_at_non_root(&self, beta: f64) -> f64;
     fn block_prob(&self, x: f64, block_len: usize) -> f64;
@@ -52,20 +53,18 @@ pub trait TKFModel: Clone + Display {
 // TODO: link our paper once it is published. For now see original TKF92 paper: https://doi.org/10.1007/bf00163848
 #[derive(Clone, Debug)]
 struct TKFIndelModelInfo {
+    /// event_prob_factor[(node, block)] = the x value for the edge above <node> for the block with id <block>.
+    node_event_prob_factor: DMatrix<f64>,
     /// aggregated_x[(node, block)] = the product of the xs of all the edges in the subtree below
     /// <node> (including the x of <node> itself) for the block with id <block>.
-    aggregated_x: DMatrix<f64>,
-
-    /// node_x[(node, block)] = the x value for the edge above <node> for the block with id <block>.
-    node_x: DMatrix<f64>,
+    substree_event_prob_factor: DMatrix<f64>,
 
     /// node_factor_n[(node, block)] = the factor_n value for the edge above <node> for the block
     /// with id <block>.
-    node_factor_n: DMatrix<f64>,
-
+    node_eta: DMatrix<f64>,
     /// factor_ns[(node, block)] = n1/ (n0 * lambda * beta(v.blen)) if there is a node <v> in the
     /// subtree rooted in <node> where the current event is an insertion and the previous one was a deletion.
-    factor_ns: DMatrix<f64>,
+    subtree_eta: DMatrix<f64>,
 
     /// n0[node] = n0(node.blen)
     n0: Vec<f64>,
@@ -76,16 +75,15 @@ struct TKFIndelModelInfo {
     /// insertion[node], may hold previously computed values for insertion
     /// that can be reused.
     insertion: Vec<f64>,
-
     /// insertion_value_valid[node] = true if insertion[node] holds a valid value.
     insertion_value_valid: FixedBitSet,
 
     /// factor_n[node] = n1/ (n0 * lambda * beta(node.blen)), may hold previously computed
     /// values for factor_n that can be reused.
-    factor_n: Vec<f64>,
+    eta_cache: Vec<f64>,
 
     /// factor_n_value_valid[node] = true if factor_n[node] holds a valid value.
-    factor_n_value_valid: FixedBitSet,
+    eta_cache_valid: FixedBitSet,
 
     /// beta[node] = beta(node.blen)).
     beta: Vec<f64>,
@@ -96,11 +94,11 @@ struct TKFIndelModelInfo {
     /// The lengths of the blocks.
     block_lengths: Vec<usize>,
 
-    /// last_event_deletion[node] = true if the last event was a deletion for a that <node>.
-    previous_action_deletion: Vec<bool>,
+    /// previous_event_deletion[node] = true if the last event was a deletion for a that <node>.
+    previous_event_deletion: Vec<bool>,
 
     /// valid[node] = true if the intermediate values for that <node> are valid.
-    valid: Vec<bool>,
+    valid: FixedBitSet,
 }
 
 impl TKFIndelModelInfo {
@@ -110,21 +108,21 @@ impl TKFIndelModelInfo {
         let n_blocks = blocks.len();
         let n_nodes = phylo.tree.len();
         TKFIndelModelInfo {
-            aggregated_x: DMatrix::<f64>::zeros(n_nodes, n_blocks),
-            node_x: DMatrix::<f64>::zeros(n_nodes, n_blocks),
-            node_factor_n: DMatrix::<f64>::zeros(n_nodes, n_blocks),
-            factor_ns: DMatrix::<f64>::zeros(n_nodes, n_blocks),
+            substree_event_prob_factor: DMatrix::<f64>::zeros(n_nodes, n_blocks),
+            node_event_prob_factor: DMatrix::<f64>::zeros(n_nodes, n_blocks),
+            node_eta: DMatrix::<f64>::zeros(n_nodes, n_blocks),
+            subtree_eta: DMatrix::<f64>::zeros(n_nodes, n_blocks),
             n0: vec![0.0; n_nodes],
             h1: vec![0.0; n_nodes],
             insertion: vec![0.0; n_nodes],
             insertion_value_valid: FixedBitSet::with_capacity(n_nodes),
-            factor_n: vec![0.0; n_nodes],
-            factor_n_value_valid: FixedBitSet::with_capacity(n_nodes),
+            eta_cache: vec![0.0; n_nodes],
+            eta_cache_valid: FixedBitSet::with_capacity(n_nodes),
             beta: vec![0.0; n_nodes],
             blocks,
             block_lengths,
-            previous_action_deletion: vec![false; n_nodes],
-            valid: vec![false; n_nodes],
+            previous_event_deletion: vec![false; n_nodes],
+            valid: FixedBitSet::with_capacity(n_nodes),
         }
     }
 }
@@ -169,7 +167,7 @@ impl<AA: AncestralAlignment, T: TKFModel> TKFIndelCost<AA, T> {
             };
         }
 
-        let l: f64 = self.model.lambda();
+        let l = self.model.lambda();
         let m = self.model.mu();
         let root_id = usize::from(self.phylo.tree.root);
         let mut logl = 0.0;
@@ -182,8 +180,8 @@ impl<AA: AncestralAlignment, T: TKFModel> TKFIndelCost<AA, T> {
         }
         for block_id in 0..self.model_info.borrow().blocks.len() {
             let block_len = self.model_info.borrow().block_lengths[block_id];
-            logl += self.model_info.borrow().factor_ns[(root_id, block_id)];
-            let x = self.model_info.borrow().aggregated_x[(root_id, block_id)];
+            logl += self.model_info.borrow().subtree_eta[(root_id, block_id)];
+            let x = self.model_info.borrow().substree_event_prob_factor[(root_id, block_id)];
             logl += self.model.block_prob(x, block_len);
         }
         logl
@@ -194,13 +192,16 @@ impl<AA: AncestralAlignment, T: TKFModel> TKFIndelCost<AA, T> {
         if self.model_info.borrow().valid[usize::from(root_idx)] {
             return;
         }
-        self.reset_cached_factors(root_idx);
+        self.reset_cache(root_idx);
         let n_blocks = self.model_info.borrow().blocks.len();
         for block_id in 0..n_blocks {
-            let x = self.get_indel_x_for_root(block_id);
+            let x = self.event_factor_for_root(block_id);
             self.set_node_values(root_idx, block_id, x, 0.0);
         }
-        self.model_info.borrow_mut().valid[usize::from(root_idx)] = true;
+        self.model_info
+            .borrow_mut()
+            .valid
+            .set(usize::from(root_idx), true);
     }
 
     fn set_non_root(&self, node_idx: &NodeIdx) {
@@ -208,99 +209,110 @@ impl<AA: AncestralAlignment, T: TKFModel> TKFIndelCost<AA, T> {
         if self.model_info.borrow().valid[node_id] {
             return;
         }
-        self.reset_cached_factors(node_idx);
+        self.reset_cache(node_idx);
         let n_blocks = self.model_info.borrow().blocks.len();
         for block_id in 0..n_blocks {
-            let action = self.get_action(node_idx, block_id);
-            let x = self.get_indel_x_for_non_root(node_idx, action);
-            let factor_n = self.get_factor_n_for_non_root(node_idx, action);
+            if block_id == 0 {
+                self.model_info.borrow_mut().previous_event_deletion[usize::from(node_idx)] = false;
+            }
+            let event = self.determine_event(node_idx, block_id);
+            let x = self.event_factor_for_non_root(node_idx, event);
+            let factor_n = self.eta_for_non_root(node_idx, event);
             self.set_node_values(node_idx, block_id, x, factor_n);
-            self.update_previous_event(node_idx, action);
+            self.update_previous_event(node_idx, event);
         }
 
         if let Some(parent_idx) = self.phylo.tree.parent(node_idx) {
-            self.model_info.borrow_mut().valid[usize::from(parent_idx)] = false;
+            self.model_info
+                .borrow_mut()
+                .valid
+                .set(usize::from(parent_idx), false);
         }
-        self.model_info.borrow_mut().valid[node_id] = true;
+        self.model_info.borrow_mut().valid.set(node_id, true);
     }
 
-    fn update_previous_event(&self, node_idx: &NodeIdx, action: Action) {
+    fn update_previous_event(&self, node_idx: &NodeIdx, action: Event) {
         let node_id = usize::from(node_idx);
         match action {
-            Action::Deletion => {
-                self.model_info.borrow_mut().previous_action_deletion[node_id] = true;
+            Event::Deletion => {
+                self.model_info.borrow_mut().previous_event_deletion[node_id] = true;
             }
-            Action::Insertion | Action::Homolog => {
-                self.model_info.borrow_mut().previous_action_deletion[node_id] = false;
+            Event::Insertion | Event::Homolog => {
+                self.model_info.borrow_mut().previous_event_deletion[node_id] = false;
             }
-            Action::Nothing => {}
+            Event::Nothing => {}
         }
     }
 
-    fn reset_cached_factors(&self, node_idx: &NodeIdx) {
+    fn reset_cache(&self, node_idx: &NodeIdx) {
         let node_id = usize::from(node_idx);
         let lambda = self.model.lambda();
         let mu = self.model.mu();
         let blen = self.phylo.tree.node(node_idx).blen;
-        let beta = b(lambda, mu, blen);
-        self.model_info.borrow_mut().beta[node_id] = beta;
-        self.model_info.borrow_mut().n0[node_id] = n0(mu, beta);
-        self.model_info.borrow_mut().h1[node_id] = h1(lambda, mu, beta, blen);
-        self.model_info.borrow_mut().previous_action_deletion[node_id] = false;
-        self.model_info
-            .borrow_mut()
-            .insertion_value_valid
-            .set(node_id, false);
-        self.model_info
-            .borrow_mut()
-            .factor_n_value_valid
-            .set(node_id, false);
-        self.model_info.borrow_mut().valid[node_id] = false;
+        let beta = beta(lambda, mu, blen);
+        let mut model_info = self.model_info.borrow_mut();
+        model_info.beta[node_id] = beta;
+        model_info.n0[node_id] = n0(mu, beta);
+        model_info.h1[node_id] = h1(lambda, mu, beta, blen);
+        model_info.previous_event_deletion[node_id] = false;
+        model_info.insertion_value_valid.set(node_id, false);
+        model_info.eta_cache_valid.set(node_id, false);
+        model_info.valid.set(node_id, false);
     }
 
     fn set_node_values(&self, node_idx: &NodeIdx, block_id: usize, mut x: f64, mut factor_n: f64) {
         let node_id = usize::from(node_idx);
-        self.model_info.borrow_mut().node_x[(node_id, block_id)] = x;
-        self.model_info.borrow_mut().node_factor_n[(node_id, block_id)] = factor_n;
+        self.model_info.borrow_mut().node_event_prob_factor[(node_id, block_id)] = x;
+        self.model_info.borrow_mut().node_eta[(node_id, block_id)] = factor_n;
         for child in &self.phylo.tree.node(node_idx).children {
             let child_id = usize::from(child);
-            x *= self.model_info.borrow().aggregated_x[(child_id, block_id)];
-            factor_n += self.model_info.borrow().factor_ns[(child_id, block_id)];
+            x *= self.model_info.borrow().substree_event_prob_factor[(child_id, block_id)];
+            factor_n += self.model_info.borrow().subtree_eta[(child_id, block_id)];
         }
-        self.model_info.borrow_mut().factor_ns[(node_id, block_id)] = factor_n;
-        self.model_info.borrow_mut().aggregated_x[(node_id, block_id)] = x;
+        self.model_info.borrow_mut().subtree_eta[(node_id, block_id)] = factor_n;
+        self.model_info.borrow_mut().substree_event_prob_factor[(node_id, block_id)] = x;
     }
 
-    fn get_indel_x_for_root(&self, block_id: usize) -> f64 {
+    fn update_insertion_cache(&self, node_idx: &NodeIdx) {
+        let node_id = usize::from(node_idx);
+        let cache_valid = self
+            .model_info
+            .borrow()
+            .insertion_value_valid
+            .contains(node_id);
+        if !cache_valid {
+            let beta = self.model_info.borrow().beta[node_id];
+            let insertion_prob = if node_idx == &self.phylo.tree.root {
+                self.model.insertion_prob_at_root()
+            } else {
+                self.model.insertion_prob_at_non_root(beta)
+            };
+            self.model_info.borrow_mut().insertion[node_id] = insertion_prob;
+            self.model_info
+                .borrow_mut()
+                .insertion_value_valid
+                .set(node_id, true);
+        }
+    }
+
+    fn event_factor_for_root(&self, block_id: usize) -> f64 {
         let root_idx = &self.phylo.tree.root;
         let site = self.model_info.borrow().blocks[block_id] - 1;
-        let char_at_root = self.phylo.msa.ancestral_map(root_idx)[site].is_some();
-        if char_at_root {
-            if self
-                .model_info
-                .borrow()
-                .insertion_value_valid
-                .contains(usize::from(root_idx))
-            {
-                return self.model_info.borrow().insertion[usize::from(root_idx)];
-            } else {
-                let insertion_prob = self.model.insertion_prob_at_root();
-                self.model_info.borrow_mut().insertion[usize::from(root_idx)] = insertion_prob;
-                self.model_info
-                    .borrow_mut()
-                    .insertion_value_valid
-                    .set(usize::from(root_idx), true);
-                return insertion_prob;
-            }
+        let char_present_at_root = self.phylo.msa.ancestral_map(root_idx)[site].is_some();
+        if char_present_at_root {
+            //
+            self.update_insertion_cache(root_idx);
+            return self.model_info.borrow().insertion[usize::from(root_idx)];
         }
         1.0
     }
 
-    fn get_action(&self, node_idx: &NodeIdx, block_id: usize) -> Action {
-        if block_id == 0 {
-            self.model_info.borrow_mut().previous_action_deletion[usize::from(node_idx)] = false;
-        }
+    /// Determines the event that happened on the edge above `node_idx` for the given `block_id`
+    /// based on the ancestral alignment.
+    fn determine_event(&self, node_idx: &NodeIdx, block_id: usize) -> Event {
         let parent_idx = self.phylo.tree.node(node_idx).parent.unwrap();
+        // the presence or absence of characters is the same for all sites in a block
+        // so we can just check the last site of the block
         let site = self.model_info.borrow().blocks[block_id] - 1;
         let parent_is_gap = match parent_idx {
             Internal(_) => self.phylo.msa.ancestral_map(&parent_idx)[site].is_none(),
@@ -311,77 +323,56 @@ impl<AA: AncestralAlignment, T: TKFModel> TKFIndelCost<AA, T> {
             Leaf(_) => self.phylo.msa.leaf_map(node_idx)[site].is_none(),
         };
         if !parent_is_gap && current_is_gap {
-            Action::Deletion
+            Event::Deletion
         } else if !parent_is_gap && !current_is_gap {
-            Action::Homolog
+            Event::Homolog
         } else if parent_is_gap && !current_is_gap {
-            Action::Insertion
+            Event::Insertion
         } else {
-            Action::Nothing
+            Event::Nothing
         }
     }
 
-    fn get_factor_n_for_non_root(&self, node_idx: &NodeIdx, action: Action) -> f64 {
-        if matches!(action, Action::Insertion)
-            && self.model_info.borrow().previous_action_deletion[usize::from(node_idx)]
-        {
-            let node_id = usize::from(node_idx);
+    fn update_eta_cache(&self, node_idx: &NodeIdx) {
+        let node_id = usize::from(node_idx);
+        if !self.model_info.borrow().eta_cache_valid.contains(node_id) {
             let lambda = self.model.lambda();
             let mu = self.model.mu();
             let beta = self.model_info.borrow().beta[node_id];
             let blen = self.phylo.tree.node(node_idx).blen;
 
-            let n0_option = self.model_info.borrow().n0[node_id];
-            if self
-                .model_info
-                .borrow()
-                .factor_n_value_valid
-                .contains(node_id)
-            {
-                return self.model_info.borrow().factor_n[node_id];
-            } else {
-                let mut factor_n = log_n1(lambda, mu, beta, blen);
-                factor_n -= (lambda * beta).ln();
-                // since last event was a deletion n0 is not None
-                factor_n -= n0_option.ln();
-                self.model_info.borrow_mut().factor_n[node_id] = factor_n;
-                self.model_info
-                    .borrow_mut()
-                    .factor_n_value_valid
-                    .set(node_id, true);
-                factor_n
-            }
+            let mut eta = log_n1(lambda, mu, beta, blen);
+            eta -= (lambda * beta).ln();
+            eta -= self.model_info.borrow().n0[node_id].ln();
+            self.model_info.borrow_mut().eta_cache[node_id] = eta;
+            self.model_info
+                .borrow_mut()
+                .eta_cache_valid
+                .set(node_id, true);
+        }
+    }
+
+    fn eta_for_non_root(&self, node_idx: &NodeIdx, event: Event) -> f64 {
+        if matches!(event, Event::Insertion)
+            && self.model_info.borrow().previous_event_deletion[usize::from(node_idx)]
+        {
+            self.update_eta_cache(node_idx);
+            self.model_info.borrow().eta_cache[usize::from(node_idx)]
         } else {
             0.0
         }
     }
 
-    fn get_indel_x_for_non_root(&self, node_idx: &NodeIdx, action: Action) -> f64 {
+    fn event_factor_for_non_root(&self, node_idx: &NodeIdx, action: Event) -> f64 {
         let node_id = usize::from(node_idx);
-        let beta = self.model_info.borrow().beta[node_id];
-
         match action {
-            Action::Deletion => self.model_info.borrow_mut().n0[node_id],
-            Action::Homolog => self.model_info.borrow().h1[node_id],
-            Action::Insertion => {
-                if self
-                    .model_info
-                    .borrow()
-                    .insertion_value_valid
-                    .contains(node_id)
-                {
-                    self.model_info.borrow().insertion[node_id]
-                } else {
-                    let insertion_prob = self.model.insertion_prob_at_non_root(beta);
-                    self.model_info.borrow_mut().insertion[node_id] = insertion_prob;
-                    self.model_info
-                        .borrow_mut()
-                        .insertion_value_valid
-                        .set(node_id, true);
-                    insertion_prob
-                }
+            Event::Deletion => self.model_info.borrow_mut().n0[node_id],
+            Event::Homolog => self.model_info.borrow().h1[node_id],
+            Event::Insertion => {
+                self.update_insertion_cache(node_idx);
+                self.model_info.borrow().insertion[node_id]
             }
-            Action::Nothing => 1.0,
+            Event::Nothing => 1.0,
         }
     }
 }
@@ -401,7 +392,7 @@ impl<AA: AncestralAlignment, T: TKFModel> ModelSearchCost for TKFIndelCost<AA, T
 
     fn set_param(&mut self, idx: usize, value: f64) {
         if self.model.set_param(idx, value) {
-            self.model_info.borrow_mut().valid.fill(false);
+            self.model_info.borrow_mut().valid.clear();
         }
     }
 
@@ -496,25 +487,44 @@ impl<Q: QMatrix, T: TKFModel, AA: AncestralAlignment> ModelSearchCost for TKFCos
     }
 }
 
-fn log_i1(lambda: f64, beta: f64) -> f64 {
-    (1.0 - lambda * beta).ln()
-}
-
-// TKF beta function
-fn b(lambda: f64, mu: f64, time: f64) -> f64 {
+/// Returns the value of beta(t) for a branch of length `time`.
+/// It is called beta(t) in the TKF papers.
+#[inline]
+fn beta(lambda: f64, mu: f64, time: f64) -> f64 {
     let exp_term = ((lambda - mu) * time).exp();
     (1.0 - exp_term) / (mu - lambda * exp_term)
 }
 
+/// Returns the log probability of a character being inserted right of the immortal link
+/// along a branch of length `time`, i.e., at the very left of the sequence.
+/// The 'time' is implicitly included in beta.
+/// It is called p''_1() in the TKF papers.
+#[inline]
+fn log_i1(lambda: f64, beta: f64) -> f64 {
+    (1.0 - lambda * beta).ln()
+}
+
+/// Returns the probability of a homologous character surviving along a branch of length `time`.
+/// The 'time' is also implicitly included in beta.
+/// It is called p_1(t) in the TKF papers.
+#[inline]
 fn h1(lambda: f64, mu: f64, beta: f64, time: f64) -> f64 {
     (-mu * time).exp() * (1.0 - lambda * beta)
 }
 
+/// Returns the probability of a character being deleted along a branch of length `time`.
+/// It is called p'_0(t) in the TKF papers.
+/// The 'time' is also implicitly included in beta.
 #[inline]
 fn n0(mu: f64, beta: f64) -> f64 {
     mu * beta
 }
 
+/// Returns the log probability of a new character being inserted right of a character that is
+/// deleted along a branch of length `time`.
+/// The 'time' is also implicitly included in beta.
+/// It is called p'_1() in the TKF papers.
+#[inline]
 fn log_n1(lambda: f64, mu: f64, beta: f64, time: f64) -> f64 {
     ((1.0 - (-mu * time).exp() - mu * beta) * (1.0 - lambda * beta)).ln()
 }
