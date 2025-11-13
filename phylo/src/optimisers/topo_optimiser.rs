@@ -31,7 +31,7 @@ impl<S: ParsimonyScoring, A: Alignment> Compatible<SprOptimiser> for DolloParsim
 impl<S: ParsimonyScoring, A: Alignment> Compatible<NniOptimiser> for DolloParsimonyCost<S, A> {}
 impl<A: Alignment> Compatible<SprOptimiser> for BasicParsimonyCost<A> {}
 impl<A: Alignment> Compatible<NniOptimiser> for BasicParsimonyCost<A> {}
-impl<AA: AncestralAlignment, T: TKFM> Compatible<NniOptimiser> for TKFIndelCost<AA, T> {}
+impl<T: TKFM, AA: AncestralAlignment> Compatible<NniOptimiser> for TKFIndelCost<T, AA> {}
 impl<Q: QMatrix, T: TKFM, AA: AncestralAlignment> Compatible<NniOptimiser> for TKFCost<Q, T, AA> {}
 
 pub struct TopologyOptimiser<'a, MO, C, R>

@@ -56,32 +56,18 @@ impl TKFModel for TKF92IndelModel {
     /// Sets the parameter if it is valid then returns true,
     /// otherwise the parameter is not changed and false is returned.
     /// This assumes that the other parameters are valid
-    fn set_param(&mut self, idx: usize, value: f64) -> bool {
+    fn set_param(&mut self, idx: usize, value: f64) {
         let param = TKF92Parameters::from_primitive(idx);
         match param {
-            TKF92Parameters::Lambda => {
-                if value > 0.0 && value < self.mu() {
-                    self.params[usize::from(TKF92Parameters::Lambda)] = value;
-                    return true;
-                }
-            }
-            TKF92Parameters::Mu => {
-                if value > self.lambda() {
-                    self.params[usize::from(TKF92Parameters::Mu)] = value;
-                    return true;
-                }
-            }
             TKF92Parameters::R => {
-                if value > 0.0 && value < 1.0 {
-                    self.params[usize::from(TKF92Parameters::R)] = value;
-                    self.log_r = value.ln();
-                    self.one_minus_r_over_r = (1.0 - value) / value;
-                    return true;
-                }
+                self.params[usize::from(TKF92Parameters::R)] = value;
+                self.log_r = value.ln();
+                self.one_minus_r_over_r = (1.0 - value) / value;
             }
-            TKF92Parameters::Invalid(_) => return false,
+            _ => {
+                self.params[idx] = value;
+            }
         };
-        false
     }
 
     fn param_range(&self, idx: usize) -> ParamRange {
@@ -182,7 +168,7 @@ impl<AA: AncestralAlignment> TKF92IndelCostBuilder<AA> {
         }
     }
 
-    pub fn build(self) -> Result<TKFIndelCost<AA, TKF92IndelModel>> {
+    pub fn build(self) -> Result<TKFIndelCost<TKF92IndelModel, AA>> {
         let (lambda, mu) = validate_lambda_and_mu(self.lambda, self.mu);
         let r = validate_r(self.r);
         let model = TKF92IndelModel {
@@ -283,5 +269,35 @@ mod private_tests {
         };
         // Use an invalid index
         model.param_range(3);
+    }
+
+    #[test]
+    fn tkf92_model_fmt() {
+        let tkf_indel_model = TKF92IndelModel {
+            params: vec![1.1, 2.0, 0.3],
+            log_r: 0.0,              // dummy
+            one_minus_r_over_r: 0.0, // dummy
+        };
+
+        let fmt = format!("{}", tkf_indel_model);
+
+        assert_eq!(fmt, "TKF92 with lambda = 1.1, mu = 2, r = 0.3");
+    }
+
+    #[test]
+    fn tkf92_indel_set_param_r() {
+        let mut model = TKF92IndelModel {
+            params: vec![1.0, 2.0, 0.3],
+            log_r: 0.0,              // dummy
+            one_minus_r_over_r: 0.0, // dummy
+        };
+        model.set_param(usize::from(TKF92Parameters::Lambda), 1.1);
+        assert_eq!(model.lambda(), 1.1);
+        model.set_param(usize::from(TKF92Parameters::Mu), 2.1);
+        assert_eq!(model.mu(), 2.1);
+        model.set_param(usize::from(TKF92Parameters::R), 0.4);
+        assert_eq!(model.r(), 0.4);
+        assert_eq!(model.log_r, 0.4f64.ln());
+        assert_eq!(model.one_minus_r_over_r, (1.0 - 0.4) / 0.4);
     }
 }

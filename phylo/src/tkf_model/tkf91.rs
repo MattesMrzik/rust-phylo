@@ -43,24 +43,8 @@ impl TKFModel for TKF91IndelModel {
     /// Sets the parameter if it is valid then returns true, otherwise the parameter is not changed
     /// and false is returned.
     /// This assumes that the other parameter is valid
-    fn set_param(&mut self, idx: usize, value: f64) -> bool {
-        let param = TKF91Parameters::from_primitive(idx);
-        match param {
-            TKF91Parameters::Lambda => {
-                if value > 0.0 && value < self.mu() {
-                    self.params[usize::from(TKF91Parameters::Lambda)] = value;
-                    return true;
-                }
-            }
-            TKF91Parameters::Mu => {
-                if value > self.lambda() {
-                    self.params[usize::from(TKF91Parameters::Mu)] = value;
-                    return true;
-                }
-            }
-            TKF91Parameters::Invalid(_) => return false,
-        };
-        false
+    fn set_param(&mut self, idx: usize, value: f64) {
+        self.params[idx] = value;
     }
 
     fn param_range(&self, idx: usize) -> crate::likelihood::ParamRange {
@@ -141,7 +125,7 @@ impl<AA: AncestralAlignment> TKF91IndelCostBuilder<AA> {
         Self { lambda, mu, phylo }
     }
 
-    pub fn build(self) -> Result<TKFIndelCost<AA, TKF91IndelModel>> {
+    pub fn build(self) -> Result<TKFIndelCost< TKF91IndelModel, AA>> {
         let (lambda, mu) = validate_lambda_and_mu(self.lambda, self.mu);
         let model = TKF91IndelModel {
             params: vec![lambda, mu],
@@ -221,5 +205,27 @@ mod private_tests {
         };
         // Use an invalid index
         model.param_range(2);
+    }
+
+    #[test]
+    fn tkf91_model_fmt() {
+        let tkf_indel_model = TKF91IndelModel {
+            params: vec![1.1, 2.0],
+        };
+
+        let fmt = format!("{}", tkf_indel_model);
+
+        assert_eq!(fmt, "TKF91 with lambda = 1.1, mu = 2");
+    }
+
+    #[test]
+    fn tkf91_indel_set_param() {
+        let mut model = TKF91IndelModel {
+            params: vec![1.0, 2.0],
+        };
+        model.set_param(usize::from(TKF91Parameters::Lambda), 1.1);
+        assert_eq!(model.lambda(), 1.1);
+        model.set_param(usize::from(TKF91Parameters::Mu), 2.1);
+        assert_eq!(model.mu(), 2.1);
     }
 }

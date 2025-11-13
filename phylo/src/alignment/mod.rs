@@ -414,7 +414,7 @@ impl Alignment for MASA {
     /// assert_eq!(i1_seq, "XXX");
     /// let i1_map = phylo_info.msa.ancestral_map(&phylo_info.tree.by_id("I1").idx);
     /// assert_eq!(i1_map, &vec![Some(0), Some(1), None, Some(2)]);
-    /// /// or use the align_seq marco to test seq and map at the same time
+    /// /// or use the align_seq macro to test seq and map at the same time
     /// # Ok(()) }
     /// ```
     fn from_aligned(sequences: Sequences, tree: &Tree) -> Result<Self> {
