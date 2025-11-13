@@ -10,6 +10,7 @@ use crate::likelihood::{ModelSearchCost, ParamRange};
 use crate::phylo_info::PhyloInfo;
 use crate::substitution_models::FreqVector;
 use crate::tree::NodeIdx::{self, Internal, Leaf};
+
 lazy_static! {
     pub(super) static ref DUMMY_FREQS: DVector<f64> = DVector::<f64>::zeros(0);
 }
@@ -43,7 +44,7 @@ pub trait TKFModel: Clone + Display {
     fn insertion_prob_at_non_root(&self, beta: f64) -> f64;
     /// Given the subtree event probability for the root and the block length,
     /// returns the log probability of the block under the model.
-    fn block_prob(&self, x: f64, block_len: usize) -> f64;
+    fn block_prob(&self, tree_event_prob: f64, block_len: usize) -> f64;
     fn get_blocks<AA: AncestralAlignment>(msa: &AA) -> Vec<usize>;
 }
 
@@ -173,23 +174,23 @@ impl<T: TKFModel, AA: AncestralAlignment> TKFIndelCost<T, AA> {
             };
         }
 
-        let l = self.model.lambda();
-        let m = self.model.mu();
+        let lambda = self.model.lambda();
+        let mu = self.model.mu();
         let root_id = usize::from(self.phylo.tree.root);
         let mut logl = 0.0;
-        logl += (1.0 - l / m).ln();
+        logl += (1.0 - lambda / mu).ln();
         let model_info = self.model_info.borrow();
         for node in self.phylo.tree.postorder() {
             if node == &self.phylo.tree.root {
                 continue;
             }
-            logl += log_i1(l, model_info.beta[usize::from(node)]);
+            logl += log_i1(lambda, model_info.beta[usize::from(node)]);
         }
         for block_id in 0..model_info.blocks.len() {
             let block_len = model_info.block_lengths[block_id];
             logl += model_info.subtree_eta[(root_id, block_id)];
-            let x = model_info.subtree_event_prob[(root_id, block_id)];
-            logl += self.model.block_prob(x, block_len);
+            let tree_event_prob = model_info.subtree_event_prob[(root_id, block_id)];
+            logl += self.model.block_prob(tree_event_prob, block_len);
         }
         logl
     }
@@ -260,13 +261,12 @@ impl<T: TKFModel, AA: AncestralAlignment> TKFIndelCost<T, AA> {
         model_info.beta[node_id] = beta;
         model_info.n0[node_id] = n0(mu, beta);
         model_info.h1[node_id] = h1(lambda, mu, beta, blen);
-        model_info.previous_event_deletion[node_id] = false;
-        let insertion_prob = if node_idx == &self.phylo.tree.root {
+        model_info.insertion[node_id] = if node_idx == &self.phylo.tree.root {
             self.model.insertion_prob_at_root()
         } else {
             self.model.insertion_prob_at_non_root(beta)
         };
-        model_info.insertion[node_id] = insertion_prob;
+        model_info.previous_event_deletion[node_id] = false;
         model_info.eta[node_id] = eta(lambda, mu, beta, model_info.n0[node_id], blen);
         model_info.valid.set(node_id, false);
     }

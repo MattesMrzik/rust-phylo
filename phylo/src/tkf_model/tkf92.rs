@@ -53,9 +53,6 @@ impl TKFModel for TKF92IndelModel {
         &self.params
     }
 
-    /// Sets the parameter if it is valid then returns true,
-    /// otherwise the parameter is not changed and false is returned.
-    /// This assumes that the other parameters are valid
     fn set_param(&mut self, idx: usize, value: f64) {
         let param = TKF92Parameters::from_primitive(idx);
         match param {
@@ -88,11 +85,13 @@ impl TKFModel for TKF92IndelModel {
         self.lambda() * beta * self.one_minus_r_over_r
     }
 
-    fn block_prob(&self, x: f64, block_len: usize) -> f64 {
-        if x == 1.0 {
+    fn block_prob(&self, tree_event_prob: f64, block_len: usize) -> f64 {
+        if tree_event_prob == 1.0 {
             0.0
         } else {
-            x.ln() + (block_len as f64 - 1.0) * (1.0 + x).ln() + (block_len as f64) * self.log_r
+            tree_event_prob.ln()
+                + (block_len as f64 - 1.0) * (1.0 + tree_event_prob).ln()
+                + (block_len as f64) * self.log_r
         }
     }
 
@@ -135,6 +134,9 @@ impl Display for TKF92IndelModel {
     }
 }
 
+/// Validates the TKF92 parameter r. If it is not valid, it is set to
+/// default value and a warning is logged.
+/// Returns valid r.
 fn validate_r(r: f64) -> f64 {
     let mut valid_r = r;
     if r == 0.0 {

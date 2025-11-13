@@ -42,9 +42,6 @@ impl TKFModel for TKF91IndelModel {
         &self.params
     }
 
-    /// Sets the parameter if it is valid then returns true, otherwise the parameter is not changed
-    /// and false is returned.
-    /// This assumes that the other parameter is valid
     fn set_param(&mut self, idx: usize, value: f64) {
         self.params[idx] = value;
     }
@@ -66,11 +63,11 @@ impl TKFModel for TKF91IndelModel {
         self.lambda() * beta
     }
 
-    fn block_prob(&self, x: f64, block_len: usize) -> f64 {
-        if x == 1.0 {
+    fn block_prob(&self, tree_event_prob: f64, block_len: usize) -> f64 {
+        if tree_event_prob == 1.0 {
             0.0
         } else {
-            (block_len as f64) * x.ln()
+            (block_len as f64) * tree_event_prob.ln()
         }
     }
 
@@ -93,7 +90,7 @@ impl Display for TKF91IndelModel {
 /// Validates the TKF indel parameters lambda and mu. If they are not valid, they are set to
 /// default values and a warning is logged.
 /// Returns valid (lambda, mu).
-pub(crate) fn validate_lambda_and_mu(lambda: f64, mu: f64) -> (f64, f64) {
+pub(super) fn validate_lambda_and_mu(lambda: f64, mu: f64) -> (f64, f64) {
     let mut valid_lambda = lambda;
     let mut valid_mu = mu;
     if lambda <= 0.0 && mu <= 0.0 {
@@ -142,7 +139,7 @@ impl<AA: AncestralAlignment> TKF91IndelCostBuilder<AA> {
     }
 }
 
-/// Builder for TKF91 cost, i.e., with substitution model.
+/// Builder for TKF91 cost, i.e., with a substitution model.
 pub struct TKF91CostBuilder<Q: QMatrix, AA: AncestralAlignment> {
     lambda: f64,
     mu: f64,
