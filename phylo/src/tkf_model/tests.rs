@@ -1,4 +1,5 @@
 use approx::assert_relative_eq;
+use nalgebra::DVector;
 
 use crate::alignment::{Alignment, AncestralAlignment, Mapping, Sequences, MASA};
 use crate::alphabets::{dna_alphabet, protein_alphabet, Alphabet};
@@ -7,6 +8,7 @@ use crate::phylo_info::PhyloInfo;
 use crate::substitution_models::{QMatrixMaker, SubstModel, SubstitutionCostBuilder as SCB};
 use crate::substitution_models::{BLOSUM, GTR, HIVB, HKY, JC69, K80, TN93, WAG};
 use crate::tkf_model::tkf92::TKF92IndelModel;
+use crate::tkf_model::tkf_indel::DUMMY_FREQS;
 use crate::tree::NodeIdx::{self, Internal, Leaf};
 use crate::{frequencies, record_wo_desc as record, tree};
 
@@ -267,7 +269,7 @@ fn tkf92_get_blocks() {
 }
 
 #[cfg(test)]
-fn setup_test_phylo(alphabet: Alphabet) -> PhyloInfo<MASA> {
+pub(super) fn setup_test_phylo(alphabet: Alphabet) -> PhyloInfo<MASA> {
     let tree = tree!("(((A1:2.0,B2:2.0)I3:0.3,C4:2.0)R5:1.0);");
     let msa = MASA::from_aligned_with_ancestral(
         Sequences::with_alphabet(
@@ -354,42 +356,6 @@ fn tkf_get_and_set_params() {
         tkf_cost.empirical_freqs(),
         setup_test_phylo(dna_alphabet()).freqs()
     );
-}
-
-#[cfg(test)]
-fn validate_lambda_mu(l: f64, m: f64, l_expected: f64, m_expected: f64) {
-    let cost = TKF91IndelCostBuilder::new(l, m, setup_test_phylo(dna_alphabet()))
-        .build()
-        .unwrap();
-    assert_eq!(cost.model.lambda(), l_expected);
-    assert_eq!(cost.model.mu(), m_expected);
-    let cost = TKF92IndelCostBuilder::new(l, m, 0.1, setup_test_phylo(dna_alphabet()))
-        .build()
-        .unwrap();
-    assert_eq!(cost.model.lambda(), l_expected);
-    assert_eq!(cost.model.mu(), m_expected);
-}
-
-#[cfg(test)]
-fn validate_r(r: f64, r_expected: f64) {
-    let cost = TKF92IndelCostBuilder::new(1.0, 2.0, r, setup_test_phylo(dna_alphabet()))
-        .build()
-        .unwrap();
-    assert_eq!(cost.model.r(), r_expected);
-}
-
-#[test]
-fn tkf_validate_params_for_builder() {
-    validate_lambda_mu(-1.0, -2.0, DEFAULT_LAMBDA, DEFAULT_MU);
-    validate_lambda_mu(0.0, 2.0, DEFAULT_LAMBDA_MU_RATIO * 2.0, 2.0);
-    validate_lambda_mu(2.0, -0.1, 2.0, 2.0 / DEFAULT_LAMBDA_MU_RATIO);
-    validate_lambda_mu(2.0, 1.9999, 2.0, 2.0 / DEFAULT_LAMBDA_MU_RATIO);
-    validate_lambda_mu(1.2, 1.21, 1.2, 1.21);
-    validate_r(-0.5, DEFAULT_R);
-    validate_r(0.0, DEFAULT_R);
-    validate_r(1.0, DEFAULT_R);
-    validate_r(1.5, DEFAULT_R);
-    validate_r(0.1, 0.1);
 }
 
 #[test]

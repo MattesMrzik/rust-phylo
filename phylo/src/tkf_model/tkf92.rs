@@ -151,6 +151,7 @@ fn validate_r(r: f64) -> f64 {
     valid_r
 }
 
+/// Builder for TKF92 indel cost, i.e., without substitution model.
 pub struct TKF92IndelCostBuilder<AA: AncestralAlignment> {
     lambda: f64,
     mu: f64,
@@ -185,6 +186,7 @@ impl<AA: AncestralAlignment> TKF92IndelCostBuilder<AA> {
     }
 }
 
+/// Builder for TKF92 cost, i.e., with substitution model.
 pub struct TKF92CostBuilder<Q: QMatrix, AA: AncestralAlignment> {
     lambda: f64,
     mu: f64,
@@ -246,15 +248,12 @@ mod private_tests {
             log_r: 0.0,              // dummy
             one_minus_r_over_r: 0.0, // dummy
         };
-        // Lambda
         let range = model.param_range(usize::from(TKF92Parameters::Lambda));
         assert_eq!(range.0, f64::EPSILON);
         assert_eq!(range.1, model.mu());
-        // Mu
         let range = model.param_range(usize::from(TKF92Parameters::Mu));
         assert_eq!(range.0, model.lambda());
         assert_eq!(range.1, f64::MAX);
-        // R
         let range = model.param_range(usize::from(TKF92Parameters::R));
         assert_eq!(range, PARAM_RANGE_UNIT_INTERVAL_EXCLUSIVE);
     }

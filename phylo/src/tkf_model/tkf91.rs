@@ -5,13 +5,15 @@ use anyhow::bail;
 use log::warn;
 use num_enum::{FromPrimitive, IntoPrimitive};
 
+use crate::alignment::AncestralAlignment;
 use crate::evolutionary_models::EvoModel;
+use crate::phylo_info::PhyloInfo;
 use crate::substitution_models::{QMatrix, SubstModel, SubstitutionCostBuilder as SCB};
 use crate::tkf_model::{
-    TKFCost, TKFIndelCost, TKFIndelModelInfo, DEFAULT_LAMBDA, DEFAULT_LAMBDA_MU_RATIO, DEFAULT_MU,
+    TKFCost, TKFIndelCost, TKFIndelModelInfo, TKFModel, DEFAULT_LAMBDA, DEFAULT_LAMBDA_MU_RATIO,
+    DEFAULT_MU,
 };
 use crate::Result;
-use crate::{alignment::AncestralAlignment, phylo_info::PhyloInfo, tkf_model::TKFModel};
 
 #[derive(Debug, Eq, PartialEq, FromPrimitive, IntoPrimitive)]
 #[repr(usize)]
@@ -114,6 +116,7 @@ pub(crate) fn validate_lambda_and_mu(lambda: f64, mu: f64) -> (f64, f64) {
     (valid_lambda, valid_mu)
 }
 
+/// Builder for TKF91 indel cost, i.e., without substitution model.
 pub struct TKF91IndelCostBuilder<AA: AncestralAlignment> {
     lambda: f64,
     mu: f64,
@@ -125,7 +128,7 @@ impl<AA: AncestralAlignment> TKF91IndelCostBuilder<AA> {
         Self { lambda, mu, phylo }
     }
 
-    pub fn build(self) -> Result<TKFIndelCost< TKF91IndelModel, AA>> {
+    pub fn build(self) -> Result<TKFIndelCost<TKF91IndelModel, AA>> {
         let (lambda, mu) = validate_lambda_and_mu(self.lambda, self.mu);
         let model = TKF91IndelModel {
             params: vec![lambda, mu],
@@ -139,6 +142,7 @@ impl<AA: AncestralAlignment> TKF91IndelCostBuilder<AA> {
     }
 }
 
+/// Builder for TKF91 cost, i.e., with substitution model.
 pub struct TKF91CostBuilder<Q: QMatrix, AA: AncestralAlignment> {
     lambda: f64,
     mu: f64,
@@ -187,11 +191,9 @@ mod private_tests {
         let model = TKF91IndelModel {
             params: vec![0.5, 1.0],
         };
-        // Lambda
         let range = model.param_range(usize::from(TKF91Parameters::Lambda));
         assert_eq!(range.0, f64::EPSILON);
         assert_eq!(range.1, model.mu());
-        // Mu
         let range = model.param_range(usize::from(TKF91Parameters::Mu));
         assert_eq!(range.0, model.lambda());
         assert_eq!(range.1, f64::MAX);
