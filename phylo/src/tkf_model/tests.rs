@@ -3,7 +3,9 @@ use nalgebra::DVector;
 
 use crate::alignment::{Alignment, AncestralAlignment, Mapping, Sequences, MASA};
 use crate::alphabets::{dna_alphabet, protein_alphabet, Alphabet};
-use crate::likelihood::ModelSearchCost;
+use crate::likelihood::{
+    ModelSearchCost, PARAM_RANGE_POSITIVE, PARAM_RANGE_UNIT_INTERVAL_EXCLUSIVE,
+};
 use crate::phylo_info::PhyloInfo;
 use crate::substitution_models::{QMatrixMaker, SubstModel, SubstitutionCostBuilder as SCB};
 use crate::substitution_models::{BLOSUM, GTR, HIVB, HKY, JC69, K80, TN93, WAG};
@@ -416,6 +418,50 @@ fn tkf_get_and_set_freqs() {
     assert_eq!(tkf_cost.freqs().as_slice(), &[0.1, 0.2, 0.3, 0.4]);
     tkf_cost.set_freqs(frequencies!(&[0.4, 0.3, 0.2, 0.1]));
     assert_eq!(tkf_cost.freqs().as_slice(), &[0.4, 0.3, 0.2, 0.1]);
+}
+
+#[test]
+fn tkf91_param_range() {
+    let subst_model = SubstModel::<GTR>::new(&[], &[]);
+    let tkf_cost = TKF91CostBuilder::new(1.0, 2.0, subst_model, setup_test_phylo(dna_alphabet()))
+        .build()
+        .unwrap();
+    let lambda_range = tkf_cost.param_range(usize::from(TKF92Parameters::Lambda));
+    let true_lambda_range = (f64::EPSILON, 2.0 - f64::EPSILON);
+    assert_eq!(lambda_range, true_lambda_range);
+    let mu_range = tkf_cost.param_range(usize::from(TKF92Parameters::Mu));
+    let true_mu_range = (1.0 + f64::EPSILON, f64::MAX);
+    assert_eq!(mu_range, true_mu_range);
+
+    for subst_param_idx in 2..tkf_cost.param_count() {
+        let subst_range = tkf_cost.param_range(subst_param_idx);
+        let true_subst_range = PARAM_RANGE_POSITIVE;
+        assert_eq!(subst_range, true_subst_range);
+    }
+}
+
+#[test]
+fn tkf92_param_range() {
+    let subst_model = SubstModel::<GTR>::new(&[], &[]);
+    let tkf_cost =
+        TKF92CostBuilder::new(1.0, 2.0, 0.3, subst_model, setup_test_phylo(dna_alphabet()))
+            .build()
+            .unwrap();
+    let lambda_range = tkf_cost.param_range(usize::from(TKF92Parameters::Lambda));
+    let true_lambda_range = (f64::EPSILON, 2.0 - f64::EPSILON);
+    assert_eq!(lambda_range, true_lambda_range);
+    let mu_range = tkf_cost.param_range(usize::from(TKF92Parameters::Mu));
+    let true_mu_range = (1.0 + f64::EPSILON, f64::MAX);
+    assert_eq!(mu_range, true_mu_range);
+    let r_range = tkf_cost.param_range(usize::from(TKF92Parameters::R));
+    let true_r_range = PARAM_RANGE_UNIT_INTERVAL_EXCLUSIVE;
+    assert_eq!(r_range, true_r_range);
+
+    for subst_param_idx in 3..tkf_cost.param_count() {
+        let subst_range = tkf_cost.param_range(subst_param_idx);
+        let true_subst_range = PARAM_RANGE_POSITIVE;
+        assert_eq!(subst_range, true_subst_range);
+    }
 }
 
 #[test]

@@ -70,8 +70,8 @@ impl TKFModel for TKF92IndelModel {
     fn param_range(&self, idx: usize) -> ParamRange {
         let param = TKF92Parameters::from_primitive(idx);
         match param {
-            TKF92Parameters::Lambda => (f64::EPSILON, self.mu()),
-            TKF92Parameters::Mu => (self.lambda(), f64::MAX),
+            TKF92Parameters::Lambda => (f64::EPSILON, self.mu() - f64::EPSILON),
+            TKF92Parameters::Mu => (self.lambda() + f64::EPSILON, f64::MAX),
             TKF92Parameters::R => PARAM_RANGE_UNIT_INTERVAL_EXCLUSIVE,
             _ => panic!("Invalid parameter index for TKF model: {param:?}"),
         }
@@ -188,7 +188,7 @@ impl<AA: AncestralAlignment> TKF92IndelCostBuilder<AA> {
     }
 }
 
-/// Builder for TKF92 cost, i.e., with substitution model.
+/// Builder for TKF92 cost, i.e., with a substitution model.
 pub struct TKF92CostBuilder<Q: QMatrix, AA: AncestralAlignment> {
     lambda: f64,
     mu: f64,
@@ -242,23 +242,6 @@ impl<Q: QMatrix, AA: AncestralAlignment> TKF92CostBuilder<Q, AA> {
 #[cfg(test)]
 mod private_tests {
     use super::*;
-
-    #[test]
-    fn tkf92_param_range_valid_indices() {
-        let model = TKF92IndelModel {
-            params: vec![0.5, 1.0, 0.3],
-            log_r: 0.0,              // dummy
-            one_minus_r_over_r: 0.0, // dummy
-        };
-        let range = model.param_range(usize::from(TKF92Parameters::Lambda));
-        assert_eq!(range.0, f64::EPSILON);
-        assert_eq!(range.1, model.mu());
-        let range = model.param_range(usize::from(TKF92Parameters::Mu));
-        assert_eq!(range.0, model.lambda());
-        assert_eq!(range.1, f64::MAX);
-        let range = model.param_range(usize::from(TKF92Parameters::R));
-        assert_eq!(range, PARAM_RANGE_UNIT_INTERVAL_EXCLUSIVE);
-    }
 
     #[test]
     #[should_panic]

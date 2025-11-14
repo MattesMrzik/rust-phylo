@@ -28,13 +28,17 @@ enum Event {
     Nothing,
 }
 
+/// Trait for TKF indel models (i.e., TKF91, TKF92).
 #[allow(clippy::upper_case_acronyms)]
 pub trait TKFModel: Clone + Display {
     // TODO: it might be better for model optimisation to have parameter lambda and scale s = mu/lambda,
     // because of the constraint that mu > lambda.
     fn lambda(&self) -> f64;
     fn mu(&self) -> f64;
-    // TKF91 has 2 parameters: lambda and mu, TKF92 has 3 parameters: lambda, mu and r.
+    /// TKF91 has 2 parameters: lambda and mu, TKF92 has 3 parameters: lambda, mu and r.
+    /// The parameter r in TKF92 is used to model the length distribution of inserted segments,
+    /// i.e., in [`crate::tkf_model::TKF92IndelModel::insertion_prob_at_non_root`] and
+    /// [`super::TKF92IndelModel::insertion_prob_at_root`].
     fn params(&self) -> &[f64];
     fn set_param(&mut self, idx: usize, value: f64);
     fn param_range(&self, idx: usize) -> ParamRange;
@@ -42,8 +46,8 @@ pub trait TKFModel: Clone + Display {
     fn insertion_prob_at_root(&self) -> f64;
     /// Returns the factor corresponding to an insertion event at a non-root node.
     fn insertion_prob_at_non_root(&self, beta: f64) -> f64;
-    /// Given the subtree event probability for the root and the block length,
-    /// returns the log probability of the block under the model.
+    /// Given the subtree event probability for the root (i.e., the tree event probability)
+    /// and the block length, returns the log probability of the block under the model.
     fn block_prob(&self, tree_event_prob: f64, block_len: usize) -> f64;
     fn get_blocks<AA: AncestralAlignment>(msa: &AA) -> Vec<usize>;
 }

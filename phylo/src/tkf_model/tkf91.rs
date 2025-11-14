@@ -7,6 +7,7 @@ use num_enum::{FromPrimitive, IntoPrimitive};
 
 use crate::alignment::AncestralAlignment;
 use crate::evolutionary_models::EvoModel;
+use crate::likelihood::ParamRange;
 use crate::phylo_info::PhyloInfo;
 use crate::substitution_models::{QMatrix, SubstModel, SubstitutionCostBuilder as SCB};
 use crate::tkf_model::{
@@ -46,11 +47,11 @@ impl TKFModel for TKF91IndelModel {
         self.params[idx] = value;
     }
 
-    fn param_range(&self, idx: usize) -> crate::likelihood::ParamRange {
+    fn param_range(&self, idx: usize) -> ParamRange {
         let param = TKF91Parameters::from_primitive(idx);
         match param {
-            TKF91Parameters::Lambda => (f64::EPSILON, self.mu()),
-            TKF91Parameters::Mu => (self.lambda(), f64::MAX),
+            TKF91Parameters::Lambda => (f64::EPSILON, self.mu() - f64::EPSILON),
+            TKF91Parameters::Mu => (self.lambda() + f64::EPSILON, f64::MAX),
             _ => panic!("Invalid parameter index for TKF model: {param:?}"),
         }
     }
@@ -71,6 +72,7 @@ impl TKFModel for TKF91IndelModel {
         }
     }
 
+    /// Since TKF91 is a single-residue indel model, each position is its own block.
     fn get_blocks<AA: AncestralAlignment>(msa: &AA) -> Vec<usize> {
         (1..msa.len() + 1).collect()
     }
@@ -182,19 +184,6 @@ impl<Q: QMatrix, AA: AncestralAlignment> TKF91CostBuilder<Q, AA> {
 #[cfg(test)]
 mod private_tests {
     use super::*;
-
-    #[test]
-    fn tkf91_param_range_valid_indices() {
-        let model = TKF91IndelModel {
-            params: vec![0.5, 1.0],
-        };
-        let range = model.param_range(usize::from(TKF91Parameters::Lambda));
-        assert_eq!(range.0, f64::EPSILON);
-        assert_eq!(range.1, model.mu());
-        let range = model.param_range(usize::from(TKF91Parameters::Mu));
-        assert_eq!(range.0, model.lambda());
-        assert_eq!(range.1, f64::MAX);
-    }
 
     #[test]
     #[should_panic]
