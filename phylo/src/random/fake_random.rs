@@ -5,6 +5,8 @@ use rand::{RngCore, SeedableRng};
 /// signed (isize, i64, i32, i16, i8) integer types.
 /// Can also be set up to produce specific f64 values (up to floating point precision).
 /// If no pre-configured values are provided, it will return 0 for all integer types and 0.0 for f64.
+/// Pre-configured values deterministically influece the order if shuffle is called.
+/// If a no-shuffle is desired, provide u64::MAX as the pre-configured value.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct FakeRng {
     u64_values: Vec<u64>,
@@ -237,6 +239,14 @@ mod tests {
         let mut vec = vec![1, 2, 3, 4, 5];
         rng.shuffle(&mut vec);
         assert_eq!(vec, vec![5, 1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn fake_shuffle_umax() {
+        let mut rng = FakeGenerator::from_rng(FakeRng::from_u64_values(vec![u64::MAX]));
+        let mut vec = (1..100).collect::<Vec<u64>>();
+        rng.shuffle(&mut vec);
+        assert_eq!(vec, (1..100).collect::<Vec<u64>>());
     }
 
     #[test]
