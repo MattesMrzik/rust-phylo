@@ -8,6 +8,7 @@ pub use bio::io::fasta::Record;
 pub mod alignment;
 pub mod alphabets;
 pub mod asr;
+pub mod evolutionary_distances;
 pub mod evolutionary_models;
 pub mod io;
 pub mod likelihood;

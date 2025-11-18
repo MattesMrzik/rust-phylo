@@ -3,16 +3,20 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Ok};
 use log::{info, warn};
+use rand::{Rng, SeedableRng};
 
 use crate::alignment::{Aligner, Alignment, AncestralAlignment, Sequences, MASA, MSA};
-use crate::alphabets::Alphabet;
+use crate::alphabets::{dna_alphabet, protein_alphabet, Alphabet};
 use crate::asr::AncestralSequenceReconstruction;
+use crate::evolutionary_distances::{LevenshteinDNACorrected, LevenshteinProteinCorrected};
 use crate::io::{self, DataError};
 use crate::parsimony::ParsimonyAligner;
 use crate::parsimony_presence_absence::ParsimonyPresenceAbsence;
 use crate::phylo_info::PhyloInfo;
-use crate::random::{DefaultGenerator, RandomSource};
-use crate::tree::{build_nj_tree_w_rng, Tree};
+use crate::random::{DefaultGenerator, RandomGenerator};
+use crate::tree::NJTreeBuilder;
+use crate::tree::Tree;
+use crate::tree::TreeBuilder;
 use crate::Result;
 
 pub struct PhyloInfoBuilder<A: Alignment, AA: AncestralAlignment> {
@@ -111,7 +115,7 @@ impl<A: Alignment, AA: AncestralAlignment> PhyloInfoBuilder<A, AA> {
     }
 
     pub fn build(self) -> Result<PhyloInfo<A>> {
-        self.build_w_rng(&DefaultGenerator::default())
+        self.build_w_rng(&mut DefaultGenerator::default())
     }
 
     /// Builds the PhyloInfo struct from the sequence file and the tree file (if provided).
@@ -137,15 +141,13 @@ impl<A: Alignment, AA: AncestralAlignment> PhyloInfoBuilder<A, AA> {
     /// assert_eq!(info.tree.len(), 7);
     /// # Ok(()) }
     /// ```
-    pub fn build_w_rng(self, rng: &impl RandomSource) -> Result<PhyloInfo<A>> {
+    pub fn build_w_rng<R>(self, rng: &mut RandomGenerator<R>) -> Result<PhyloInfo<A>>
+    where
+        R: Rng + SeedableRng,
+    {
         let sequences = self.read_sequences()?;
-        let tree = match &self.tree_file {
-            Some(tree_file) => self.read_tree(tree_file)?,
-            None => {
-                info!("Building NJ tree from sequences");
-                build_nj_tree_w_rng(&sequences, rng)?
-            }
-        };
+        let tree = self.setup_starting_tree(rng, &sequences)?;
+
         let msa = if sequences.aligned {
             info!("Sequences are aligned");
             A::from_aligned(sequences, &tree)?
@@ -159,18 +161,19 @@ impl<A: Alignment, AA: AncestralAlignment> PhyloInfoBuilder<A, AA> {
     }
 
     pub fn build_with_ancestors(self) -> Result<PhyloInfo<AA>> {
-        self.build_with_ancestors_w_rng(&DefaultGenerator::default())
+        self.build_with_ancestors_w_rng(&mut DefaultGenerator::default())
     }
 
-    pub fn build_with_ancestors_w_rng(self, rng: &impl RandomSource) -> Result<PhyloInfo<AA>> {
+    pub fn build_with_ancestors_w_rng<R>(
+        self,
+        rng: &mut RandomGenerator<R>,
+    ) -> Result<PhyloInfo<AA>>
+    where
+        R: Rng + SeedableRng,
+    {
         let sequences = self.read_sequences()?;
-        let mut tree = match &self.tree_file {
-            Some(tree_file) => self.read_tree(tree_file)?,
-            None => {
-                info!("Building NJ tree from sequences");
-                build_nj_tree_w_rng(&sequences, rng)?
-            }
-        };
+        let mut tree = self.setup_starting_tree(rng, &sequences)?;
+
         let msa = if sequences.len() == tree.n {
             tree = set_missing_tree_node_ids(&tree)?;
             if sequences.aligned {
@@ -200,6 +203,46 @@ impl<A: Alignment, AA: AncestralAlignment> PhyloInfoBuilder<A, AA> {
         }?;
 
         Ok(PhyloInfo { tree, msa })
+    }
+
+    /// Reads starting tree from file, if provided, or runs NJ tree reconstruction
+    /// to create a starting tree.
+    fn setup_starting_tree(
+        &self,
+        rng: &mut RandomGenerator<impl Rng + SeedableRng>,
+        sequences: &Sequences,
+    ) -> Result<Tree> {
+        Ok(match &self.tree_file {
+            Some(tree_file) => {
+                info!("Starting tree provided in file {}", tree_file.display());
+                self.read_tree(tree_file)?
+            }
+            None => {
+                info!("No tree file provided, building NJ tree");
+                self.build_nj_tree(rng, sequences)?
+            }
+        })
+    }
+
+    /// Builds an NJ tree from the provided sequences using the appropriate
+    /// evolutionary distance based on the provided alphabet. Bails if the
+    /// alphabet is unknown (should not happen because the sequences would not
+    /// have been read in the first place).
+    fn build_nj_tree<R: Rng + SeedableRng>(
+        &self,
+        rng: &mut RandomGenerator<R>,
+        sequences: &Sequences,
+    ) -> Result<Tree> {
+        info!("Building NJ tree from sequences");
+        if sequences.alphabet() == &dna_alphabet() {
+            info!("Using corrected Levenshtein DNA distance for distance calculation");
+            NJTreeBuilder::new(LevenshteinDNACorrected {}).build(sequences, rng)
+        } else if sequences.alphabet() == &protein_alphabet() {
+            info!("Using corrected Levenshtein protein distance for distance calculation");
+            NJTreeBuilder::new(LevenshteinProteinCorrected {}).build(sequences, rng)
+        } else {
+            unreachable!("Unknown alphabet, should have been defined earlier");
+        }
     }
 
     fn read_sequences(&self) -> Result<Sequences> {
@@ -328,14 +371,13 @@ pub fn validate_ids_with_ancestors(tree: &Tree, sequences: &Sequences) -> Result
 mod private_tests {
     use std::path::Path;
 
-    use crate::{
-        alignment::Sequences,
-        phylo_info::{
-            phyloinfo_builder::{set_missing_tree_node_ids, PhyloInfoBuilder as PIB},
-            validate_ids_with_ancestors,
-        },
-        record_wo_desc as record, tree,
+    use crate::alignment::Sequences;
+    use crate::phylo_info::{
+        phyloinfo_builder::{set_missing_tree_node_ids, PhyloInfoBuilder as PIB},
+        validate_ids_with_ancestors,
     };
+    use crate::random::FakeGenerator;
+    use crate::{record_wo_desc as record, tree};
 
     #[test]
     fn builder_setters() {
@@ -351,6 +393,36 @@ mod private_tests {
         assert_eq!(builder.tree_file.as_ref().unwrap(), Path::new(newick_path));
         let builder = builder.tree_file(None::<&str>);
         assert_eq!(builder.tree_file, None);
+    }
+
+    #[test]
+    fn build_dna_nj_tree_wo_builder() {
+        let fldr = Path::new("./data");
+        let builder = PIB::new(fldr.join("sequences_DNA1.fasta"));
+
+        let res_tree = builder.build_nj_tree(
+            &mut FakeGenerator::default(),
+            &builder.read_sequences().unwrap(),
+        );
+
+        assert!(res_tree.is_ok());
+        let tree = res_tree.unwrap();
+        assert_eq!(tree.len(), 7);
+    }
+
+    #[test]
+    fn build_protein_nj_tree_wo_builder() {
+        let fldr = Path::new("./data");
+        let builder = PIB::new(fldr.join("sequences_protein1.fasta"));
+
+        let res_tree = builder.build_nj_tree(
+            &mut FakeGenerator::default(),
+            &builder.read_sequences().unwrap(),
+        );
+
+        assert!(res_tree.is_ok());
+        let tree = res_tree.unwrap();
+        assert_eq!(tree.len(), 7);
     }
 
     #[test]
