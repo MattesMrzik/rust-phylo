@@ -515,4 +515,3 @@ fn get_map_from_any_node<'a, AA: AncestralAlignment>(
         Leaf(_) => msa.leaf_map(node),
     }
 }
-
