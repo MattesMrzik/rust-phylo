@@ -199,7 +199,7 @@ impl<A: Alignment, AA: AncestralAlignment> PhyloInfoBuilder<A, AA> {
                 bail!("Building an ancestral alignment from unaligned sequences (including ancestral_sequencess) is not supported");
             }
         } else {
-            bail!("The number of sequences does not match the number of leaves nor the number of nodes in the tree");
+            bail!("The number of sequences ({}) does not match the number of leaves ({}) nor the number of nodes ({}) in the tree", sequences.len(), tree.n, tree.len());
         }?;
 
         Ok(PhyloInfo { tree, msa })
@@ -294,6 +294,7 @@ impl<A: Alignment, AA: AncestralAlignment> PhyloInfoBuilder<A, AA> {
 
 /// Sets missing ids and bails if there are duplicates among the node ids that were already set.
 pub(crate) fn set_missing_tree_node_ids(tree: &Tree) -> Result<Tree> {
+    info!("Setting missing tree node ids");
     let mut tree_with_all_ids = tree.clone();
     let mut seen_user_set_ids = HashSet::new();
     let mut count = 0;
@@ -305,7 +306,8 @@ pub(crate) fn set_missing_tree_node_ids(tree: &Tree) -> Result<Tree> {
                 count += 1;
                 new_id = format!("I{count}");
             }
-            tree_with_all_ids.nodes[usize::from(node_idx)].id = new_id;
+            tree_with_all_ids.nodes[usize::from(node_idx)].id = new_id.clone();
+            info!("Set missing id of node {node_idx} to {new_id}");
         } else if !seen_user_set_ids.insert(id.to_string()) {
             bail!("Duplicate id ({id}) found in the leaves of the tree");
         }

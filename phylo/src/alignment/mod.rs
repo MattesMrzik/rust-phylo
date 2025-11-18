@@ -91,6 +91,8 @@ pub trait Alignment: Display + Clone + Debug {
 pub trait AncestralAlignment: Alignment {
     fn ancestral_seqs(&self) -> &Sequences;
     fn ancestral_map(&self, node_idx: &NodeIdx) -> &Mapping;
+    fn ancestral_maps(&self) -> &SeqMaps;
+    fn update_ancestral_map(&mut self, node_idx: &NodeIdx, map: Mapping);
     /// Checks if inputs are compatible and calls [`Self::from_aligned_with_ancestral_unchecked`].  
     /// Checks:
     /// - if sequences are aligned
@@ -412,7 +414,7 @@ impl Alignment for MASA {
     /// assert_eq!(i1_seq, "XXX");
     /// let i1_map = phylo_info.msa.ancestral_map(&phylo_info.tree.by_id("I1").idx);
     /// assert_eq!(i1_map, &vec![Some(0), Some(1), None, Some(2)]);
-    /// /// or use the align_seq marco to test seq and map at the same time
+    /// // or use the align_seq macro to test seq and map at the same time
     /// # Ok(()) }
     /// ```
     fn from_aligned(sequences: Sequences, tree: &Tree) -> Result<Self> {
@@ -444,6 +446,20 @@ impl AncestralAlignment for MASA {
 
     fn ancestral_map(&self, node: &NodeIdx) -> &Mapping {
         self.ancestral_maps.get(node).unwrap()
+    }
+
+    fn ancestral_maps(&self) -> &SeqMaps {
+        &self.ancestral_maps
+    }
+
+    // This is needed because with the TKF models we need to re-estimate the ancestral maps after
+    // a tree move is applied.
+    fn update_ancestral_map(&mut self, node_idx: &NodeIdx, map: Mapping) {
+        if let Some(anc_map) = self.ancestral_maps.get_mut(node_idx) {
+            *anc_map = map;
+        } else {
+            panic!("NodeIdx {node_idx} is not an internal node");
+        }
     }
 
     /// # Example

@@ -1,3 +1,4 @@
+use std::fmt::Display;
 use std::path::Path;
 
 use approx::assert_relative_eq;
@@ -12,6 +13,7 @@ use crate::substitution_models::{
     dna_models::*, protein_models::*, FreqVector, QMatrix, QMatrixMaker, SubstModel,
     SubstitutionCostBuilder as SCB,
 };
+use crate::tkf_model::{TKF91CostBuilder, TKF92CostBuilder};
 
 #[test]
 fn likelihood_improves_k80() {
@@ -573,4 +575,63 @@ fn stop_condition_epsilon() {
     assert_eq!(result.cost.cost(), result.final_cost);
     let mut costs = result.costs;
     assert!(costs.pop().unwrap() - costs.pop().unwrap() < epsilon);
+}
+
+#[cfg(test)]
+fn tkf_model_opti_template<C: ModelSearchCost + Clone + Display>(c: C) {
+    let initial_llik = c.cost();
+    let o = ModelOptimiser::new(c.clone(), FrequencyOptimisation::Fixed)
+        .run()
+        .unwrap();
+    let intermediate_cost = o.final_cost;
+    assert_eq!(initial_llik, o.initial_cost);
+    assert_eq!(o.final_cost, o.cost.cost());
+    assert!(o.initial_cost < o.final_cost);
+    assert_eq!(c.freqs(), o.cost.freqs());
+    for param in 0..c.param_count() {
+        assert_ne!(c.param(param), o.cost.param(param));
+        let valid_range = o.cost.param_range(param);
+        assert!(valid_range.0 <= o.cost.param(param) && o.cost.param(param) <= valid_range.1);
+    }
+
+    let o = ModelOptimiser::new(o.cost.clone(), FrequencyOptimisation::Empirical)
+        .run()
+        .unwrap();
+    assert_eq!(intermediate_cost, o.initial_cost);
+    assert_eq!(o.final_cost, o.cost.cost());
+    assert!(o.initial_cost < o.final_cost);
+    assert_eq!(o.cost.freqs(), &o.cost.empirical_freqs());
+    for param in 0..c.param_count() {
+        assert_ne!(c.param(param), o.cost.param(param));
+        let valid_range = o.cost.param_range(param);
+        assert!(valid_range.0 <= o.cost.param(param) && o.cost.param(param) <= valid_range.1);
+    }
+}
+
+#[test]
+#[cfg_attr(feature = "ci_coverage", ignore)]
+fn tkf91_model_opti() {
+    let fldr = Path::new("./data/pip/arpip/");
+    let info = PIB::with_attrs(fldr.join("msa.fasta"), fldr.join("tree.nwk"))
+        .build_with_ancestors()
+        .unwrap();
+    let subst_model = SubstModel::<HKY>::new(&[], &[2.0]);
+    let tkf91 = TKF91CostBuilder::new(0.8, 1.0, subst_model.clone(), info.clone())
+        .build()
+        .unwrap();
+    tkf_model_opti_template(tkf91);
+}
+
+#[test]
+#[cfg_attr(feature = "ci_coverage", ignore)]
+fn tkf92_model_opti() {
+    let fldr = Path::new("./data/pip/arpip/");
+    let info = PIB::with_attrs(fldr.join("msa.fasta"), fldr.join("tree.nwk"))
+        .build_with_ancestors()
+        .unwrap();
+    let subst_model = SubstModel::<HKY>::new(&[], &[2.0]);
+    let tkf92 = TKF92CostBuilder::new(0.8, 1.0, 0.2, subst_model, info)
+        .build()
+        .unwrap();
+    tkf_model_opti_template(tkf92);
 }

@@ -19,6 +19,7 @@ pub mod phylo_info;
 pub mod pip_model;
 pub mod random;
 pub mod substitution_models;
+pub mod tkf_model;
 pub mod tree;
 
 pub(crate) mod macros;

@@ -4,7 +4,7 @@ use itertools::Itertools;
 use log::{debug, info};
 use rand::{Rng, SeedableRng};
 
-use crate::alignment::Alignment;
+use crate::alignment::{Alignment, AncestralAlignment};
 use crate::likelihood::TreeSearchCost;
 use crate::optimisers::{
     BranchOptimiser, MoveCostInfo, MoveOptimiser, NniOptimiser, SprOptimiser, StopCondition,
@@ -15,6 +15,7 @@ use crate::parsimony::{BasicParsimonyCost, DolloParsimonyCost};
 use crate::pip_model::PIPCost;
 use crate::random::RandomGenerator;
 use crate::substitution_models::{QMatrix, SubstitutionCost};
+use crate::tkf_model::{TKFCost, TKFIndelCost, TKFModel as TKFM};
 use crate::tree::NodeIdx;
 use crate::Result;
 
@@ -31,6 +32,8 @@ impl<S: ParsimonyScoring, A: Alignment> Compatible<SprOptimiser> for DolloParsim
 impl<S: ParsimonyScoring, A: Alignment> Compatible<NniOptimiser> for DolloParsimonyCost<S, A> {}
 impl<A: Alignment> Compatible<SprOptimiser> for BasicParsimonyCost<A> {}
 impl<A: Alignment> Compatible<NniOptimiser> for BasicParsimonyCost<A> {}
+impl<T: TKFM, AA: AncestralAlignment> Compatible<NniOptimiser> for TKFIndelCost<T, AA> {}
+impl<Q: QMatrix, T: TKFM, AA: AncestralAlignment> Compatible<NniOptimiser> for TKFCost<Q, T, AA> {}
 
 pub struct TopologyOptimiser<'a, MO, C, R>
 where

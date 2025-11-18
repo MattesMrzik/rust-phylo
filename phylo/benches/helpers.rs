@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 /// this file is essentially a workaround for #[cfg(test)] like behaviour for the benchmarks
-/// The dev-depencies are only available in benchmarks or tests
+/// The dev-dependencies are only available in benchmarks or tests
 use std::{collections::HashMap, hint::black_box, path::PathBuf, time::Duration};
 
 use criterion::Criterion;
