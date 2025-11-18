@@ -516,12 +516,3 @@ fn get_map_from_any_node<'a, AA: AncestralAlignment>(
     }
 }
 
-pub trait Foo {
-    fn foo(&mut self, node: &NodeIdx);
-}
-
-impl<'a, T: TKFModel, AA: AncestralAlignment> Foo for Reestimator<'a, T, AA> {
-    fn foo(&mut self, node: &NodeIdx) {
-        let _ = self.reestimate(node);
-    }
-}
