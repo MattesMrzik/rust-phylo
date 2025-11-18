@@ -109,7 +109,7 @@ pub struct Reestimator<'a, T: TKFModel, AA: AncestralAlignment> {
     backtracking_table: Vec<[usize; DP_ASSIGNMENT_AND_EVENTS_SIZE]>, // pointers to prev gamma argmax,
     cost: &'a TKFIndelCost<T, AA>,
     quartet_edges: QuartetEdges,
-    // TODO: add randomizer to choose between argmaxes or do stochastic backtracking
+    // TODO: add randomiser to choose between argmaxes or do stochastic backtracking
 }
 
 impl<'a, T: TKFModel, AA: AncestralAlignment> Reestimator<'a, T, AA> {
