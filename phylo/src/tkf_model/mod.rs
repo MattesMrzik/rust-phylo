@@ -1,13 +1,16 @@
 use std::fmt::Display;
 
 use crate::alignment::AncestralAlignment;
-use crate::likelihood::{ModelSearchCost, ParamRange};
+use crate::likelihood::{ModelSearchCost, ParamRange, TreeSearchCost};
 use crate::substitution_models::{FreqVector, QMatrix, SubstitutionCost};
+use crate::tree::Tree;
 
 pub mod tkf91;
 pub use tkf91::*;
 pub mod tkf92;
 pub use tkf92::*;
+pub mod reestimate;
+pub use reestimate::*;
 pub mod tkf_indel;
 pub use tkf_indel::*;
 
@@ -33,7 +36,7 @@ impl<Q: QMatrix, T: TKFModel, AA: AncestralAlignment> Display for TKFCost<Q, T, 
 
 impl<Q: QMatrix, T: TKFModel, AA: AncestralAlignment> ModelSearchCost for TKFCost<Q, T, AA> {
     fn cost(&self) -> f64 {
-        self.indel_cost.cost() + self.subst_cost.cost()
+        ModelSearchCost::cost(&self.subst_cost) + ModelSearchCost::cost(&self.indel_cost)
     }
 
     fn param_count(&self) -> usize {
@@ -81,6 +84,25 @@ impl<Q: QMatrix, T: TKFModel, AA: AncestralAlignment> ModelSearchCost for TKFCos
     }
 }
 
+impl<Q: QMatrix, T: TKFModel, AA: AncestralAlignment> TreeSearchCost for TKFCost<Q, T, AA> {
+    fn cost(&self) -> f64 {
+        TreeSearchCost::cost(&self.subst_cost) + TreeSearchCost::cost(&self.indel_cost)
+    }
+
+    fn update_tree(&mut self, tree: Tree) {
+        self.indel_cost.update_tree(tree.clone());
+        self.subst_cost.update_tree(tree.clone());
+    }
+
+    fn tree(&self) -> &Tree {
+        self.indel_cost.tree()
+    }
+}
+
 #[cfg(test)]
 #[cfg_attr(coverage, coverage(off))]
 mod tests;
+
+#[cfg(test)]
+#[cfg_attr(coverage, coverage(off))]
+mod reestimate_tests;

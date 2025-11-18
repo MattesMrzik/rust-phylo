@@ -662,8 +662,8 @@ fn tkf91_logl_with_substitution() {
         .unwrap();
 
     // act
-    let logl = tkf_cost.cost();
-    let subst_logl = subst_cost.cost();
+    let logl = ModelSearchCost::cost(&tkf_cost);
+    let subst_logl = ModelSearchCost::cost(&subst_cost);
     let tkf_logl = tkf91_indel_logl_without_aggregation(
         &tkf_cost.indel_cost.model,
         &tkf_cost.indel_cost.phylo,
@@ -689,8 +689,8 @@ fn tkf92_logl_with_substitution() {
         .unwrap();
 
     // act
-    let logl = tkf_cost.cost();
-    let subst_logl = subst_cost.cost();
+    let logl = ModelSearchCost::cost(&tkf_cost);
+    let subst_logl = ModelSearchCost::cost(&subst_cost);
     let tkf_logl = tkf92_indel_logl_without_aggregation(
         &tkf_cost.indel_cost.model,
         &tkf_cost.indel_cost.phylo,
@@ -738,14 +738,14 @@ fn tkf_indel_history_doesnt_change_felsenstein() {
         .unwrap();
 
     // act
-    let tkf_log_1 = tkf_cost1.clone().cost();
-    let tkf_log_2 = tkf_cost2.clone().cost();
-    let tkf_indel_cost_1 = tkf_cost1.indel_cost.cost();
+    let tkf_log_1 = ModelSearchCost::cost(&tkf_cost1.clone());
+    let tkf_log_2 = ModelSearchCost::cost(&tkf_cost2.clone());
+    let tkf_indel_cost_1 = ModelSearchCost::cost(&tkf_cost1.indel_cost);
     let tkf_indel_cost_without_agg_1 = tkf92_indel_logl_without_aggregation(
         &tkf_cost1.indel_cost.model,
         &tkf_cost1.indel_cost.phylo,
     );
-    let tkf_indel_cost_2 = tkf_cost2.indel_cost.cost();
+    let tkf_indel_cost_2 = ModelSearchCost::cost(&tkf_cost2.indel_cost);
     let tkf_indel_cost_without_agg_2 = tkf92_indel_logl_without_aggregation(
         &tkf_cost2.indel_cost.model,
         &tkf_cost2.indel_cost.phylo,
@@ -835,4 +835,26 @@ fn tkf_modify_indel_model_params_costs_match() {
     modify_tkf92_indel_params_costs_match_template::<WAG>(protein_alphabet());
     modify_tkf92_indel_params_costs_match_template::<BLOSUM>(protein_alphabet());
     modify_tkf92_indel_params_costs_match_template::<HIVB>(protein_alphabet());
+}
+
+#[test]
+fn tkf92_update_tree() {
+    let tree = tree!("(((A1:2.0,B2:2.0)I3:0.3,C4:2.0)R5:1.0);");
+    let msa = MASA::from_aligned_with_ancestral(
+        Sequences::new(vec![
+            record!("A1", b"--GTGGA---"),
+            record!("B2", b"-------NNA"),
+            record!("I3", b"--T-------"),
+            record!("C4", b"AGG-------"),
+            record!("R5", b"--A-------"),
+        ]),
+        &tree,
+    )
+    .unwrap();
+    let phylo = PhyloInfo { msa, tree };
+
+    let subst_model = SubstModel::<GTR>::new(&[], &[]);
+    let _tkf_cost = TKF92CostBuilder::new(0.1, 0.2, 0.3, subst_model, phylo.clone())
+        .build()
+        .unwrap();
 }

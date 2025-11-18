@@ -6,10 +6,12 @@ use lazy_static::lazy_static;
 use nalgebra::{DMatrix, DVector};
 
 use crate::alignment::AncestralAlignment;
-use crate::likelihood::{ModelSearchCost, ParamRange};
+use crate::likelihood::{ModelSearchCost, ParamRange, TreeSearchCost};
 use crate::phylo_info::PhyloInfo;
 use crate::substitution_models::FreqVector;
+use crate::tkf_model::reestimate::Reestimator;
 use crate::tree::NodeIdx::{self, Internal, Leaf};
+use crate::tree::Tree;
 
 lazy_static! {
     pub(super) static ref DUMMY_FREQS: DVector<f64> = DVector::<f64>::zeros(0);
@@ -20,8 +22,8 @@ pub(super) static DEFAULT_MU: f64 = 1.1;
 pub(super) static DEFAULT_LAMBDA_MU_RATIO: f64 = 0.9;
 pub(super) static DEFAULT_R: f64 = 0.5;
 
-#[derive(Copy, Clone)]
-enum Event {
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub(super) enum Event {
     Insertion,
     Deletion,
     Homolog,
@@ -64,51 +66,51 @@ pub(super) struct TKFIndelModelInfo {
     /// on the edge above <node> for the block with id <block>.
     /// See [`TKFIndelCost::event_factor_for_root`] and
     /// [`TKFIndelCost::event_factor_for_non_root`].
-    node_event_prob: DMatrix<f64>,
+    pub(super) node_event_prob: DMatrix<f64>,
     /// subtree_event_prob[(node, block)] = the product of the event probability factors
     /// for all edges in the subtree rooted in <node> for the block with id <block>,
     /// including the edge above <node>.
     /// See [`TKFIndelCost::set_node_values`].
-    subtree_event_prob: DMatrix<f64>,
+    pub(super) subtree_event_prob: DMatrix<f64>,
 
     /// node_eta[(node, block)] = node_eta[(node, block)] = eta if the current event is an
     /// insertion and the previous one was a deletion, 0 otherwise.
     /// See [`TKFIndelCost::eta_for_non_root`].
-    node_eta: DMatrix<f64>,
+    pub(super) node_eta: DMatrix<f64>,
     /// subtree_eta[(node, block)] = sum of node_eta for all nodes in the subtree rooted in <node>
     /// for the block with id <block>. Since we only have one insertion per column, at most one
     /// node in the subtree can contribute to this sum.
-    subtree_eta: DMatrix<f64>,
+    pub(super) subtree_eta: DMatrix<f64>,
 
     /// beta[node] = beta(node.blen)), precomputed for each node.
     /// See [`beta`] function.
-    beta: Vec<f64>,
+    pub(super) beta: Vec<f64>,
     /// n0[node] = n0(node.blen), precomputed for each node.
     /// See [`n0`] function.
-    n0: Vec<f64>,
+    pub(super) n0: Vec<f64>,
     /// h1[node] = h1(node.blen), precomputed for each node.
     /// See [`h1`] function.
-    h1: Vec<f64>,
+    pub(super) h1: Vec<f64>,
     /// insertion[node], precomputed for each node.
     /// See [`TKFModel::insertion_prob_at_root`] and [`TKFModel::insertion_prob_at_non_root`].
-    insertion: Vec<f64>,
+    pub(super) insertion: Vec<f64>,
     /// eta[node] = n1/ (n0 * lambda * beta(node.blen)), precomputed for each node.
     /// See [`eta`] function.
-    eta: Vec<f64>,
+    pub(super) eta: Vec<f64>,
 
     /// The right exclusive interval borders of the blocks.
     /// See [`TKFModel::get_blocks`].
-    blocks: Vec<usize>,
+    pub(super) blocks: Vec<usize>,
     /// The lengths of the blocks.
     /// See [`get_block_lengths`].
-    block_lengths: Vec<usize>,
+    pub(super) block_lengths: Vec<usize>,
 
     /// previous_event_deletion[node] = true if the last event was a deletion for a that <node>.
     /// See [`TKFIndelCost::determine_event`] and [`TKFIndelCost::update_previous_event`].
     previous_event_deletion: FixedBitSet,
 
     /// valid[node] = true if the intermediate values for that <node> are valid.
-    valid: FixedBitSet,
+    pub(super) valid: FixedBitSet,
 }
 
 impl TKFIndelModelInfo {
@@ -397,6 +399,40 @@ impl<T: TKFModel, AA: AncestralAlignment> ModelSearchCost for TKFIndelCost<T, AA
 
     fn freqs(&self) -> &FreqVector {
         &DUMMY_FREQS
+    }
+}
+
+impl<T: TKFModel, AA: AncestralAlignment> TreeSearchCost for TKFIndelCost<T, AA> {
+    fn cost(&self) -> f64 {
+        self.logl()
+    }
+
+    fn update_tree(&mut self, tree: Tree) {
+        self.phylo.tree = tree;
+        for idx in self.phylo.tree.dirty.ones() {
+            // TODO: is this correct?
+            self.model_info.borrow_mut().valid.set(idx, false);
+        }
+        let mut reestimator = Reestimator::new(self);
+        for node in self.phylo.tree.postorder() {
+            if self.model_info.borrow().valid[usize::from(node)] {
+                let new_mappings = reestimator.reestimate(node);
+                match new_mappings {
+                    Err(_) => panic!("Re-estimation failed during tree update."),
+                    Ok(mappings) => {
+                        for (node, map) in mappings.0 {
+                            self.phylo.msa.update_ancestral_map(&node, map);
+                        }
+                    }
+                }
+                break;
+            }
+        }
+        self.phylo.tree.clean();
+    }
+
+    fn tree(&self) -> &Tree {
+        &self.phylo.tree
     }
 }
 
