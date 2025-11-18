@@ -95,9 +95,9 @@ impl TKFModel for TKF92IndelModel {
         }
     }
 
-    // Determines the block borders from the alignment. A block border is defined as a
-    // position where any sequence changes from gap to non-gap or vice versa. Returns a sorted
-    // vector of the right exclusive block borders.
+    /// Determines the block borders from the alignment. A block border is defined as a
+    /// position where any sequence changes from gap to non-gap or vice versa. Returns a sorted
+    /// vector of the right exclusive block borders.
     fn get_blocks<AA: AncestralAlignment>(msa: &AA) -> Vec<usize> {
         let mut blocks: HashSet<usize> = HashSet::new();
         for map in msa
@@ -140,15 +140,13 @@ impl Display for TKF92IndelModel {
 fn validate_r(r: f64) -> f64 {
     let mut valid_r = r;
     if r == 0.0 {
-        warn!(
-            "Tried to set r to invalid value 0. It must be in (0, 1). Setting r to {DEFAULT_R}. Hint: r = 0 yields special case: TKF91 model, consider using that instead."
-        );
         valid_r = DEFAULT_R;
+        warn!(
+            "Tried to set r to invalid value 0. It must be in (0, 1). Setting r to {valid_r}. Hint: r = 0 yields special case: TKF91 model, consider using that instead."
+        );
     } else if r <= 0.0 || r >= 1.0 {
-        warn!(
-            "Tried to set r to invalid value {r}. It must be in (0, 1). Setting r to {DEFAULT_R}",
-        );
         valid_r = DEFAULT_R;
+        warn!("Tried to set r to invalid value {r}. It must be in (0, 1). Setting r to {valid_r}.");
     }
     valid_r
 }
@@ -248,8 +246,8 @@ mod private_tests {
     fn tkf92_param_range_invalid_index() {
         let model = TKF92IndelModel {
             params: vec![0.5, 1.0, 0.3],
-            log_r: 0.0,              // dummy
-            one_minus_r_over_r: 0.0, // dummy
+            log_r: 0.0,              // cache filled with dummy since it is not printed
+            one_minus_r_over_r: 0.0, // cache filled with dummy since it is not printed
         };
         // Use an invalid index
         model.param_range(3);
@@ -259,8 +257,8 @@ mod private_tests {
     fn tkf92_model_fmt() {
         let tkf_indel_model = TKF92IndelModel {
             params: vec![1.1, 2.0, 0.3],
-            log_r: 0.0,              // dummy
-            one_minus_r_over_r: 0.0, // dummy
+            log_r: 0.0,              // cache filled with dummy since it is not printed
+            one_minus_r_over_r: 0.0, // cache filled with dummy since it is not printed
         };
 
         let fmt = format!("{}", tkf_indel_model);

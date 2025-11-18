@@ -28,15 +28,17 @@ enum Event {
     Nothing,
 }
 
-/// Trait for TKF indel models (i.e., TKF91, TKF92).
+/// Trait for TKF indel models (i.e., [TKF91](crate::tkf_model::tkf91) and
+/// [TKF92](crate::tkf_model::tkf92)).
 #[allow(clippy::upper_case_acronyms)]
 pub trait TKFModel: Clone + Display {
     // TODO: it might be better for model optimisation to have parameter lambda and scale s = mu/lambda,
     // because of the constraint that mu > lambda.
     fn lambda(&self) -> f64;
     fn mu(&self) -> f64;
-    /// TKF91 has 2 parameters: lambda and mu, TKF92 has 3 parameters: lambda, mu and r.
-    /// The parameter r in TKF92 is used to model the length distribution of inserted segments,
+    /// [TKF91](crate::tkf_model::tkf91) has 2 parameters: lambda and mu, [TKF92](crate::tkf_model::tkf92)
+    /// has 3 parameters: lambda, mu and r.
+    /// The parameter r in [TKF92](crate::tkf_model::tkf92) is used to model the length distribution of inserted segments,
     /// i.e., in [`crate::tkf_model::TKF92IndelModel::insertion_prob_at_non_root`] and
     /// [`super::TKF92IndelModel::insertion_prob_at_root`].
     fn params(&self) -> &[f64];
@@ -103,7 +105,7 @@ pub(super) struct TKFIndelModelInfo {
 
     /// previous_event_deletion[node] = true if the last event was a deletion for a that <node>.
     /// See [`TKFIndelCost::determine_event`] and [`TKFIndelCost::update_previous_event`].
-    previous_event_deletion: Vec<bool>,
+    previous_event_deletion: FixedBitSet,
 
     /// valid[node] = true if the intermediate values for that <node> are valid.
     valid: FixedBitSet,
@@ -129,7 +131,7 @@ impl TKFIndelModelInfo {
             eta: vec![0.0; n_nodes],
             blocks,
             block_lengths,
-            previous_event_deletion: vec![false; n_nodes],
+            previous_event_deletion: FixedBitSet::with_capacity(n_nodes),
             valid: FixedBitSet::with_capacity(n_nodes),
         }
     }
@@ -225,7 +227,10 @@ impl<T: TKFModel, AA: AncestralAlignment> TKFIndelCost<T, AA> {
         let n_blocks = self.model_info.borrow().blocks.len();
         for block_id in 0..n_blocks {
             if block_id == 0 {
-                self.model_info.borrow_mut().previous_event_deletion[usize::from(node_idx)] = false;
+                self.model_info
+                    .borrow_mut()
+                    .previous_event_deletion
+                    .set(usize::from(node_idx), false);
             }
             let event = self.determine_event(node_idx, block_id);
             let node_event_prob = self.event_prob_for_non_root(node_idx, event);
@@ -243,12 +248,11 @@ impl<T: TKFModel, AA: AncestralAlignment> TKFIndelCost<T, AA> {
 
     fn update_previous_event(&self, node_idx: &NodeIdx, action: Event) {
         let node_id = usize::from(node_idx);
+        let mut model_info = self.model_info.borrow_mut();
         match action {
-            Event::Deletion => {
-                self.model_info.borrow_mut().previous_event_deletion[node_id] = true;
-            }
+            Event::Deletion => model_info.previous_event_deletion.set(node_id, true),
             Event::Insertion | Event::Homolog => {
-                self.model_info.borrow_mut().previous_event_deletion[node_id] = false;
+                model_info.previous_event_deletion.set(node_id, false)
             }
             // Since nothing happened, the previous event status remains the same.
             Event::Nothing => {}
@@ -270,7 +274,7 @@ impl<T: TKFModel, AA: AncestralAlignment> TKFIndelCost<T, AA> {
         } else {
             self.model.insertion_prob_at_non_root(beta)
         };
-        model_info.previous_event_deletion[node_id] = false;
+        model_info.previous_event_deletion.set(node_id, false);
         model_info.eta[node_id] = eta(lambda, mu, beta, model_info.n0[node_id], blen);
         model_info.valid.set(node_id, false);
     }
@@ -351,7 +355,7 @@ impl<T: TKFModel, AA: AncestralAlignment> TKFIndelCost<T, AA> {
     fn event_prob_for_non_root(&self, node_idx: &NodeIdx, action: Event) -> f64 {
         let node_id = usize::from(node_idx);
         match action {
-            Event::Deletion => self.model_info.borrow_mut().n0[node_id],
+            Event::Deletion => self.model_info.borrow().n0[node_id],
             Event::Homolog => self.model_info.borrow().h1[node_id],
             Event::Insertion => self.model_info.borrow().insertion[node_id],
             Event::Nothing => 1.0,

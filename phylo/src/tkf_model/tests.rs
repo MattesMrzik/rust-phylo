@@ -290,12 +290,6 @@ pub(super) fn setup_test_phylo(alphabet: Alphabet) -> PhyloInfo<MASA> {
     PhyloInfo { msa, tree }
 }
 
-#[cfg(test)]
-enum Submodel {
-    TKFIndel,
-    SubstitutionModel,
-}
-
 #[test]
 fn tkf_indel_get_and_set_params_and_freqs() {
     let mut tkf_indel_cost =
@@ -764,43 +758,58 @@ fn tkf_indel_history_doesnt_change_felsenstein() {
 }
 
 #[cfg(test)]
-fn modify_tkf92_params_costs_match_template<Q: QMatrix + QMatrixMaker>(
-    alphabet: Alphabet,
-    model_to_change: Submodel,
-) {
-    // arrange
+fn modify_tkf92_subst_params_costs_match_template<Q: QMatrix + QMatrixMaker>(alphabet: Alphabet) {
     let phylo = setup_test_phylo(alphabet);
     let subst_original_param = 1.0;
     let subst_changed_param = 0.5;
     let subst_model = SubstModel::<Q>::new(&[], &[subst_original_param]);
+    let mut tkf_cost = TKF92CostBuilder::new(0.1, 0.2, 0.3, subst_model, phylo.clone())
+        .build()
+        .unwrap();
+
+    // sanity check
+    let logl = ModelSearchCost::cost(&tkf_cost);
+    assert_eq!(logl, ModelSearchCost::cost(&tkf_cost));
+
+    // The likelihood should change if we change model parameters
+    tkf_cost.set_param(3, subst_changed_param);
+    let logl2 = ModelSearchCost::cost(&tkf_cost);
+    assert_eq!(logl2, ModelSearchCost::cost(&tkf_cost));
+    assert_ne!(logl, logl2);
+
+    // The likelihood should be the same if we rebuild from scratch with the same modification
+    let subst_model = SubstModel::<Q>::new(&[], &[subst_changed_param]);
+    let tkf_cost = TKF92CostBuilder::new(0.1, 0.2, 0.3, subst_model, phylo)
+        .build()
+        .unwrap();
+    let new_logl = ModelSearchCost::cost(&tkf_cost);
+    assert_eq!(new_logl, ModelSearchCost::cost(&tkf_cost));
+    assert_eq!(logl2, new_logl);
+}
+
+#[cfg(test)]
+fn modify_tkf92_indel_params_costs_match_template<Q: QMatrix + QMatrixMaker>(alphabet: Alphabet) {
+    let phylo = setup_test_phylo(alphabet);
+    let subst_model = SubstModel::<Q>::new(&[], &[]);
     let tkf_original_mu = 0.2;
     let tkf_changed_mu = 0.25;
     let mut tkf_cost = TKF92CostBuilder::new(0.1, tkf_original_mu, 0.3, subst_model, phylo.clone())
         .build()
         .unwrap();
 
-    // act & assert
     // sanity check
     let logl = ModelSearchCost::cost(&tkf_cost);
     assert_eq!(logl, ModelSearchCost::cost(&tkf_cost));
 
     // The likelihood should change if we change model parameters
-    match model_to_change {
-        Submodel::TKFIndel => tkf_cost.set_param(1, tkf_changed_mu),
-        Submodel::SubstitutionModel => tkf_cost.set_param(3, subst_changed_param),
-    }
-
+    tkf_cost.set_param(1, tkf_changed_mu);
     let logl2 = ModelSearchCost::cost(&tkf_cost);
     assert_eq!(logl2, ModelSearchCost::cost(&tkf_cost));
     assert_ne!(logl, logl2);
 
     // The likelihood should be the same if we rebuild from scratch with the same modification
-    let (new_subst_param, new_tkf_mu) = match model_to_change {
-        Submodel::TKFIndel => (subst_original_param, tkf_changed_mu),
-        Submodel::SubstitutionModel => (subst_changed_param, tkf_original_mu),
-    };
-    let subst_model = SubstModel::<Q>::new(&[], &[new_subst_param]);
-    let tkf_cost = TKF92CostBuilder::new(0.1, new_tkf_mu, 0.3, subst_model, phylo)
+    let subst_model = SubstModel::<Q>::new(&[], &[]);
+    let tkf_cost = TKF92CostBuilder::new(0.1, tkf_changed_mu, 0.3, subst_model, phylo)
         .build()
         .unwrap();
     let new_logl = ModelSearchCost::cost(&tkf_cost);
@@ -810,28 +819,20 @@ fn modify_tkf92_params_costs_match_template<Q: QMatrix + QMatrixMaker>(
 
 #[test]
 fn tkf92_modify_subst_model_params_costs_match() {
-    // For these models the substitution model has parameters
-    // We test changing both the substitution model and the TKF92 parameters
-    modify_tkf92_params_costs_match_template::<K80>(dna_alphabet(), Submodel::SubstitutionModel);
-    modify_tkf92_params_costs_match_template::<HKY>(dna_alphabet(), Submodel::SubstitutionModel);
-    modify_tkf92_params_costs_match_template::<TN93>(dna_alphabet(), Submodel::SubstitutionModel);
-    modify_tkf92_params_costs_match_template::<GTR>(dna_alphabet(), Submodel::SubstitutionModel);
+    modify_tkf92_subst_params_costs_match_template::<K80>(dna_alphabet());
+    modify_tkf92_subst_params_costs_match_template::<HKY>(dna_alphabet());
+    modify_tkf92_subst_params_costs_match_template::<TN93>(dna_alphabet());
+    modify_tkf92_subst_params_costs_match_template::<GTR>(dna_alphabet());
 }
 
 #[test]
 fn tkf_modify_indel_model_params_costs_match() {
-    modify_tkf92_params_costs_match_template::<K80>(dna_alphabet(), Submodel::TKFIndel);
-    modify_tkf92_params_costs_match_template::<HKY>(dna_alphabet(), Submodel::TKFIndel);
-    modify_tkf92_params_costs_match_template::<TN93>(dna_alphabet(), Submodel::TKFIndel);
-    modify_tkf92_params_costs_match_template::<GTR>(dna_alphabet(), Submodel::TKFIndel);
-}
-
-#[test]
-fn tkf_modify_indel_model_params_costs_match_no_subst_params() {
-    // For these models the substitution model has no parameters
-    // We only test changing the TKF92 parameters
-    modify_tkf92_params_costs_match_template::<JC69>(dna_alphabet(), Submodel::TKFIndel);
-    modify_tkf92_params_costs_match_template::<WAG>(protein_alphabet(), Submodel::TKFIndel);
-    modify_tkf92_params_costs_match_template::<BLOSUM>(protein_alphabet(), Submodel::TKFIndel);
-    modify_tkf92_params_costs_match_template::<HIVB>(protein_alphabet(), Submodel::TKFIndel);
+    modify_tkf92_indel_params_costs_match_template::<JC69>(dna_alphabet());
+    modify_tkf92_indel_params_costs_match_template::<K80>(dna_alphabet());
+    modify_tkf92_indel_params_costs_match_template::<HKY>(dna_alphabet());
+    modify_tkf92_indel_params_costs_match_template::<TN93>(dna_alphabet());
+    modify_tkf92_indel_params_costs_match_template::<GTR>(dna_alphabet());
+    modify_tkf92_indel_params_costs_match_template::<WAG>(protein_alphabet());
+    modify_tkf92_indel_params_costs_match_template::<BLOSUM>(protein_alphabet());
+    modify_tkf92_indel_params_costs_match_template::<HIVB>(protein_alphabet());
 }
