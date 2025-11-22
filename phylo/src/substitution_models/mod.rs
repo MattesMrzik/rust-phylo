@@ -54,7 +54,7 @@ pub trait QMatrix: Debug + Clone + Display {
     fn freqs(&self) -> &FreqVector;
     fn set_freqs(&mut self, freqs: FreqVector);
     fn n(&self) -> usize;
-    fn alphabet(&self) -> &Alphabet;
+    fn alphabet() -> &'static Alphabet;
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -118,8 +118,8 @@ impl<Q: QMatrix> EvoModel for SubstModel<Q> {
         self.qmatrix.n()
     }
 
-    fn alphabet(&self) -> &Alphabet {
-        self.qmatrix.alphabet()
+    fn alphabet() -> &'static Alphabet {
+        Q::alphabet()
     }
 }
 
@@ -134,7 +134,7 @@ impl<Q: QMatrix, A: Alignment> SubstitutionCostBuilder<Q, A> {
     }
 
     pub fn build(self) -> Result<SubstitutionCost<Q, A>> {
-        if self.info.msa.alphabet() != self.model.alphabet() {
+        if self.info.msa.alphabet() != Q::alphabet() {
             bail!("Alphabet mismatch between model and alignment");
         }
 
@@ -326,7 +326,7 @@ impl<Q: QMatrix> SubstModelInfo<Q> {
                 if let Some(c) = alignment_map[i] {
                     site_info.copy_from(info.msa.alphabet().char_encoding(seq[c]));
                 } else {
-                    site_info.copy_from(info.msa.alphabet().gap_encoding());
+                    site_info.copy_from(info.msa.alphabet().missing_char_encoding());
                 }
             }
             leaf_seq_info.insert(node.idx, leaf_seq_w_gaps);
