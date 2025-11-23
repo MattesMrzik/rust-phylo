@@ -156,12 +156,20 @@ impl<'a, T: TKFModel, AA: AncestralAlignment> EdgeSeqsReestimator<'a, T, AA> {
                 break;
             }
         }
+        println!(
+            "before prepare dp logl from root {}",
+            self.cost.logl_from_root_model_info()
+        );
         self.prepare_for_dp(v2_idx);
         self.fill_dp_table();
         let backtrack_res = self.backtrack();
         self.update_mappings(&backtrack_res);
         self.valid_false();
         self.make_valid_for_further_reestimate_calls();
+        println!(
+            "after reestimate logl from root {}",
+            self.cost.logl_from_root_model_info()
+        );
         backtrack_res.logl
     }
 
@@ -215,6 +223,11 @@ impl<'a, T: TKFModel, AA: AncestralAlignment> EdgeSeqsReestimator<'a, T, AA> {
     // assumes that new mappings were already set in the msa
     fn make_valid_for_further_reestimate_calls(&mut self) {
         let num_blocks = self.cost.model_info.borrow().blocks.len();
+        self.cost
+            .model_info
+            .borrow_mut()
+            .previous_event_deletion
+            .clear();
         for block_id in 0..num_blocks {
             let root_id = usize::from(self.cost.phylo.tree.root);
             for edge in self.quartet_edges.edges() {
@@ -673,6 +686,7 @@ pub(super) fn get_map_from_any_node<'a, AA: AncestralAlignment>(
 #[cfg_attr(coverage, coverage(off))]
 mod private_tests {
     use crate::alphabets::dna_alphabet;
+    use crate::phylo_info::PhyloInfoBuilder;
     use crate::tkf_model::tests::setup_test_phylo;
     use crate::tkf_model::{EdgeSeqsReestimator, TKF92IndelCostBuilder};
 
@@ -690,5 +704,35 @@ mod private_tests {
         assert_ne!(reestimator.cost.logl_from_root_model_info(), original_logl);
         reestimator.make_valid_for_further_reestimate_calls();
         assert_eq!(reestimator.cost.logl_from_root_model_info(), original_logl);
+    }
+
+    #[test]
+    fn tkf_remove_and_add_back_quartet_larger() {
+        let msa = "/Users/mrzi/Documents/develop/115-tkf_tree_search/rust-phylo/phylo/data/tkf_masas/fails.fasta";
+        let tree =
+        "/Users/mrzi/Documents/develop/58-TKF92/rust-phylo/phylo/data/runtime/tree_of_life.newick";
+        let phylo = PhyloInfoBuilder::with_attrs(msa, tree)
+            .build_with_ancestors()
+            .unwrap();
+
+        let mut cost = TKF92IndelCostBuilder::new(1.0, 2.0, 0.3, phylo)
+            .build()
+            .unwrap();
+        let mut reestimator = EdgeSeqsReestimator::new(&mut cost);
+        let original_logl = reestimator.cost.logl();
+        assert_eq!(
+            original_logl,
+            reestimator.cost.logl_from_root_model_info(),
+            "before"
+        );
+        let v2_idx = reestimator.cost.phylo.tree.by_id("N372").idx;
+        reestimator.prepare_for_dp(&v2_idx);
+        assert_ne!(reestimator.cost.logl_from_root_model_info(), original_logl);
+        reestimator.make_valid_for_further_reestimate_calls();
+        assert_eq!(
+            reestimator.cost.logl_from_root_model_info(),
+            original_logl,
+            "after"
+        );
     }
 }

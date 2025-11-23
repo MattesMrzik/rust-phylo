@@ -197,7 +197,7 @@ fn tkf92_reestimate_large_tree() {
     let mut reestimator = EdgeSeqsReestimator::new(&mut tkf_cost);
     let mut prev_phylo = reestimator.get_phylo().clone();
     for node in ["I3", "I6", "I7", "I3", "I6", "I7"] {
-        let best_logl = reestimator.reestimate(&phylo.tree.by_id(node).idx);
+        let backtrack_logl = reestimator.reestimate(&phylo.tree.by_id(node).idx);
         for node in phylo.tree.postorder() {
             if get_map_from_any_node(&prev_phylo.msa, node)
                 != get_map_from_any_node(&reestimator.get_phylo().msa, node)
@@ -212,7 +212,7 @@ fn tkf92_reestimate_large_tree() {
             .unwrap();
         let new_logl = tkf_cost.cost();
         assert!(masa_is_dollo(&tkf_cost.phylo));
-        assert_relative_eq!(best_logl, new_logl, epsilon = 1e-12);
+        assert_relative_eq!(backtrack_logl, new_logl, epsilon = 1e-12);
         assert!(new_logl >= prev_logl);
         prev_logl = new_logl;
     }

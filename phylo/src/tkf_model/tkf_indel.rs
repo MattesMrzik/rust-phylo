@@ -108,7 +108,7 @@ pub(super) struct TKFIndelModelInfo {
 
     /// previous_event_deletion[node] = true if the last event was a deletion for a that <node>.
     /// See [`TKFIndelCost::determine_event`] and [`TKFIndelCost::update_previous_event`].
-    previous_event_deletion: FixedBitSet,
+    pub(super) previous_event_deletion: FixedBitSet,
 
     /// valid[node] = true if the intermediate values for that <node> are valid.
     pub(super) valid: FixedBitSet,
