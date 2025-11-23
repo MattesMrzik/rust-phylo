@@ -462,7 +462,12 @@ fn tkf92_reestimate_large_tree_for_file_iterative() {
         .unwrap();
     let mut prev_logl = tkf_cost.clone().cost();
     let mut rng = DefaultGenerator::new(41);
-    let mut random_nodes = phylo.tree.postorder().iter().collect::<Vec<_>>().repeat(repeat);
+    let mut random_nodes = phylo
+        .tree
+        .postorder()
+        .iter()
+        .collect::<Vec<_>>()
+        .repeat(repeat);
     rng.shuffle(&mut random_nodes);
 
     let mut reestimator = EdgeSeqsReestimator::new(&mut tkf_cost);
