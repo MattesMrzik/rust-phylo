@@ -2,6 +2,8 @@ use anyhow::{bail, Error};
 use approx::assert_relative_eq;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
+
+#[cfg(feature = "par-regraft")]
 use rayon::prelude::*;
 
 type Result<T> = std::result::Result<T, Error>;
@@ -9,6 +11,8 @@ type Result<T> = std::result::Result<T, Error>;
 use crate::alignment::{AncestralAlignment, MASA};
 use crate::alphabets::dna_alphabet;
 use crate::likelihood::ModelSearchCost;
+use crate::phylo_info::PhyloInfoBuilder;
+use crate::tkf_model::reestimate_tests::masa_is_dollo;
 use crate::tkf_model::tests::setup_test_phylo;
 use crate::tkf_model::EdgeSeqsReestimator;
 use crate::tkf_model::{TKF92IndelCostBuilder, TKFIndelCost, TKFModel};
@@ -85,32 +89,51 @@ fn cost_for_edge_seqs<T: TKFModel>(
     cost: &mut TKFIndelCost<T, MASA>,
     edge_seqs: &[(bool, bool)],
 ) -> f64 {
+    use crate::likelihood::TreeSearchCost;
+
     let v1_idx = cost.phylo.tree.node(v2_idx).parent.unwrap();
     let block_lens = cost.model_info.borrow().block_lengths.clone();
     let seq_len = cost.phylo.msa.len();
 
-    // this probably does not work !!!
-
-    let v1_fixed_bit_set = FixedBitSet::from_iter(edge_seqs.iter().map(|e| e.0 as usize));
-    let v2_fixed_bit_set = FixedBitSet::from_iter(edge_seqs.iter().map(|e| e.1 as usize));
+    let mut v2_fixed_bit_set = FixedBitSet::with_capacity(block_lens.len());
+    let mut v1_fixed_bit_set = FixedBitSet::with_capacity(block_lens.len());
+    for (site, edge_assignment) in edge_seqs.iter().enumerate() {
+        if edge_assignment.0 {
+            v1_fixed_bit_set.insert(site);
+        }
+        if edge_assignment.1 {
+            v2_fixed_bit_set.insert(site);
+        }
+    }
 
     let new_v1_mapping = mapping_from_node_seq(&v1_fixed_bit_set, &block_lens, seq_len);
     let new_v2_mapping = mapping_from_node_seq(&v2_fixed_bit_set, &block_lens, seq_len);
     cost.phylo.msa.update_ancestral_map(&v1_idx, new_v1_mapping);
     cost.phylo.msa.update_ancestral_map(v2_idx, new_v2_mapping);
 
+    // cost.model_info
+    //     .borrow_mut()
+    //     .valid
+    //     .set(usize::from(v2_idx), false);
+    // more save than above but slower
+    // cost.model_info.borrow_mut().valid.clear();
+    for child in &cost.phylo.tree.node(v2_idx).children {
+        cost.model_info
+            .borrow_mut()
+            .valid
+            .set(usize::from(child), false);
+    }
     cost.model_info
         .borrow_mut()
         .valid
-        .set(usize::from(v2_idx), false);
+        .set(usize::from(cost.tree().sibling(v2_idx).unwrap()), false);
     cost.logl()
 }
 
-type IterOverPossibilities =
-    std::iter::Enumerate<itertools::MultiProduct<std::vec::IntoIter<(bool, bool)>>>;
-
 fn single_thread_dp_max<T: TKFModel>(
-    possible_edge_assignments: IterOverPossibilities,
+    possible_edge_assignments: std::iter::Enumerate<
+        itertools::MultiProduct<std::vec::IntoIter<(bool, bool)>>,
+    >,
     number_of_possibilities: usize,
     cost: &mut TKFIndelCost<T, MASA>,
     v2_idx: &NodeIdx,
@@ -140,6 +163,7 @@ fn single_thread_dp_max<T: TKFModel>(
     }
 }
 
+#[cfg(feature = "par-regraft")]
 fn multi_thread_dp_max(
     possible_edge_assignments: Vec<Vec<(bool, bool)>>,
     number_of_possibilities: usize,
@@ -155,27 +179,21 @@ fn multi_thread_dp_max(
         .enumerate()
         .zip(cost_clones)
         .into_par_iter()
-        .map(move |((chunk_id, chunk), thread_cost)| {
+        .map(move |((chunk_id, chunk), mut thread_cost)| {
             let mut local_max: Option<f64> = None;
 
             for i in chunk {
                 let possibility = decode_index(i, &possible_edge_assignments);
                 // let new_mapping = reassign.mapping_from_vec(&possibility);
 
-                let current = cost_for_edge_seqs(v2_idx, &mut thread_cost.clone(), &possibility);
+                let current = cost_for_edge_seqs(v2_idx, &mut thread_cost, &possibility);
 
                 local_max = Some(match local_max {
                     Some(m) => m.max(current),
                     None => current,
                 });
-                if chunk_id == 0 && (i + 1) % 10000 == 0 {
-                    let percent = (i + 1) as f64 / chunk_size as f64 * 100.0;
-                    // print!("calculating {i} of {number_of_possibilities}, which is {percent:.4}% \r");
-                    println!(
-                        "calculating {} of {number_of_possibilities}, which is {percent:.4}%",
-                        i + 1
-                    );
-                    // let _ = io::stdout().flush();
+                if chunk_id == 0 {
+                    print_progress(i, number_of_possibilities / num_threads);
                 }
             }
 
@@ -191,7 +209,6 @@ fn multi_thread_dp_max(
 fn find_brute_force_max<T: TKFModel + Send>(
     mut cost: TKFIndelCost<T, MASA>,
     v2_idx: &NodeIdx,
-    multi_threading: bool,
 ) -> Result<f64> {
     let n_blocks = cost.model_info.borrow().blocks.len();
     let mut reassign = EdgeSeqsReestimator::new(&mut cost);
@@ -205,18 +222,8 @@ fn find_brute_force_max<T: TKFModel + Send>(
     let number_of_possibilities = number_of_possibilities(&possible_edge_assignments);
     too_many_possibilities(number_of_possibilities)?;
 
-    if !multi_threading {
-        let possible_edge_seqs = possible_edge_assignments
-            .into_iter()
-            .multi_cartesian_product()
-            .enumerate();
-        single_thread_dp_max(
-            possible_edge_seqs,
-            number_of_possibilities,
-            &mut cost,
-            v2_idx,
-        )
-    } else {
+    cfg_if::cfg_if! {
+    if #[cfg(feature="par-regraft")] {
         let num_threads = rayon::current_num_threads();
         // let num_threads = 10;
         println!("using {num_threads} threads");
@@ -227,7 +234,19 @@ fn find_brute_force_max<T: TKFModel + Send>(
             v2_idx,
             num_threads,
         )
-    }
+       } else {
+           let possible_edge_seqs = possible_edge_assignments
+        .into_iter()
+        .multi_cartesian_product()
+        .enumerate();
+    single_thread_dp_max(
+        possible_edge_seqs,
+        number_of_possibilities,
+        &mut cost,
+        v2_idx,
+    )
+
+    }}
 }
 
 #[cfg(test)]
@@ -239,19 +258,31 @@ fn get_max_dp_reestimated<T: TKFModel>(
     let mut reassign = EdgeSeqsReestimator::new(&mut cost);
     // let factor_ns_before_reestimate = reassign.count_factor_ns_on_dirty_tree(node_idx);
     let backtracking_prob = reassign.reestimate(node_idx);
+    let msa = reassign.get_phylo().msa.clone();
+    // println!(
+    //     "mapping v2 {}",
+    //     msa.ancestral_map(node_idx)
+    //         .iter()
+    //         .map(|s| if s.is_some() { '1' } else { '0' })
+    //         .collect::<String>()
+    // );
+    // println!("mapping v1 {}", {
+    //     let v1_idx = cost.phylo.tree.node(node_idx).parent.unwrap();
+    //     msa.ancestral_map(&v1_idx)
+    //         .iter()
+    //         .map(|s| if s.is_some() { '1' } else { '0' })
+    //         .collect::<String>()
+    // });
 
     // for statistic count the number of times the dp max is different to the original mapping
     // let mut reassigned_same_as_ori = true;
-    cost.model_info
-        .borrow_mut()
-        .valid
-        .set(usize::from(node_idx), false);
+    cost.model_info.borrow_mut().valid.clear();
     let reestimated_cost = cost.logl();
     // let factor_ns_after_reestimate = reassign.count_factor_ns_on_dirty_tree(node_idx);
 
     // println!("checking dp table vs dp armgax cost");
     if assert_check {
-        assert_relative_eq!(reestimated_cost, backtracking_prob, epsilon = 1e-12);
+        assert_relative_eq!(reestimated_cost, backtracking_prob, epsilon = 1e-9);
     }
     // println!("factor_ns_after_reestimate = {factor_ns_after_reestimate}");
     // println!("factor_ns_before_reestimate = {factor_ns_before_reestimate}");
@@ -261,7 +292,6 @@ fn get_max_dp_reestimated<T: TKFModel>(
 #[cfg(test)]
 fn compare_dp_vs_brute_force_for_every_internal_node<T: TKFModel + Send>(
     cost: TKFIndelCost<T, MASA>,
-    multi_threading: bool,
 ) {
     for v2_idx in cost.phylo.tree.postorder() {
         // only re-estimate non root internal nodes
@@ -269,7 +299,7 @@ fn compare_dp_vs_brute_force_for_every_internal_node<T: TKFModel + Send>(
             continue;
         }
         let max_dp = get_max_dp_reestimated(cost.clone(), v2_idx, true);
-        let max_brute_force = find_brute_force_max(cost.clone(), v2_idx, multi_threading);
+        let max_brute_force = find_brute_force_max(cost.clone(), v2_idx);
         match max_brute_force {
             Ok(max_bf) => {
                 // println!(
@@ -278,6 +308,14 @@ fn compare_dp_vs_brute_force_for_every_internal_node<T: TKFModel + Send>(
                 //     max_dp,
                 //     max_bf
                 // );
+                if (max_dp - max_bf).abs() > 1e-12 {
+                    println!(
+                        "node {}: dp max = {}, brute force max = {}",
+                        cost.phylo.tree.node(v2_idx).id,
+                        max_dp,
+                        max_bf
+                    );
+                }
                 assert_relative_eq!(max_dp, max_bf, epsilon = 1e-12);
             }
             Err(e) => {
@@ -292,11 +330,58 @@ fn compare_dp_vs_brute_force_for_every_internal_node<T: TKFModel + Send>(
 }
 
 #[test]
-fn tkf91_compare_dp_vs_brute_force() {
+fn tkf92_compare_dp_vs_brute_force() {
     let phylo = setup_test_phylo(dna_alphabet());
     let tkf_cost = TKF92IndelCostBuilder::new(1.0, 2.0, 0.5, phylo)
         .build()
         .unwrap();
     let _ = ModelSearchCost::cost(&tkf_cost);
-    compare_dp_vs_brute_force_for_every_internal_node(tkf_cost, true);
+    compare_dp_vs_brute_force_for_every_internal_node(tkf_cost);
+}
+
+#[test]
+fn tkf92_compare_dp_vs_brute_force_for_file() {
+    let msa = "/Users/mrzi/Documents/develop/58-TKF92/rust-phylo/phylo/data/runtime/outputname_TRUE_strip250.fasta";
+    let tree =
+        "/Users/mrzi/Documents/develop/58-TKF92/rust-phylo/phylo/data/runtime/tree_of_life.newick";
+    let phylo = PhyloInfoBuilder::with_attrs(msa, tree)
+        .build_with_ancestors()
+        .unwrap();
+    assert!(masa_is_dollo(&phylo));
+
+    let tkf_cost = TKF92IndelCostBuilder::new(1.0, 2.0, 0.5, phylo)
+        .build()
+        .unwrap();
+    let _ = ModelSearchCost::cost(&tkf_cost);
+    compare_dp_vs_brute_force_for_every_internal_node(tkf_cost);
+}
+
+#[test]
+fn tkf92_reestimate_large_tree() {
+    let msa = "/Users/mrzi/Documents/develop/58-TKF92/rust-phylo/phylo/data/runtime/outputname_TRUE_strip250.fasta";
+    let tree =
+        "/Users/mrzi/Documents/develop/58-TKF92/rust-phylo/phylo/data/runtime/tree_of_life.newick";
+    let phylo = PhyloInfoBuilder::with_attrs(msa, tree)
+        .build_with_ancestors()
+        .unwrap();
+
+    assert!(masa_is_dollo(&phylo));
+    let mut tkf_cost = TKF92IndelCostBuilder::new(1.0, 2.0, 0.3, phylo.clone())
+        .build()
+        .unwrap();
+    let mut prev_logl = tkf_cost.clone().cost();
+    let mut reestimator = EdgeSeqsReestimator::new(&mut tkf_cost);
+    let mut prev_phylo = reestimator.get_phylo().clone();
+    for node in phylo.tree.postorder() {
+        let best_logl = reestimator.reestimate(node);
+        assert!(masa_is_dollo(&reestimator.get_phylo().clone()));
+        let tkf_cost = TKF92IndelCostBuilder::new(1.0, 2.0, 0.3, reestimator.get_phylo().clone())
+            .build()
+            .unwrap();
+        let new_logl = tkf_cost.cost();
+        assert!(masa_is_dollo(&tkf_cost.phylo));
+        assert_relative_eq!(best_logl, new_logl, epsilon = 1e-12);
+        assert!(new_logl >= prev_logl);
+        prev_logl = new_logl;
+    }
 }

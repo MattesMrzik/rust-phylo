@@ -141,7 +141,7 @@ fn tkf92_reestimate() {
 }
 
 #[cfg(test)]
-fn masa_is_dollo<AA: AncestralAlignment>(phylo: &PhyloInfo<AA>) -> bool {
+pub(super) fn masa_is_dollo<AA: AncestralAlignment>(phylo: &PhyloInfo<AA>) -> bool {
     for col_idx in 0..phylo.msa.len() {
         let mut num_insertions = 0;
         for node in phylo.tree.postorder() {
@@ -196,7 +196,7 @@ fn tkf92_reestimate_large_tree() {
     let mut prev_logl = tkf_cost.clone().cost();
     let mut reestimator = EdgeSeqsReestimator::new(&mut tkf_cost);
     let mut prev_phylo = reestimator.get_phylo().clone();
-    for node in ["I3", "I6", "I7"] {
+    for node in ["I3", "I6", "I7", "I3", "I6", "I7"] {
         let best_logl = reestimator.reestimate(&phylo.tree.by_id(node).idx);
         for node in phylo.tree.postorder() {
             if get_map_from_any_node(&prev_phylo.msa, node)
