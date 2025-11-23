@@ -2,6 +2,7 @@ use std::fmt::{Debug, Display};
 
 use anyhow::bail;
 use hashbrown::HashMap;
+use itertools::Itertools;
 
 use crate::alphabets::Alphabet;
 use crate::asr::AncestralSequenceReconstruction;
@@ -334,6 +335,10 @@ pub struct MASA {
 impl Display for MASA {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let both_maps = self.leaf_maps.iter().chain(self.ancestral_maps.iter());
+        // sort by node id
+        let both_maps = both_maps.sorted_by(|(node_idx_a, _), (node_idx_b, _)| {
+            self.idx_to_id[usize::from(*node_idx_a)].cmp(&self.idx_to_id[usize::from(*node_idx_b)])
+        });
         for (node_idx, seq_map) in both_maps {
             let id = &self.idx_to_id[usize::from(node_idx)];
             let record = match node_idx {

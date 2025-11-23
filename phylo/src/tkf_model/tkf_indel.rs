@@ -2,6 +2,7 @@ use std::cell::RefCell;
 use std::fmt::Display;
 
 use fixedbitset::FixedBitSet;
+use itertools::Itertools;
 use lazy_static::lazy_static;
 use nalgebra::{DMatrix, DVector};
 
@@ -9,7 +10,7 @@ use crate::alignment::AncestralAlignment;
 use crate::likelihood::{ModelSearchCost, ParamRange, TreeSearchCost};
 use crate::phylo_info::PhyloInfo;
 use crate::substitution_models::FreqVector;
-use crate::tkf_model::reestimate::Reestimator;
+use crate::tkf_model::reestimate::EdgeSeqsReestimator;
 use crate::tree::NodeIdx::{self, Internal, Leaf};
 use crate::tree::Tree;
 
@@ -111,6 +112,11 @@ pub(super) struct TKFIndelModelInfo {
 
     /// valid[node] = true if the intermediate values for that <node> are valid.
     pub(super) valid: FixedBitSet,
+    /// valid_for_reestimation[node] = true if the intermediate values can be used for re-estimation.
+    /// Since for re-estimation we don't need the subtree values for the internal nodes except the
+    /// root. So if many re-estimations are done for fixed tree and model, we can save time by not
+    /// recomputing subtree values for internal nodes that are not the root.
+    pub(super) valid_for_reestimation: FixedBitSet,
 }
 
 impl TKFIndelModelInfo {
@@ -135,6 +141,7 @@ impl TKFIndelModelInfo {
             block_lengths,
             previous_event_deletion: FixedBitSet::with_capacity(n_nodes),
             valid: FixedBitSet::with_capacity(n_nodes),
+            valid_for_reestimation: FixedBitSet::with_capacity(n_nodes),
         }
     }
 }
@@ -166,7 +173,7 @@ impl<T: TKFModel, AA: AncestralAlignment> Display for TKFIndelCost<T, AA> {
 }
 
 impl<T: TKFModel, AA: AncestralAlignment> TKFIndelCost<T, AA> {
-    pub(super) fn logl(&self) -> f64 {
+    pub(super) fn set_all_nodes(&self) {
         for node_idx in self.phylo.tree.postorder() {
             match node_idx {
                 Internal(_) => {
@@ -181,7 +188,14 @@ impl<T: TKFModel, AA: AncestralAlignment> TKFIndelCost<T, AA> {
                 }
             };
         }
+    }
 
+    pub(super) fn logl(&self) -> f64 {
+        self.set_all_nodes();
+        self.logl_from_root_model_info()
+    }
+
+    pub(super) fn logl_from_root_model_info(&self) -> f64 {
         let lambda = self.model.lambda();
         let mu = self.model.mu();
         let root_id = usize::from(self.phylo.tree.root);
@@ -218,6 +232,10 @@ impl<T: TKFModel, AA: AncestralAlignment> TKFIndelCost<T, AA> {
             .borrow_mut()
             .valid
             .set(usize::from(root_idx), true);
+        self.model_info
+            .borrow_mut()
+            .valid_for_reestimation
+            .set(usize::from(root_idx), true);
     }
 
     fn set_non_root(&self, node_idx: &NodeIdx) {
@@ -246,12 +264,13 @@ impl<T: TKFModel, AA: AncestralAlignment> TKFIndelCost<T, AA> {
             model_info.valid.set(usize::from(parent_idx), false);
         }
         model_info.valid.set(node_id, true);
+        model_info.valid_for_reestimation.set(node_id, true);
     }
 
-    fn update_previous_event(&self, node_idx: &NodeIdx, action: Event) {
+    pub(super) fn update_previous_event(&self, node_idx: &NodeIdx, event: Event) {
         let node_id = usize::from(node_idx);
         let mut model_info = self.model_info.borrow_mut();
-        match action {
+        match event {
             Event::Deletion => model_info.previous_event_deletion.set(node_id, true),
             Event::Insertion | Event::Homolog => {
                 model_info.previous_event_deletion.set(node_id, false)
@@ -315,14 +334,17 @@ impl<T: TKFModel, AA: AncestralAlignment> TKFIndelCost<T, AA> {
 
     /// Determines the event that happened on the edge above `node_idx` for the given `block_id`
     /// based on the ancestral alignment.
-    fn determine_event(&self, node_idx: &NodeIdx, block_id: usize) -> Event {
-        let parent_idx = self.phylo.tree.node(node_idx).parent.unwrap();
+    pub(super) fn determine_event(&self, node_idx: &NodeIdx, block_id: usize) -> Event {
         // the presence or absence of characters is the same for all sites in a block
         // so we can just check the last site of the block
         let site = self.model_info.borrow().blocks[block_id] - 1;
-        let parent_is_gap = match parent_idx {
-            Internal(_) => self.phylo.msa.ancestral_map(&parent_idx)[site].is_none(),
-            _ => unreachable!("The parent of a node cannot be a leaf."),
+
+        let parent_is_gap = match self.phylo.tree.node(node_idx).parent {
+            Some(parent_idx) => match parent_idx {
+                Internal(_) => self.phylo.msa.ancestral_map(&parent_idx)[site].is_none(),
+                _ => unreachable!("The parent of a node cannot be a leaf."),
+            },
+            None => true, // root has no parent
         };
         let current_is_gap = match node_idx {
             Internal(_) => self.phylo.msa.ancestral_map(node_idx)[site].is_none(),
@@ -344,7 +366,7 @@ impl<T: TKFModel, AA: AncestralAlignment> TKFIndelCost<T, AA> {
     /// See [`eta`] function.
     /// Since there can't be a deletion at the root (it has no parent),
     /// this function is only for non-root nodes.
-    fn eta_for_non_root(&self, node_idx: &NodeIdx, event: Event) -> f64 {
+    pub(super) fn eta_for_non_root(&self, node_idx: &NodeIdx, event: Event) -> f64 {
         if matches!(event, Event::Insertion)
             && self.model_info.borrow().previous_event_deletion[usize::from(node_idx)]
         {
@@ -354,9 +376,9 @@ impl<T: TKFModel, AA: AncestralAlignment> TKFIndelCost<T, AA> {
         }
     }
 
-    fn event_prob_for_non_root(&self, node_idx: &NodeIdx, action: Event) -> f64 {
+    pub(super) fn event_prob_for_non_root(&self, node_idx: &NodeIdx, event: Event) -> f64 {
         let node_id = usize::from(node_idx);
-        match action {
+        match event {
             Event::Deletion => self.model_info.borrow().n0[node_id],
             Event::Homolog => self.model_info.borrow().h1[node_id],
             Event::Insertion => self.model_info.borrow().insertion[node_id],
@@ -408,25 +430,32 @@ impl<T: TKFModel, AA: AncestralAlignment> TreeSearchCost for TKFIndelCost<T, AA>
     }
 
     fn update_tree(&mut self, tree: Tree) {
-        self.phylo.tree = tree;
-        for idx in self.phylo.tree.dirty.ones() {
-            // TODO: is this correct?
-            self.model_info.borrow_mut().valid.set(idx, false);
+        let mut dirty_nodes = vec![];
+        let mut model_info = self.model_info.borrow_mut();
+        for idx in tree.dirty.ones() {
+            model_info.valid.set(idx, false);
+            model_info.valid_for_reestimation.set(idx, false);
+            dirty_nodes.push(idx);
         }
-        let mut reestimator = Reestimator::new(self);
-        for node in self.phylo.tree.postorder() {
-            if self.model_info.borrow().valid[usize::from(node)] {
-                let new_mappings = reestimator.reestimate(node);
-                match new_mappings {
-                    Err(_) => panic!("Re-estimation failed during tree update."),
-                    Ok(mappings) => {
-                        for (node, map) in mappings.0 {
-                            self.phylo.msa.update_ancestral_map(&node, map);
-                        }
-                    }
-                }
-                break;
-            }
+        drop(model_info);
+
+        let update_due_to_nni = dirty_nodes.len() == 1 && {
+            // check if children of the dirty node are different than before
+            let mut previous_children = self.phylo.tree.nodes[dirty_nodes[0]]
+                .children
+                .iter()
+                .collect_vec();
+            let mut new_children = tree.nodes[dirty_nodes[0]].children.iter().collect_vec();
+            previous_children.sort();
+            new_children.sort();
+
+            previous_children != new_children
+        };
+        self.phylo.tree = tree;
+        if update_due_to_nni {
+            let v2 = self.tree().nodes[dirty_nodes[0]].idx;
+            let mut reestimator = EdgeSeqsReestimator::new(self);
+            reestimator.reestimate(&v2);
         }
         self.phylo.tree.clean();
     }

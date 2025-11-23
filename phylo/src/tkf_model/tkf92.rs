@@ -81,6 +81,8 @@ impl TKFModel for TKF92IndelModel {
         self.lambda() / self.mu() * self.one_minus_r_over_r
     }
 
+    // this is not a prob but a factor since it can be > 1
+    // TODO i really should rename also the node_event_prob to node_event_factor or something
     fn insertion_prob_at_non_root(&self, beta: f64) -> f64 {
         self.lambda() * beta * self.one_minus_r_over_r
     }

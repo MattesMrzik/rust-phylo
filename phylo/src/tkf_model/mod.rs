@@ -106,3 +106,8 @@ mod tests;
 #[cfg(test)]
 #[cfg_attr(coverage, coverage(off))]
 mod reestimate_tests;
+
+// TODO: remove this before merge
+#[cfg(test)]
+#[cfg_attr(coverage, coverage(off))]
+mod non_git_tkf;
