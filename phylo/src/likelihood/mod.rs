@@ -1,3 +1,4 @@
+use crate::alignment::AncestralAlignment;
 use crate::substitution_models::FreqVector;
 use crate::tree::Tree;
 
@@ -28,6 +29,12 @@ pub trait TreeSearchCost {
     fn blen_optimisation(&self) -> bool {
         true
     }
+}
+
+pub trait TreeSeachCoestimateAncestors: TreeSearchCost {
+    fn masa(&mut self) -> &mut impl AncestralAlignment;
+    fn update_maps(&mut self);
+    // potentially also a method that updates the ancestors after a tree change
 }
 
 pub trait ModelSearchCost {

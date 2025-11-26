@@ -7,7 +7,9 @@ use lazy_static::lazy_static;
 use nalgebra::{DMatrix, DVector};
 
 use crate::alignment::AncestralAlignment;
-use crate::likelihood::{ModelSearchCost, ParamRange, TreeSearchCost};
+use crate::likelihood::{
+    ModelSearchCost, ParamRange, TreeSeachCoestimateAncestors, TreeSearchCost,
+};
 use crate::phylo_info::PhyloInfo;
 use crate::substitution_models::FreqVector;
 use crate::tkf_model::reestimate::EdgeSeqsReestimator;
@@ -54,6 +56,8 @@ pub trait TKFModel: Clone + Display {
     /// Given the subtree event probability for the root (i.e., the tree event probability)
     /// and the block length, returns the log probability of the block under the model.
     fn block_prob(&self, tree_event_prob: f64, block_len: usize) -> f64;
+    // TODO: perhaps also make the get block lens pub through this trait
+    // but perhaps that would not help the restiamtio the
     fn get_blocks<AA: AncestralAlignment>(msa: &AA) -> Vec<usize>;
 }
 
@@ -424,6 +428,14 @@ impl<T: TKFModel, AA: AncestralAlignment> ModelSearchCost for TKFIndelCost<T, AA
     }
 }
 
+impl<T: TKFModel, AA: AncestralAlignment> TreeSeachCoestimateAncestors for TKFIndelCost<T, AA> {
+    fn masa(&mut self) -> &mut impl AncestralAlignment {
+        &mut self.phylo.msa
+    }
+    fn update_maps(&mut self) {
+    }
+}
+
 impl<T: TKFModel, AA: AncestralAlignment> TreeSearchCost for TKFIndelCost<T, AA> {
     fn cost(&self) -> f64 {
         self.logl()
@@ -523,7 +535,8 @@ pub(super) fn eta(lambda: f64, mu: f64, beta: f64, n0: f64, time: f64) -> f64 {
 
 /// Given the right exclusive block borders, returns the lengths of the blocks.
 /// For example, given [3, 5, 8], the block lengths are [3, 2, 3].
-pub(super) fn get_block_lengths(blocks: &[usize]) -> Vec<usize> {
+// TODO: or only have this pub super and re-implement it in the tkf brute force helper
+pub fn get_block_lengths(blocks: &[usize]) -> Vec<usize> {
     let mut block_lens = vec![0; blocks.len()];
     for (i, block) in blocks.iter().enumerate() {
         block_lens[i] = if i == 0 {

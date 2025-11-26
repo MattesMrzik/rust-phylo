@@ -28,12 +28,13 @@ const N_EDGES_IN_QUARTET: usize = 5; // v1, v2, t2, t3, t4
 /// t3   t4
 /// ```
 /// The ancestral wild card sequences for v1 and v2 are re-estimated. The assignments in the
-/// dynamic programming are for \[v1, v2].
+/// dynamic programming are for (v1, v2).
 ///
 #[derive(Clone)]
 struct QuartetEdges {
     edges: [NodeIdx; N_EDGES_IN_QUARTET],
     node_mappings: [Mapping; 3],
+    /// is None if t1 is the root
     t1_mapping: Option<Mapping>,
 }
 
@@ -95,7 +96,7 @@ impl QuartetEdges {
     fn t1_has_char(&self, site: usize) -> bool {
         match &self.t1_mapping {
             Some(mapping) => mapping[site].is_some(),
-            None => false,
+            None => false, // t1 is the root
         }
     }
 }
@@ -469,13 +470,10 @@ impl<'a, T: TKFModel, AA: AncestralAlignment> EdgeSeqsReestimator<'a, T, AA> {
     /// Based on whether there are chars at the "leaves" of the quartet finds
     /// all possible [assignment for v1, assignment for v2] combinations that
     /// follow Dollo's principle.
+    // TODO: check if pub or only pub(super) or none
     pub fn possible_assignments_of_nni_edge(&self, block_id: usize) -> EdgeAssignmentPossibilities {
         let site = self.cost.model_info.borrow().blocks[block_id] - 1;
-
-        let t1_is_char = match &self.quartet_edges.t1_mapping {
-            Some(mapping) => mapping[site].is_some(),
-            None => false,
-        };
+        let t1_is_char = self.quartet_edges.t1_has_char(site);
         let t2_is_char = self.quartet_edges.t2_has_char(site);
         let t3_is_char = self.quartet_edges.t3_has_char(site);
         let t4_is_char = self.quartet_edges.t4_has_char(site);
