@@ -445,7 +445,6 @@ fn tkf92_reestimate_large_tree_for_file_iterative() {
         if Path::new(dir_path).exists() {
             fs::remove_dir_all(dir_path).expect("Could not remove existing brute force max dir");
         }
-
     }
 
     assert!(masa_is_dollo(&phylo));

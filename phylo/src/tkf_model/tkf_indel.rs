@@ -432,8 +432,7 @@ impl<T: TKFModel, AA: AncestralAlignment> TreeSeachCoestimateAncestors for TKFIn
     fn masa(&mut self) -> &mut impl AncestralAlignment {
         &mut self.phylo.msa
     }
-    fn update_maps(&mut self) {
-    }
+    fn update_maps(&mut self) {}
 }
 
 impl<T: TKFModel, AA: AncestralAlignment> TreeSearchCost for TKFIndelCost<T, AA> {
