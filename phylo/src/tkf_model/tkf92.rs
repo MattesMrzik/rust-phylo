@@ -38,6 +38,18 @@ impl TKF92IndelModel {
     pub(crate) fn r(&self) -> f64 {
         self.params[usize::from(TKF92Parameters::R)]
     }
+
+    #[cfg(test)]
+    pub(super) fn default() -> Self {
+        use crate::tkf_model::{DEFAULT_LAMBDA, DEFAULT_MU};
+
+        let r = DEFAULT_R;
+        Self {
+            params: vec![DEFAULT_LAMBDA, DEFAULT_MU, r],
+            log_r: r.ln(),
+            one_minus_r_over_r: (1.0 - r) / r,
+        }
+    }
 }
 
 impl TKFModel for TKF92IndelModel {
@@ -100,7 +112,7 @@ impl TKFModel for TKF92IndelModel {
     /// Determines the block borders from the alignment. A block border is defined as a
     /// position where any sequence changes from gap to non-gap or vice versa. Returns a sorted
     /// vector of the right exclusive block borders.
-    fn get_blocks<AA: AncestralAlignment>(msa: &AA) -> Vec<usize> {
+    fn get_blocks<AA: AncestralAlignment>(&self, msa: &AA) -> Vec<usize> {
         let mut blocks: HashSet<usize> = HashSet::new();
         for map in msa
             .ancestral_maps()
@@ -179,7 +191,7 @@ impl<AA: AncestralAlignment> TKF92IndelCostBuilder<AA> {
             log_r: r.ln(),
             one_minus_r_over_r: (1.0 - r) / r,
         };
-        let info = TKFIndelModelInfo::new::<_, TKF92IndelModel>(&self.phylo);
+        let info = TKFIndelModelInfo::new::<_, TKF92IndelModel>(&model, &self.phylo);
         Ok(TKFIndelCost {
             model,
             phylo: self.phylo.clone(),
@@ -226,7 +238,7 @@ impl<Q: QMatrix, AA: AncestralAlignment> TKF92CostBuilder<Q, AA> {
             log_r: r.ln(),
             one_minus_r_over_r: (1.0 - r) / r,
         };
-        let info = TKFIndelModelInfo::new::<_, TKF92IndelModel>(&self.phylo);
+        let info = TKFIndelModelInfo::new::<_, TKF92IndelModel>(&model, &self.phylo);
         let tkf_cost = TKFIndelCost {
             model,
             phylo: self.phylo.clone(),

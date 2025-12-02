@@ -135,6 +135,9 @@ impl<'a, T: TKFModel, AA: AncestralAlignment> EdgeSeqsReestimator<'a, T, AA> {
     }
 
     // instead i want to have a cfg test helper that gets the logl from the dp
+    // TODO: instead of returning the backtrack logl (i thinks its only used to test against bottom
+    // up logl), i could add a debug assert within this methods that clones the cost and checks
+    // against the logl from backtrack;
     pub fn reestimate(&mut self, v2_idx: &NodeIdx) -> f64 {
         let v2_id = self.cost.phylo.tree.node(v2_idx).id.clone();
         if v2_idx == &self.cost.phylo.tree.root {

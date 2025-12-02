@@ -30,6 +30,15 @@ pub struct TKF91IndelModel {
     params: Vec<f64>,
 }
 
+impl TKF91IndelModel {
+    #[cfg(test)]
+    pub(super) fn default() -> Self {
+        Self {
+            params: vec![DEFAULT_LAMBDA, DEFAULT_MU],
+        }
+    }
+}
+
 impl TKFModel for TKF91IndelModel {
     fn lambda(&self) -> f64 {
         self.params[usize::from(TKF91Parameters::Lambda)]
@@ -73,7 +82,7 @@ impl TKFModel for TKF91IndelModel {
     }
 
     /// Since TKF91 is a single-residue indel model, each position is its own block.
-    fn get_blocks<AA: AncestralAlignment>(msa: &AA) -> Vec<usize> {
+    fn get_blocks<AA: AncestralAlignment>(&self, msa: &AA) -> Vec<usize> {
         (1..msa.len() + 1).collect()
     }
 }
@@ -132,7 +141,7 @@ impl<AA: AncestralAlignment> TKF91IndelCostBuilder<AA> {
         let model = TKF91IndelModel {
             params: vec![lambda, mu],
         };
-        let info = TKFIndelModelInfo::new::<_, TKF91IndelModel>(&self.phylo);
+        let info = TKFIndelModelInfo::new::<_, TKF91IndelModel>(&model, &self.phylo);
         Ok(TKFIndelCost {
             model,
             phylo: self.phylo,
@@ -168,7 +177,7 @@ impl<Q: QMatrix, AA: AncestralAlignment> TKF91CostBuilder<Q, AA> {
         let model = TKF91IndelModel {
             params: vec![lambda, mu],
         };
-        let info = TKFIndelModelInfo::new::<_, TKF91IndelModel>(&self.phylo);
+        let info = TKFIndelModelInfo::new::<_, TKF91IndelModel>(&model, &self.phylo);
         let tkf_cost = TKFIndelCost {
             model,
             phylo: self.phylo.clone(),

@@ -58,7 +58,7 @@ pub trait TKFModel: Clone + Display {
     fn block_prob(&self, tree_event_prob: f64, block_len: usize) -> f64;
     // TODO: perhaps also make the get block lens pub through this trait
     // but perhaps that would not help the restiamtio the
-    fn get_blocks<AA: AncestralAlignment>(msa: &AA) -> Vec<usize>;
+    fn get_blocks<AA: AncestralAlignment>(&self, msa: &AA) -> Vec<usize>;
 }
 
 // TODO: link our paper once it is published. For now see original TKF92 paper: https://doi.org/10.1007/bf00163848
@@ -125,9 +125,10 @@ pub(super) struct TKFIndelModelInfo {
 
 impl TKFIndelModelInfo {
     pub(super) fn new<AA: AncestralAlignment, T: TKFModel>(
+        model: &T,
         phylo: &PhyloInfo<AA>,
     ) -> TKFIndelModelInfo {
-        let blocks = T::get_blocks(&phylo.msa);
+        let blocks = model.get_blocks(&phylo.msa);
         let block_lengths = get_block_lengths(&blocks);
         let n_blocks = blocks.len();
         let n_nodes = phylo.tree.len();
@@ -467,6 +468,9 @@ impl<T: TKFModel, AA: AncestralAlignment> TreeSearchCost for TKFIndelCost<T, AA>
             let v2 = self.tree().nodes[dirty_nodes[0]].idx;
             let mut reestimator = EdgeSeqsReestimator::new(self);
             reestimator.reestimate(&v2);
+            // TODO: I think i also have to set the children and siblings to dirty
+            // and i think after reestimation is correct. Since for reestimation i check
+            // if they are still valid (valid for the old tree that is)
         }
         self.phylo.tree.clean();
     }

@@ -107,7 +107,7 @@ fn tkf92_indel_logl_without_aggregation<AA: AncestralAlignment>(
     model: &TKF92IndelModel,
     phylo: &PhyloInfo<AA>,
 ) -> f64 {
-    let blocks = TKF92IndelModel::get_blocks(&phylo.msa);
+    let blocks = model.get_blocks(&phylo.msa);
     let tree = &phylo.tree;
     let lambda = model.lambda();
     let mu = model.mu();
@@ -245,7 +245,7 @@ fn tkf91_get_blocks() {
     ]);
     let msa = MASA::from_aligned_with_ancestral(seqs, &tree).unwrap();
 
-    let blocks = TKF91IndelModel::get_blocks(&msa);
+    let blocks = TKF91IndelModel::default().get_blocks(&msa);
     let block_lens = get_block_lengths(&blocks);
 
     assert_eq!(blocks, (1..msa.len() + 1).collect::<Vec<usize>>());
@@ -263,7 +263,7 @@ fn tkf92_get_blocks() {
 
     let msa = MASA::from_aligned_with_ancestral(seqs, &tree).unwrap();
 
-    let blocks = TKF92IndelModel::get_blocks(&msa);
+    let blocks = TKF92IndelModel::default().get_blocks(&msa);
     let block_lens = get_block_lengths(&blocks);
 
     assert_eq!(blocks, vec![1, 3, 4, 5]);
