@@ -129,8 +129,7 @@ impl<'a, T: TKFModel, AA: AncestralAlignment> EdgeSeqsReestimator<'a, T, AA> {
         }
     }
 
-    #[cfg(test)]
-    pub(super) fn get_phylo(&self) -> &crate::phylo_info::PhyloInfo<AA> {
+    pub fn get_phylo(&self) -> &crate::phylo_info::PhyloInfo<AA> {
         &self.cost.phylo
     }
 
@@ -160,20 +159,20 @@ impl<'a, T: TKFModel, AA: AncestralAlignment> EdgeSeqsReestimator<'a, T, AA> {
                 break;
             }
         }
-        println!(
-            "before prepare dp logl from root {}",
-            self.cost.logl_from_root_model_info()
-        );
+        // println!(
+        //     "before prepare dp logl from root {}",
+        //     self.cost.logl_from_root_model_info()
+        // );
         self.prepare_for_dp(v2_idx);
         self.fill_dp_table();
         let backtrack_res = self.backtrack();
         self.update_mappings(&backtrack_res);
         self.valid_false();
         self.make_valid_for_further_reestimate_calls();
-        println!(
-            "after reestimate logl from root {}",
-            self.cost.logl_from_root_model_info()
-        );
+        // println!(
+        //     "after reestimate logl from root {}",
+        //     self.cost.logl_from_root_model_info()
+        // );
         backtrack_res.logl
     }
 
@@ -211,7 +210,7 @@ impl<'a, T: TKFModel, AA: AncestralAlignment> EdgeSeqsReestimator<'a, T, AA> {
         }
     }
 
-    pub fn prepare_for_dp(&mut self, v2_idx: &NodeIdx) {
+    fn prepare_for_dp(&mut self, v2_idx: &NodeIdx) {
         let num_blocks = self.cost.model_info.borrow().blocks.len();
         self.dp_table = vec![[f64::NEG_INFINITY; DP_ASSIGNMENT_AND_EVENTS_SIZE]; num_blocks];
         //self.backtracking_table = vec![[0; DP_ASSIGNMENT_AND_EVENTS_SIZE]; num_blocks];
@@ -318,9 +317,9 @@ impl<'a, T: TKFModel, AA: AncestralAlignment> EdgeSeqsReestimator<'a, T, AA> {
         for block_id in 0..n_blocks {
             for assignment in self.possible_assignments_of_nni_edge(block_id) {
                 // println!("assignment at block {block_id}: {:?}", assignment);
-                let actions = self.event_for_assignment(assignment, block_id);
-                let x_prob = self.integrated_root_event_prob(&actions, block_id);
-                for q_del_or_not in self.possible_events(&actions, block_id == 0) {
+                let events = self.event_for_assignment(assignment, block_id);
+                let x_prob = self.integrated_root_event_prob(&events, block_id);
+                for q_del_or_not in self.possible_del_or_not(&events, block_id == 0) {
                     // println!("quartet del or not at block {block_id}: {:?}", q_del_or_not);
                     let dp_index = bools_to_index(&assignment, &q_del_or_not);
                     // println!("{:?}", index_to_bools(dp_index));
@@ -329,7 +328,7 @@ impl<'a, T: TKFModel, AA: AncestralAlignment> EdgeSeqsReestimator<'a, T, AA> {
                         continue;
                     }
                     let (max_prev_gamma, argmax) =
-                        self.max_over_previous(&q_del_or_not, &actions, block_id);
+                        self.max_over_previous(&q_del_or_not, &events, block_id);
                     self.backtracking_table[block_id][dp_index] = argmax;
                     let root_id = usize::from(self.cost.phylo.tree.root);
                     let eta_for_block =
@@ -343,8 +342,8 @@ impl<'a, T: TKFModel, AA: AncestralAlignment> EdgeSeqsReestimator<'a, T, AA> {
     /// Finds the max over previous assignments and events that lead to the provided events
     fn max_over_previous(
         &self,
-        current_events: &QuartetDelOrNot,
-        current_actions: &QuartetEvents,
+        current_del_or_not: &QuartetDelOrNot,
+        current_events: &QuartetEvents,
         block_id: usize,
     ) -> (f64, usize) {
         let mut max = f64::NEG_INFINITY;
@@ -352,15 +351,17 @@ impl<'a, T: TKFModel, AA: AncestralAlignment> EdgeSeqsReestimator<'a, T, AA> {
 
         // instead of recalculating this it could be reused from the previous block
         for prev_assignment in self.possible_assignments_of_nni_edge(block_id - 1) {
-            for prev_event in self.prev_compatible_events(current_events, current_actions) {
-                let prev_dp_index = bools_to_index(&prev_assignment, &prev_event);
+            for prev_del_or_not in
+                self.prev_compatible_del_or_not(current_del_or_not, current_events)
+            {
+                let prev_dp_index = bools_to_index(&prev_assignment, &prev_del_or_not);
                 let prev_gamma = self.dp_table[block_id - 1][prev_dp_index];
                 if prev_gamma == f64::NEG_INFINITY {
                     // because the compatibility of the previous event with the previous
                     // assignment is not checked
                     continue;
                 }
-                let current = prev_gamma + self.quartet_eta(current_actions, &prev_event);
+                let current = prev_gamma + self.quartet_eta(current_events, &prev_del_or_not);
                 if current > max {
                     max = current;
                     argmax = prev_dp_index;
@@ -370,9 +371,9 @@ impl<'a, T: TKFModel, AA: AncestralAlignment> EdgeSeqsReestimator<'a, T, AA> {
         (max, argmax)
     }
 
-    fn quartet_eta(&self, actions: &QuartetEvents, prev_events: &[bool]) -> f64 {
+    fn quartet_eta(&self, events: &QuartetEvents, prev_events: &[bool]) -> f64 {
         for i in 0..N_EDGES_IN_QUARTET {
-            if actions[i] == Event::Insertion && prev_events[i] {
+            if events[i] == Event::Insertion && prev_events[i] {
                 let edge = &self.quartet_edges.edges()[i];
                 return self.cost.model_info.borrow_mut().eta[usize::from(edge)];
             }
@@ -380,22 +381,22 @@ impl<'a, T: TKFModel, AA: AncestralAlignment> EdgeSeqsReestimator<'a, T, AA> {
         0.0
     }
 
-    /// Based on the current events and actions finds all compatible previous events.
+    /// Based on the current events and del_or_not finds all compatible previous del_or_not.
     // TODO: these are not ensured to be compatible with the previous assignments. Would it be
     // worth to filter them here?
-    fn prev_compatible_events(
+    fn prev_compatible_del_or_not(
         &self,
-        current_events: &QuartetDelOrNot,
-        current_actions: &[Event; N_EDGES_IN_QUARTET],
+        current_del_or_not: &QuartetDelOrNot,
+        current_events: &QuartetEvents,
     ) -> QuartetDelOrNotPossibilities {
         // let mut choices: Vec<Vec<bool>> = vec![vec![]; N_EDGES_IN_QUARTET];
         let mut no_choices = [false; N_EDGES_IN_QUARTET];
         let mut choices = Vec::with_capacity(N_EDGES_IN_QUARTET);
         for i in 0..N_EDGES_IN_QUARTET {
-            match current_actions[i] {
-                // we have a gap col, so we have no action here but pass through the previous one
-                Event::Nothing => no_choices[i] = current_events[i],
-                // we have an action here, so we can choose any previous action
+            match current_events[i] {
+                // we have a gap col, so we have no event here but pass through the previous one
+                Event::Nothing => no_choices[i] = current_del_or_not[i],
+                // we have an event here, so we can choose any previous del_or_not
                 _ => choices.push(i),
             };
         }
@@ -403,17 +404,17 @@ impl<'a, T: TKFModel, AA: AncestralAlignment> EdgeSeqsReestimator<'a, T, AA> {
     }
 
     /// Finds all possible combinations of deletion or not for each edge in the quartet
-    /// given the (current) actions taken on those edges.
-    fn possible_events(
+    /// given the (current) events taken on those edges.
+    fn possible_del_or_not(
         &self,
-        actions: &[Event; N_EDGES_IN_QUARTET],
+        events: &QuartetEvents,
         is_first_block: bool,
     ) -> QuartetDelOrNotPossibilities {
         let mut no_choices = [false; N_EDGES_IN_QUARTET];
         let mut choices = Vec::with_capacity(N_EDGES_IN_QUARTET);
 
         for (i, edge) in self.quartet_edges.edges().iter().enumerate() {
-            match actions[i] {
+            match events[i] {
                 Event::Deletion => no_choices[i] = true,
                 Event::Insertion | Event::Homolog => no_choices[i] = false,
                 Event::Nothing => {
@@ -425,7 +426,6 @@ impl<'a, T: TKFModel, AA: AncestralAlignment> EdgeSeqsReestimator<'a, T, AA> {
                 }
             };
         }
-        // TODO also replace this with get_possibilities_for_choices?
         possibilities_for_choices(&choices, &no_choices)
     }
 
@@ -439,18 +439,18 @@ impl<'a, T: TKFModel, AA: AncestralAlignment> EdgeSeqsReestimator<'a, T, AA> {
         QuartetEdges::new(v1_idx, *v2_idx, t2_idx, t3_idx, t4_idx, self.cost)
     }
 
-    /// Computes the integrated x probability for the quartet given the actions
-    fn integrated_root_event_prob(&self, actions: &QuartetEvents, block_id: usize) -> f64 {
+    /// Computes the integrated x probability for the quartet given the events
+    fn integrated_root_event_prob(&self, events: &QuartetEvents, block_id: usize) -> f64 {
         let root_id = usize::from(self.cost.phylo.tree.root);
         let block_len = self.cost.model_info.borrow().block_lengths[block_id];
 
         let mut x = self.cost.model_info.borrow().subtree_event_prob[(root_id, block_id)];
         // TODO: does it make sense to pre-compute this functions return values?
-        x *= self.quartet_event_prob(actions);
+        x *= self.quartet_event_prob(events);
         self.cost.model.block_prob(x, block_len)
     }
 
-    /// Computes the product of x values for the nodes in the quartet for the provided actions
+    /// Computes the product of x values for the nodes in the quartet for the provided events
     /// which correspond to an assignment of characters at v1 and v2 that is currently considered
     /// in the dynamic programming.
     fn quartet_event_prob(&self, events: &QuartetEvents) -> f64 {
@@ -473,8 +473,7 @@ impl<'a, T: TKFModel, AA: AncestralAlignment> EdgeSeqsReestimator<'a, T, AA> {
     /// Based on whether there are chars at the "leaves" of the quartet finds
     /// all possible [assignment for v1, assignment for v2] combinations that
     /// follow Dollo's principle.
-    // TODO: check if pub or only pub(super) or none
-    pub fn possible_assignments_of_nni_edge(&self, block_id: usize) -> EdgeAssignmentPossibilities {
+    fn possible_assignments_of_nni_edge(&self, block_id: usize) -> EdgeAssignmentPossibilities {
         let site = self.cost.model_info.borrow().blocks[block_id] - 1;
         let t1_is_char = self.quartet_edges.t1_has_char(site);
         let t2_is_char = self.quartet_edges.t2_has_char(site);
@@ -505,20 +504,20 @@ impl<'a, T: TKFModel, AA: AncestralAlignment> EdgeSeqsReestimator<'a, T, AA> {
 
     fn event_for_assignment(&self, assignment: EdgeAssignment, block_id: usize) -> QuartetEvents {
         let site = self.cost.model_info.borrow().blocks[block_id] - 1;
-        let mut actions = [Event::Nothing; N_EDGES_IN_QUARTET];
+        let mut events = [Event::Nothing; N_EDGES_IN_QUARTET];
         let v1_has_char = assignment.0;
         let v2_has_char = assignment.1;
         // edge (t1 = pa(v1) -> v1)
-        actions[0] = event_for_edge(v1_has_char, self.quartet_edges.t1_has_char(site));
+        events[0] = event_for_edge(v1_has_char, self.quartet_edges.t1_has_char(site));
         // edge (v1 = pa(v2) -> v2)
-        actions[1] = event_for_edge(v2_has_char, v1_has_char);
+        events[1] = event_for_edge(v2_has_char, v1_has_char);
         // edge (v1 = pa(t2) -> t2)
-        actions[2] = event_for_edge(self.quartet_edges.t2_has_char(site), v1_has_char);
+        events[2] = event_for_edge(self.quartet_edges.t2_has_char(site), v1_has_char);
         // edge (v2 = pa(t3) -> t3)
-        actions[3] = event_for_edge(self.quartet_edges.t3_has_char(site), v2_has_char);
+        events[3] = event_for_edge(self.quartet_edges.t3_has_char(site), v2_has_char);
         // edge (v2 = pa(t4) -> t4)
-        actions[4] = event_for_edge(self.quartet_edges.t4_has_char(site), v2_has_char);
-        actions
+        events[4] = event_for_edge(self.quartet_edges.t4_has_char(site), v2_has_char);
+        events
     }
 
     fn backtrack(&self) -> BackTrackingResult {
@@ -591,25 +590,13 @@ impl<'a, T: TKFModel, AA: AncestralAlignment> EdgeSeqsReestimator<'a, T, AA> {
         }
         const_per_alignment
     }
-
-    pub fn print_dp_table(&self) {
-        println!("dp table");
-        for block_id in 0..self.cost.model_info.borrow().blocks.len() {
-            for (index, &value) in self.dp_table[block_id].iter().enumerate() {
-                if value != f64::NEG_INFINITY {
-                    println!(
-                        "block {}, assignment & events {:?}, {}",
-                        block_id,
-                        index_to_bools(index),
-                        value
-                    );
-                }
-            }
-        }
-    }
 }
 
-pub fn mapping_from_node_seq(node_seq: &NodeSeq, block_lens: &[usize], seq_len: usize) -> Mapping {
+pub(super) fn mapping_from_node_seq(
+    node_seq: &NodeSeq,
+    block_lens: &[usize],
+    seq_len: usize,
+) -> Mapping {
     let mut mapping = Vec::with_capacity(seq_len);
     let mut count = 0;
     for (i, &block_len) in block_lens.iter().enumerate() {
@@ -686,6 +673,8 @@ pub(super) fn get_map_from_any_node<'a, AA: AncestralAlignment>(
 #[cfg(test)]
 #[cfg_attr(coverage, coverage(off))]
 mod private_tests {
+    use std::path::Path;
+
     use crate::alphabets::dna_alphabet;
     use crate::phylo_info::PhyloInfoBuilder;
     use crate::tkf_model::tests::setup_test_phylo;
@@ -711,7 +700,6 @@ mod private_tests {
             [true, false, false, true, false],
             [false, false, false, true, false],
         ];
-        // sort
         possibilities.sort();
         expected.sort();
         assert_eq!(possibilities, expected);
@@ -728,7 +716,6 @@ mod private_tests {
             [true, true, false, false, false],
             [true, true, false, true, false],
         ];
-        // sort
         possibilities.sort();
         expected.sort();
         assert_eq!(possibilities, expected);
@@ -772,9 +759,9 @@ mod private_tests {
 
     #[test]
     fn tkf_remove_and_add_back_quartet_larger() {
-        let msa = "/Users/mrzi/Documents/develop/115-tkf_tree_search/rust-phylo/phylo/data/tkf_masas/fails.fasta";
-        let tree =
-        "/Users/mrzi/Documents/develop/58-TKF92/rust-phylo/phylo/data/runtime/tree_of_life.newick";
+        let dir = Path::new("data/tkf_brute_force_ancestors/simulation_01");
+        let msa = dir.join("masa.fasta");
+        let tree = dir.join("tree.newick");
         let phylo = PhyloInfoBuilder::with_attrs(msa, tree)
             .build_with_ancestors()
             .unwrap();
@@ -787,7 +774,7 @@ mod private_tests {
         assert_eq!(
             original_logl,
             reestimator.cost.logl_from_root_model_info(),
-            "before"
+            "before removing quartet"
         );
         let v2_idx = reestimator.cost.phylo.tree.by_id("N372").idx;
         reestimator.prepare_for_dp(&v2_idx);
@@ -796,7 +783,7 @@ mod private_tests {
         assert_eq!(
             reestimator.cost.logl_from_root_model_info(),
             original_logl,
-            "after"
+            "after adding back quartet"
         );
     }
 }
