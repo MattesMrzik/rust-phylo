@@ -15,6 +15,21 @@ use crate::tkf_model::{
 };
 use crate::tree::NodeIdx;
 
+/// Given all possible edge assignment for each block in the alignment returns a specific edge
+/// assignment corresponding to the given index.
+///
+/// # Arguments
+///
+/// * `idx` - index to decode
+/// * `possible_edge_assignments` - a vector of possible edge assignment for each block in the
+/// alignment, the outer vector is over blocks, the inner vector is over possible assignments for
+/// the edge.
+/// # Examples
+///  ```
+///  let possibilities= vec![vec![(true, true), (true, false)], vec![(false, false)]];
+///  let first = edge_seqs(0, &possibilities); // returns vec![(true, true), (false, false)]
+///  let second = edge_seqs(1, &possibilities); // returns vec![(true, false), (false, false)]
+///  ```
 #[cfg(test)]
 fn edge_seqs(
     mut idx: usize,
@@ -74,17 +89,6 @@ fn number_of_possibilities(possible_edge_assignments: &[Vec<(bool, bool)>]) -> u
         .map(|poss| poss.len())
         .product()
 }
-
-// #[cfg(test)]
-// fn too_many_possibilities(number_of_possibilities: usize) -> Result<()> {
-//     idenumber_of_possibilities > 10000000 {
-//         println!("too many possibilities to brute force: {number_of_possibilities}");
-//         bail!("too many possibilities to brute force: {number_of_possibilities}",);
-//     } else {
-//         println!("calculation of {number_of_possibilities} possibilities");
-//         Ok(())
-//     }
-// }
 
 #[cfg(test)]
 fn cost_for_edge_seqs<T: TKFModel>(
@@ -175,7 +179,7 @@ fn brute_force_max_for_possibilities_multi_thread(
 }
 
 #[cfg(test)]
-pub fn possible_assignments_of_edge(
+fn possible_assignments_of_edge(
     t1_is_char: bool,
     t2_is_char: bool,
     t3_is_char: bool,
@@ -222,16 +226,6 @@ fn get_edge_assignment_possibilities(
     } else {
         None
     };
-    println!(
-        "before sibling, node = {}, root {}",
-        tree.node(v2_idx).id,
-        tree.node(&tree.root).id
-    );
-    println!(
-        "before sibling, node = {}, root {}",
-        tree.node(v2_idx),
-        tree.node(&tree.root)
-    );
 
     let sibling = tree.sibling(v2_idx).unwrap();
     let t2_mapping = get_mapping_for_any_node(&cost.phylo.msa, &sibling);
@@ -489,7 +483,7 @@ fn tkf92_reestimate_large_tree_for_file_iterative() {
             }
         }
         if stayed_same {
-            println!("🔴 no change in msa");
+            println!(" no change in msa");
         }
         previous_phylo = reestimator.get_phylo().clone();
         let tkf_cost = TKF92IndelCostBuilder::new(lambda, mu, r, reestimator.get_phylo().clone())
