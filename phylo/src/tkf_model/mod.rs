@@ -111,4 +111,4 @@ mod reestimate_tests;
 // TODO: remove this before merge
 #[cfg(test)]
 #[cfg_attr(coverage, coverage(off))]
-mod non_git_tkf;
+mod brute_force_ancestors;
