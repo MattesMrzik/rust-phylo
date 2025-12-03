@@ -105,12 +105,8 @@ mod tests;
 
 #[cfg(test)]
 #[cfg_attr(coverage, coverage(off))]
-mod reestimate_tests;
+mod brute_force_ancestors_tests;
 
 #[cfg(test)]
 #[cfg_attr(coverage, coverage(off))]
-mod brute_force_ancestors;
-
-#[cfg(test)]
-#[cfg_attr(coverage, coverage(off))]
-mod tkf92_fixed;
+mod tkf92_fixed_fragmentation;

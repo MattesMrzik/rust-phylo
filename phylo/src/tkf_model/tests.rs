@@ -10,7 +10,7 @@ use crate::phylo_info::PhyloInfo;
 use crate::substitution_models::{QMatrixMaker, SubstModel, SubstitutionCostBuilder as SCB};
 use crate::substitution_models::{BLOSUM, GTR, HIVB, HKY, JC69, K80, TN93, WAG};
 use crate::tkf_model::tkf92::TKF92IndelModel;
-use crate::tkf_model::tkf92_fixed::TKF92FixedIndelModel;
+use crate::tkf_model::tkf92_fixed_fragmentation::TKF92FixedIndelModel;
 use crate::tkf_model::tkf_indel::DUMMY_FREQS;
 use crate::tree::NodeIdx::{self, Internal, Leaf};
 use crate::{frequencies, record_wo_desc as record, tree};
