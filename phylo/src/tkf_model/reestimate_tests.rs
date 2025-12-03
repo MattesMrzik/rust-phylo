@@ -141,7 +141,7 @@ fn tkf92_reestimate() {
 }
 
 #[cfg(test)]
-pub(super) fn masa_is_dollo<AA: AncestralAlignment>(phylo: &PhyloInfo<AA>) -> bool {
+pub(super) fn assert_masa_is_dollo<AA: AncestralAlignment>(phylo: &PhyloInfo<AA>) {
     for col_idx in 0..phylo.msa.len() {
         let mut num_insertions = 0;
         for node in phylo.tree.postorder() {
@@ -156,17 +156,12 @@ pub(super) fn masa_is_dollo<AA: AncestralAlignment>(phylo: &PhyloInfo<AA>) -> bo
                 if parent_site.is_none() && node_site.is_some() {
                     num_insertions += 1;
                 }
-            }
-            if num_insertions > 1 {
-                println!(
-                    "Column {} has {} insertions, not Dollo",
-                    col_idx, num_insertions
-                );
-                return false;
-            }
-        }
+            }}
+            assert_eq!(
+                num_insertions, 1,
+                "Column {col_idx} has {num_insertions} insertions, not Dollo",
+            );
     }
-    true
 }
 // again for a larger tree
 #[test]
@@ -189,7 +184,7 @@ fn tkf92_reestimate_large_tree() {
     .unwrap();
     let phylo = PhyloInfo { msa, tree };
 
-    assert!(masa_is_dollo(&phylo));
+    assert_masa_is_dollo(&phylo);
     let mut tkf_cost = TKF92IndelCostBuilder::new(1.0, 2.0, 0.3, phylo.clone())
         .build()
         .unwrap();
@@ -206,12 +201,12 @@ fn tkf92_reestimate_large_tree() {
                 break;
             }
         }
-        assert!(masa_is_dollo(&reestimator.get_phylo().clone()));
+        assert_masa_is_dollo(&reestimator.get_phylo().clone());
         let tkf_cost = TKF92IndelCostBuilder::new(1.0, 2.0, 0.3, reestimator.get_phylo().clone())
             .build()
             .unwrap();
         let new_logl = tkf_cost.cost();
-        assert!(masa_is_dollo(&tkf_cost.phylo));
+        assert_masa_is_dollo(&tkf_cost.phylo);
         assert_relative_eq!(backtrack_logl, new_logl, epsilon = 1e-12);
         assert!(new_logl >= prev_logl);
         prev_logl = new_logl;
