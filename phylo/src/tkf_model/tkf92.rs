@@ -151,7 +151,7 @@ impl Display for TKF92IndelModel {
 /// Validates the TKF92 parameter r. If it is not valid, it is set to
 /// default value and a warning is logged.
 /// Returns valid r.
-fn validate_r(r: f64) -> f64 {
+pub(super) fn validate_r(r: f64) -> f64 {
     let mut valid_r = r;
     if r == 0.0 {
         valid_r = DEFAULT_R;
@@ -191,7 +191,7 @@ impl<AA: AncestralAlignment> TKF92IndelCostBuilder<AA> {
             log_r: r.ln(),
             one_minus_r_over_r: (1.0 - r) / r,
         };
-        let info = TKFIndelModelInfo::new::<_, TKF92IndelModel>(&model, &self.phylo);
+        let info = TKFIndelModelInfo::new(&model, &self.phylo);
         Ok(TKFIndelCost {
             model,
             phylo: self.phylo.clone(),
@@ -238,7 +238,7 @@ impl<Q: QMatrix, AA: AncestralAlignment> TKF92CostBuilder<Q, AA> {
             log_r: r.ln(),
             one_minus_r_over_r: (1.0 - r) / r,
         };
-        let info = TKFIndelModelInfo::new::<_, TKF92IndelModel>(&model, &self.phylo);
+        let info = TKFIndelModelInfo::new(&model, &self.phylo);
         let tkf_cost = TKFIndelCost {
             model,
             phylo: self.phylo.clone(),

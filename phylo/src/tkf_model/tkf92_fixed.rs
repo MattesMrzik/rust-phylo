@@ -1,8 +1,14 @@
+use std::cell::RefCell;
 use std::fmt::Display;
 
+use hashbrown::HashSet;
+use log::warn;
 use num_enum::{FromPrimitive, IntoPrimitive};
 
 use crate::likelihood::{ParamRange, PARAM_RANGE_UNIT_INTERVAL_EXCLUSIVE};
+use crate::phylo_info::PhyloInfo;
+use crate::tkf_model::{validate_lambda_and_mu, validate_r, TKFIndelCost, TKFIndelModelInfo};
+use crate::Result;
 use crate::{alignment::AncestralAlignment, tkf_model::TKFModel};
 
 #[derive(Debug, Eq, PartialEq, FromPrimitive, IntoPrimitive)]
@@ -17,29 +23,17 @@ pub(crate) enum TKF92Parameters {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct TKF92FixedIndelModel {
-    params: Vec<f64>,
+    pub(super) params: Vec<f64>,
     /// precomputed r.ln()
-    log_r: f64,
+    pub(super) log_r: f64,
     /// The fixed fragmentation to be used
-    fragmentation: Vec<usize>,
+    pub(super) fragmentation: Vec<usize>,
 }
 
 // TODO: this whole thing could be compiled only when testing
 impl TKF92FixedIndelModel {
     pub(crate) fn r(&self) -> f64 {
         self.params[usize::from(TKF92Parameters::R)]
-    }
-
-    #[cfg(test)]
-    pub(super) fn default_with_fragmentation(fragmentation: Vec<usize>) -> Self {
-        use crate::tkf_model::{DEFAULT_LAMBDA, DEFAULT_MU, DEFAULT_R};
-
-        let r = DEFAULT_R;
-        Self {
-            params: vec![DEFAULT_LAMBDA, DEFAULT_MU, r],
-            log_r: r.ln(),
-            fragmentation,
-        }
     }
 }
 
@@ -97,9 +91,70 @@ impl TKFModel for TKF92FixedIndelModel {
         }
     }
 
-    fn get_blocks<AA: AncestralAlignment>(&self, _msa: &AA) -> Vec<usize> {
-        self.fragmentation.clone()
+    fn get_blocks<AA: AncestralAlignment>(&self, msa: &AA) -> Vec<usize> {
+        let mut blocks: HashSet<usize> = HashSet::new();
+        for map in msa
+            .ancestral_maps()
+            .values()
+            .chain(msa.leaf_maps().values())
+        {
+            let mut previous_is_char = map[0].is_some();
+            for (i, c) in map.iter().skip(1).enumerate() {
+                let current_is_char = c.is_some();
+                // whenever there is a change from gap to not gap or vice versa, we have a block border
+                if previous_is_char ^ current_is_char {
+                    blocks.insert(i + 1);
+                }
+                previous_is_char = current_is_char;
+            }
+            blocks.insert(map.len());
+        }
+        let mut blocks: Vec<usize> = blocks.iter().copied().collect();
+        blocks.sort();
+        merge_fragmentations_with_blocks(&self.fragmentation, &blocks)
     }
+}
+
+/// Merges the user defined fragmentation with the observed block borders in the MSA.
+/// Assumes both inputs are sorted and within MSA length.
+pub(super) fn merge_fragmentations_with_blocks(
+    fragmentation: &[usize],
+    blocks: &[usize],
+) -> Vec<usize> {
+    let mut frag_iter = fragmentation.iter().peekable();
+    let mut missing = Vec::new();
+    for block in blocks.iter() {
+        let mut next_block = false;
+        while let Some(&frag) = frag_iter.peek() {
+            if frag > block {
+                println!("Observed right border of block {block} in MSA not in fragmentation, adding it.");
+                warn!("Observed right border of block {block} in MSA not in fragmentation, adding it.");
+                missing.push(*block);
+                next_block = true;
+                break;
+            } else if frag == block {
+                next_block = true;
+                break;
+            } else {
+                frag_iter.next();
+            }
+        }
+        if next_block {
+            continue;
+        } else {
+            println!(
+                "Observed right border of block {block} in MSA not in fragmentation, adding it."
+            );
+            warn!("Observed right border of block {block} in MSA not in fragmentation, adding it.");
+            missing.push(*block);
+        }
+    }
+    for frag in fragmentation {
+        missing.push(*frag);
+    }
+
+    missing.sort();
+    missing
 }
 
 impl Display for TKF92FixedIndelModel {
@@ -115,21 +170,113 @@ impl Display for TKF92FixedIndelModel {
     }
 }
 
+/// Builder for TKF92 indel cost, i.e., without substitution model and a fixed fragmentation
+pub struct TKF92FixedIndelCostBuilder<AA: AncestralAlignment> {
+    lambda: f64,
+    mu: f64,
+    r: f64,
+    fragmentation: Vec<usize>,
+    phylo: PhyloInfo<AA>,
+}
+
+fn validate_fragmentation(fragmentation: &[usize], msa_len: usize) -> Vec<usize> {
+    let mut fragmentation = fragmentation.to_vec();
+    let original_len = fragmentation.len();
+    if original_len == 0 {
+        return fragmentation.to_vec();
+    }
+    fragmentation.sort();
+    fragmentation.dedup();
+    let deduped_len = fragmentation.len();
+    if deduped_len < original_len {
+        warn!("Fragmentation had duplicate entries, which were removed.");
+    }
+    fragmentation.retain(|&x| x > 0 && x <= msa_len);
+    let retained_len = fragmentation.len();
+    if retained_len < deduped_len {
+        warn!("Fragmentation had entries out of bounds (0, seq_len], which were removed.");
+    }
+    fragmentation.to_vec()
+}
+
+impl<AA: AncestralAlignment> TKF92FixedIndelCostBuilder<AA> {
+    pub fn new(
+        lambda: f64,
+        mu: f64,
+        r: f64,
+        fragmentation: Vec<usize>,
+        phylo: PhyloInfo<AA>,
+    ) -> Self {
+        Self {
+            lambda,
+            mu,
+            r,
+            fragmentation,
+            phylo,
+        }
+    }
+
+    pub fn build(self) -> Result<TKFIndelCost<TKF92FixedIndelModel, AA>> {
+        let (lambda, mu) = validate_lambda_and_mu(self.lambda, self.mu);
+        let r = validate_r(self.r);
+        let fragmentation = validate_fragmentation(&self.fragmentation, self.phylo.msa.len());
+        let model = TKF92FixedIndelModel {
+            params: vec![lambda, mu, r],
+            log_r: r.ln(),
+            fragmentation,
+        };
+        let info = TKFIndelModelInfo::new(&model, &self.phylo);
+        Ok(TKFIndelCost {
+            model,
+            phylo: self.phylo.clone(),
+            model_info: RefCell::new(info),
+        })
+    }
+}
+
 #[cfg(test)]
 mod private_tests {
-    use std::cell::RefCell;
 
     use approx::assert_relative_eq;
 
     use crate::alignment::{Sequences, MASA};
     use crate::phylo_info::PhyloInfo;
-    use crate::tkf_model::{
-        TKF92IndelCostBuilder, TKFIndelCost, TKFIndelModelInfo, DEFAULT_LAMBDA, DEFAULT_MU,
-        DEFAULT_R,
-    };
+    use crate::tkf_model::{TKF92IndelCostBuilder, DEFAULT_LAMBDA, DEFAULT_MU, DEFAULT_R};
     use crate::{record_wo_desc as record, tree};
 
     use super::*;
+
+    #[test]
+    fn test_validate_fragmentation() {
+        let fragmentation = vec![3, 19, 3, 4, 58, 13, 0, 1, 0, 3, 4, 15, 16];
+        let msa_len = 15;
+        let validated = validate_fragmentation(&fragmentation, msa_len);
+        assert_eq!(validated, vec![1, 3, 4, 13, 15]);
+    }
+
+    #[test]
+    fn test_merge_fragmentations_with_blocks_case1() {
+        let fragmentation = vec![3, 5, 7, 10];
+        let blocks = vec![5, 10, 12];
+        let merged = merge_fragmentations_with_blocks(&fragmentation, &blocks);
+        assert_eq!(merged, vec![3, 5, 7, 10, 12]);
+    }
+
+    #[test]
+    fn test_merge_fragmentations_with_blocks_case2() {
+        let fragmentation = vec![3, 7, 10, 12];
+        let blocks = vec![5, 10, 12];
+        let merged = merge_fragmentations_with_blocks(&fragmentation, &blocks);
+        assert_eq!(merged, vec![3, 5, 7, 10, 12]);
+    }
+
+    #[test]
+    fn test_merge_fragmentations_with_blocks_case3() {
+        let fragmentation = vec![];
+        let blocks = vec![5, 10, 12];
+        let merged = merge_fragmentations_with_blocks(&fragmentation, &blocks);
+        assert_eq!(merged, vec![ 5,  10, 12]);
+    }
 
     #[test]
     fn test_integration() {
@@ -161,14 +308,15 @@ mod private_tests {
         ];
 
         for fragmentation in fragmentations {
-            let fragment_model = TKF92FixedIndelModel::default_with_fragmentation(fragmentation);
-            let fragment_info =
-                TKFIndelModelInfo::new::<_, TKF92FixedIndelModel>(&fragment_model, &phylo_info);
-            let fragment_cost = TKFIndelCost {
-                model: fragment_model,
-                phylo: phylo_info.clone(),
-                model_info: RefCell::new(fragment_info),
-            };
+            let fragment_cost = TKF92FixedIndelCostBuilder::new(
+                DEFAULT_LAMBDA,
+                DEFAULT_MU,
+                DEFAULT_R,
+                fragmentation,
+                phylo_info.clone(),
+            )
+            .build()
+            .unwrap();
             sum_over_fragmentations_cost += fragment_cost.logl().exp();
         }
         sum_over_fragmentations_cost = sum_over_fragmentations_cost.ln();
@@ -203,14 +351,15 @@ mod private_tests {
             312, 321, 322, 324, 331, 332, 334, 335, 336, 341, 342, 343, 344, 346, 347, 349, 352,
             354, 355, 356, 359, 360, 363, 365, 369, 372, 374, 376,
         ];
-        let fragment_model = TKF92FixedIndelModel::default_with_fragmentation(fragmentation);
-        let fragment_info =
-            TKFIndelModelInfo::new::<_, TKF92FixedIndelModel>(&fragment_model, &phylo_info);
-        let fragment_cost = TKFIndelCost {
-            model: fragment_model,
-            phylo: phylo_info.clone(),
-            model_info: RefCell::new(fragment_info),
-        };
+        let fragment_cost = TKF92FixedIndelCostBuilder::new(
+            DEFAULT_LAMBDA,
+            DEFAULT_MU,
+            DEFAULT_R,
+            fragmentation,
+            phylo_info,
+        )
+        .build()
+        .unwrap();
         // logl from simulation
         assert_relative_eq!(fragment_cost.logl(), -769.4115065236674, epsilon = 1e-10);
     }

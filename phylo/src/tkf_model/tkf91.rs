@@ -141,7 +141,7 @@ impl<AA: AncestralAlignment> TKF91IndelCostBuilder<AA> {
         let model = TKF91IndelModel {
             params: vec![lambda, mu],
         };
-        let info = TKFIndelModelInfo::new::<_, TKF91IndelModel>(&model, &self.phylo);
+        let info = TKFIndelModelInfo::new(&model, &self.phylo);
         Ok(TKFIndelCost {
             model,
             phylo: self.phylo,
@@ -177,7 +177,7 @@ impl<Q: QMatrix, AA: AncestralAlignment> TKF91CostBuilder<Q, AA> {
         let model = TKF91IndelModel {
             params: vec![lambda, mu],
         };
-        let info = TKFIndelModelInfo::new::<_, TKF91IndelModel>(&model, &self.phylo);
+        let info = TKFIndelModelInfo::new(&model, &self.phylo);
         let tkf_cost = TKFIndelCost {
             model,
             phylo: self.phylo.clone(),

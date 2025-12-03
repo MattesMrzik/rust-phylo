@@ -10,6 +10,7 @@ use crate::phylo_info::PhyloInfo;
 use crate::substitution_models::{QMatrixMaker, SubstModel, SubstitutionCostBuilder as SCB};
 use crate::substitution_models::{BLOSUM, GTR, HIVB, HKY, JC69, K80, TN93, WAG};
 use crate::tkf_model::tkf92::TKF92IndelModel;
+use crate::tkf_model::tkf92_fixed::TKF92FixedIndelModel;
 use crate::tkf_model::tkf_indel::DUMMY_FREQS;
 use crate::tree::NodeIdx::{self, Internal, Leaf};
 use crate::{frequencies, record_wo_desc as record, tree};
@@ -268,6 +269,30 @@ fn tkf92_get_blocks() {
 
     assert_eq!(blocks, vec![1, 3, 4, 5]);
     assert_eq!(block_lens, vec![1, 2, 1, 1]);
+}
+
+#[test]
+fn tkf92_fixed_get_blocks() {
+    let tree = tree!("((A0:1.0,B1:1.0)I1:1.0);");
+    let seqs = Sequences::new(vec![
+        record!("A0", b"AAAAAAB-D"),
+        record!("B1", b"---AAARAW"),
+        record!("I1", b"AAAAAAA-A"),
+    ]);
+
+    let msa = MASA::from_aligned_with_ancestral(seqs, &tree).unwrap();
+
+    let fragmentation = vec![1, 2, 7];
+    let model = TKF92FixedIndelModel {
+        params: vec![0.5, 1.5, 0.2],
+        log_r: 0.2_f64.ln(),
+        fragmentation,
+    };
+    let blocks = model.get_blocks(&msa);
+    let block_lens = get_block_lengths(&blocks);
+
+    assert_eq!(blocks, vec![1, 2, 3, 7, 8, 9]);
+    assert_eq!(block_lens, vec![1, 1, 1, 4, 1, 1]);
 }
 
 #[cfg(test)]

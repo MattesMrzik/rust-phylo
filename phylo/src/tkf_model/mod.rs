@@ -10,7 +10,6 @@ pub use tkf91::*;
 pub mod tkf92;
 pub use tkf92::*;
 pub mod reestimate;
-pub mod tkf92_fixed;
 pub use reestimate::*;
 pub mod tkf_indel;
 pub use tkf_indel::*;
@@ -108,7 +107,10 @@ mod tests;
 #[cfg_attr(coverage, coverage(off))]
 mod reestimate_tests;
 
-// TODO: remove this before merge
 #[cfg(test)]
 #[cfg_attr(coverage, coverage(off))]
 mod brute_force_ancestors;
+
+#[cfg(test)]
+#[cfg_attr(coverage, coverage(off))]
+mod tkf92_fixed;

@@ -1,9 +1,11 @@
+use std::fs::OpenOptions;
+use std::io::{BufWriter, Write};
 use std::path::Path;
 
 use approx::assert_relative_eq;
 use fixedbitset::FixedBitSet;
-
 use itertools::Itertools;
+
 #[cfg(feature = "multi-thread")]
 use rayon::prelude::*;
 
@@ -12,8 +14,8 @@ use crate::likelihood::ModelSearchCost;
 use crate::phylo_info::{PhyloInfo, PhyloInfoBuilder};
 use crate::random::DefaultGenerator;
 use crate::tkf_model::{
-    mapping_from_node_seq, reestimate_tests::assert_masa_is_dollo, EdgeSeqsReestimator,
-    TKF92IndelCostBuilder, TKFIndelCost, TKFModel,
+    get_map_from_any_node, mapping_from_node_seq, EdgeSeqsReestimator, TKF92IndelCostBuilder,
+    TKFIndelCost, TKFModel,
 };
 use crate::tree::NodeIdx;
 
@@ -78,22 +80,6 @@ fn test_decode_index() {
 }
 
 #[cfg(test)]
-fn print_progress(i: usize, number_of_possibilities: usize) {
-    if (i + 1) % 10000 == 0 {
-        let percent = i as f64 / number_of_possibilities as f64 * 100.0;
-        println!("Brute force progress for current edge {percent:.4}% ");
-    }
-}
-
-#[cfg(test)]
-fn number_of_possibilities(possible_edge_assignments: &[Vec<(bool, bool)>]) -> usize {
-    possible_edge_assignments
-        .iter()
-        .map(|poss| poss.len())
-        .product()
-}
-
-#[cfg(test)]
 fn edge_seqs_to_mappings(
     edge_seqs: &[(bool, bool)],
     block_lens: &[usize],
@@ -114,6 +100,22 @@ fn edge_seqs_to_mappings(
     (new_v1_mapping, new_v2_mapping)
 }
 
+#[cfg(test)]
+fn print_progress(i: usize, number_of_possibilities: usize) {
+    if (i + 1) % 10000 == 0 {
+        let percent = i as f64 / number_of_possibilities as f64 * 100.0;
+        println!("Brute force progress for current edge {percent:.4}% ");
+    }
+}
+
+#[cfg(test)]
+fn number_of_possibilities(possible_edge_assignments: &[Vec<(bool, bool)>]) -> usize {
+    possible_edge_assignments
+        .iter()
+        .map(|poss| poss.len())
+        .product()
+}
+
 fn make_nodes_dirty<T: TKFModel>(cost: &mut TKFIndelCost<T, MASA>, v2_idx: &NodeIdx) {
     for child in &cost.phylo.tree.node(v2_idx).children {
         cost.model_info
@@ -125,6 +127,31 @@ fn make_nodes_dirty<T: TKFModel>(cost: &mut TKFIndelCost<T, MASA>, v2_idx: &Node
         .borrow_mut()
         .valid
         .set(usize::from(cost.phylo.tree.sibling(v2_idx).unwrap()), false);
+}
+
+#[cfg(test)]
+fn assert_masa_is_dollo<AA: AncestralAlignment>(phylo: &PhyloInfo<AA>) {
+    for col_idx in 0..phylo.msa.len() {
+        let mut num_insertions = 0;
+        for node in phylo.tree.postorder() {
+            if *node == phylo.tree.root {
+                if phylo.msa.ancestral_map(node)[col_idx].is_some() {
+                    num_insertions += 1;
+                }
+            } else {
+                let parent = phylo.tree.parent(node).unwrap();
+                let parent_site = phylo.msa.ancestral_map(&parent)[col_idx];
+                let node_site = get_map_from_any_node(&phylo.msa, node)[col_idx];
+                if parent_site.is_none() && node_site.is_some() {
+                    num_insertions += 1;
+                }
+            }
+        }
+        assert_eq!(
+            num_insertions, 1,
+            "Column {col_idx} has {num_insertions} insertions, not Dollo",
+        );
+    }
 }
 
 #[cfg(test)]
@@ -305,70 +332,6 @@ fn brute_force_max<T: TKFModel + Send>(mut cost: TKFIndelCost<T, MASA>, v2_idx: 
 }
 
 #[cfg(test)]
-fn get_max_dp_reestimated<T: TKFModel>(mut cost: TKFIndelCost<T, MASA>, node_idx: &NodeIdx) -> f64 {
-    let mut reassign = EdgeSeqsReestimator::new(&mut cost);
-    // let factor_ns_before_reestimate = reassign.count_factor_ns_on_dirty_tree(node_idx);
-    let backtracking_prob = reassign.reestimate(node_idx);
-
-    // TODO: for statistic count
-    //  - how many etas were changed
-    //  - how many times did the msa not change
-    cost.model_info.borrow_mut().valid.clear();
-    let reestimated_cost = cost.logl();
-
-    assert_relative_eq!(reestimated_cost, backtracking_prob, epsilon = 1e-9);
-    reestimated_cost
-}
-
-// #[test]
-// fn tkf92_compare_dp_vs_brute_force_for_file() {
-//     // let msa = "/Users/mrzi/Documents/develop/58-TKF92/rust-phylo/phylo/data/runtime/outputname_TRUE_strip250.fasta";
-//     let msa = "/Users/mrzi/Documents/develop/115-tkf_tree_search/rust-phylo/phylo/data/tkf_masas/fails.fasta";
-//     let tree =
-//         "/Users/mrzi/Documents/develop/58-TKF92/rust-phylo/phylo/data/runtime/tree_of_life.newick";
-//     let phylo = PhyloInfoBuilder::with_attrs(msa, tree)
-//         .build_with_ancestors()
-//         .unwrap();
-//     assert!(masa_is_dollo(&phylo));
-//     let lambda = 1.0;
-//     let mu = 2.0;
-//     let r = 0.3;
-//
-//     let tkf_cost = TKF92IndelCostBuilder::new(lambda, mu, r, phylo)
-//         .build()
-//         .unwrap();
-//
-//     // TODO: do i really need this call?
-//     let _ = ModelSearchCost::cost(&tkf_cost);
-//     compare_dp_vs_brute_force_for_every_internal_node(tkf_cost);
-// }
-
-// #[test]
-// fn tkf92_compare_dp_vs_brute_force_for_file_and_node() {
-//     // let msa = "/Users/mrzi/Documents/develop/58-TKF92/rust-phylo/phylo/data/runtime/outputname_TRUE_strip250.fasta";
-//     let msa = "/Users/mrzi/Documents/develop/115-tkf_tree_search/rust-phylo/phylo/data/tkf_masas/fails.fasta";
-//     let tree =
-//         "/Users/mrzi/Documents/develop/58-TKF92/rust-phylo/phylo/data/runtime/tree_of_life.newick";
-//     let phylo = PhyloInfoBuilder::with_attrs(msa, tree)
-//         .build_with_ancestors()
-//         .unwrap();
-//     assert!(masa_is_dollo(&phylo));
-//     let lambda = 1.0;
-//     let mu = 2.0;
-//     let r = 0.3;
-//
-//     let tkf_cost = TKF92IndelCostBuilder::new(lambda, mu, r, phylo)
-//         .build()
-//         .unwrap();
-//     let _ = ModelSearchCost::cost(&tkf_cost);
-//     let node = &tkf_cost.phylo.tree.by_id("N343").idx;
-//     let max_dp = get_max_dp_reestimated(tkf_cost.clone(), node);
-//     let max_bf = find_brute_force_max(tkf_cost.clone(), node);
-//
-//     assert_relative_eq!(max_dp, max_bf, epsilon = 1e-12);
-// }
-
-#[cfg(test)]
 fn log_iteration(iteration: usize, node_id: &str, prev_logl: f64, new_logl: f64) {
     println!(
         "Iteration {iteration}, node {node_id}, previous_logl = {prev_logl}, new_logl = {new_logl}, difference = {}",
@@ -440,19 +403,18 @@ fn load_precalculated_brute_force_maxes(file_path: &Path, iteration_info: &mut V
 }
 
 #[cfg(test)]
-pub fn append_result(path: &str, iter: usize, node: String, logl: f64) -> std::io::Result<()> {
-    use std::{fs::OpenOptions, io::BufWriter, io::Write};
+pub fn append_result(path: &str, iteration: usize, node: String, logl: f64) -> std::io::Result<()> {
     let file = OpenOptions::new().create(true).append(true).open(path)?;
 
     let mut writer = BufWriter::new(file);
 
-    writeln!(writer, "{iter},{node},{logl}")?;
+    writeln!(writer, "{iteration},{node},{logl}")?;
 
     Ok(())
 }
 
 #[cfg(test)]
-fn calc_or_load_brute_force_max(
+fn calc_or_lookup_brute_force_max(
     iteration: usize,
     iteration_info: &[IterationInfo],
     precalculated_file: &Path,
@@ -544,7 +506,7 @@ fn tkf92_reestimate_large_tree_for_file_iterative() {
         log_iteration(iteration, &phylo.tree.node(node).id, prev_logl, new_logl);
         assert_relative_eq!(max_dp, new_logl, epsilon = 1e-10);
 
-        let max_brute_force = calc_or_load_brute_force_max(
+        let max_brute_force = calc_or_lookup_brute_force_max(
             iteration - n_skipped,
             &iteration_info,
             &precalculated_file,
