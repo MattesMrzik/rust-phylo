@@ -111,13 +111,13 @@ impl TKFModel for TKF92FixedIndelModel {
         }
         let mut blocks: Vec<usize> = blocks.iter().copied().collect();
         blocks.sort();
-        merge_fragmentations_with_blocks(&self.fragmentation, &blocks)
+        merge_fragmentation_with_blocks(&self.fragmentation, &blocks)
     }
 }
 
 /// Merges the user defined fragmentation with the observed block borders in the MSA.
 /// Assumes both inputs are sorted and within MSA length.
-pub(super) fn merge_fragmentations_with_blocks(
+pub(super) fn merge_fragmentation_with_blocks(
     fragmentation: &[usize],
     blocks: &[usize],
 ) -> Vec<usize> {
@@ -161,7 +161,7 @@ impl Display for TKF92FixedIndelModel {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "TKF92 with lambda = {}, mu = {}, r = {}, fragmentation = {:?}",
+            "TKF92 with lambda = {}, mu = {}, r = {}, fragmentation = {:?} (will be merged with observed block borders in MSA)",
             self.lambda(),
             self.mu(),
             self.r(),
@@ -258,7 +258,7 @@ mod private_tests {
     fn test_merge_fragmentations_with_blocks_case1() {
         let fragmentation = vec![3, 5, 7, 10];
         let blocks = vec![5, 10, 12];
-        let merged = merge_fragmentations_with_blocks(&fragmentation, &blocks);
+        let merged = merge_fragmentation_with_blocks(&fragmentation, &blocks);
         assert_eq!(merged, vec![3, 5, 7, 10, 12]);
     }
 
@@ -266,16 +266,16 @@ mod private_tests {
     fn test_merge_fragmentations_with_blocks_case2() {
         let fragmentation = vec![3, 7, 10, 12];
         let blocks = vec![5, 10, 12];
-        let merged = merge_fragmentations_with_blocks(&fragmentation, &blocks);
-        assert_eq!(merged, vec![3, 5, 7, 10, 12]);
-    }
+        let merged = merge_fragmentation_with_blocks(&fragmentation, &blocks);
+            assert_eq!(merged, vec![3, 5, 7, 10, 12]);
+        }
 
     #[test]
     fn test_merge_fragmentations_with_blocks_case3() {
         let fragmentation = vec![];
         let blocks = vec![5, 10, 12];
-        let merged = merge_fragmentations_with_blocks(&fragmentation, &blocks);
-        assert_eq!(merged, vec![ 5,  10, 12]);
+        let merged = merge_fragmentation_with_blocks(&fragmentation, &blocks);
+        assert_eq!(merged, vec![5, 10, 12]);
     }
 
     #[test]
@@ -323,6 +323,10 @@ mod private_tests {
         assert_relative_eq!(cost, sum_over_fragmentations_cost);
     }
 
+    // This uses the MASA from a simulation under the TKF92 model given a tree and parameters.
+    // Since it is a simulation, we know the true fragmentation. So we compute the log-likelihood
+    // using the fixed fragmentation and compare it to the log-likelihood obtained from the
+    // simulation.
     #[test]
     fn test_simulation() {
         let tree = tree!("((A:0.5,B:0.5)I1:0.7,(C:0.6,D:0.6)I2:0.6)R:1.0;");
