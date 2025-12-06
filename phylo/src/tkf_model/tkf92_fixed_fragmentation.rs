@@ -267,8 +267,8 @@ mod private_tests {
         let fragmentation = vec![3, 7, 10, 12];
         let blocks = vec![5, 10, 12];
         let merged = merge_fragmentation_with_blocks(&fragmentation, &blocks);
-            assert_eq!(merged, vec![3, 5, 7, 10, 12]);
-        }
+        assert_eq!(merged, vec![3, 5, 7, 10, 12]);
+    }
 
     #[test]
     fn test_merge_fragmentations_with_blocks_case3() {
