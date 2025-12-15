@@ -11,6 +11,7 @@ use crate::likelihood::{
     ModelSearchCost, ParamRange, TreeSeachCoestimateAncestors, TreeSearchCost,
 };
 use crate::phylo_info::PhyloInfo;
+use crate::random::DefaultGenerator;
 use crate::substitution_models::FreqVector;
 use crate::tkf_model::reestimate::EdgeSeqsReestimator;
 use crate::tree::NodeIdx::{self, Internal, Leaf};
@@ -285,7 +286,7 @@ impl<T: TKFModel, AA: AncestralAlignment> TKFIndelCost<T, AA> {
         }
     }
 
-    fn reset_cache(&self, node_idx: &NodeIdx) {
+    pub(super) fn reset_cache(&self, node_idx: &NodeIdx) {
         let node_id = usize::from(node_idx);
         let lambda = self.model.lambda();
         let mu = self.model.mu();
@@ -466,7 +467,8 @@ impl<T: TKFModel, AA: AncestralAlignment> TreeSearchCost for TKFIndelCost<T, AA>
         self.phylo.tree = tree;
         if update_due_to_nni {
             let v2 = self.tree().nodes[dirty_nodes[0]].idx;
-            let mut reestimator = EdgeSeqsReestimator::new(self);
+            let rng = &mut DefaultGenerator::default();
+            let mut reestimator = EdgeSeqsReestimator::new(self, rng);
             reestimator.reestimate(&v2);
             // TODO: I think i also have to set the children and siblings to dirty
             // and i think after reestimation is correct. Since for reestimation i check

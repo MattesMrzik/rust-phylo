@@ -486,7 +486,8 @@ fn tkf92_reestimate_large_tree_for_file_iterative() {
         .repeat(repeat);
     rng.shuffle(&mut random_nodes);
 
-    let mut reestimator = EdgeSeqsReestimator::new(&mut tkf_cost);
+        let rng = &mut DefaultGenerator::default();
+    let mut reestimator = EdgeSeqsReestimator::new(&mut tkf_cost, rng);
     let mut n_skipped = 0;
     for (iteration, node) in random_nodes.into_iter().enumerate() {
         if node == &phylo.tree.root || phylo.tree.node(node).children.is_empty() {
