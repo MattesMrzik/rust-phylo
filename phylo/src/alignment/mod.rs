@@ -30,14 +30,32 @@ pub type SeqMaps = HashMap<NodeIdx, Mapping>;
 /// Represents a pairwise alignment of two sequences or MSAs. Used in [`InternalAlignments`].
 #[derive(Clone, Debug, PartialEq)]
 pub struct PairwiseAlignment {
-    pub map_x: Mapping,
-    pub map_y: Mapping,
+    pub(crate) map_x: Mapping,
+    pub(crate) map_y: Mapping,
 }
 
 impl PairwiseAlignment {
     pub fn new(map_x: Mapping, map_y: Mapping) -> PairwiseAlignment {
-        debug_assert!((map_x.len() == map_y.len()) || map_y.is_empty());
+        assert_eq!(
+            map_x.len(),
+            map_y.len(),
+            "Mappings must have the same length"
+        );
         PairwiseAlignment { map_x, map_y }
+    }
+
+    pub fn map_x(&self) -> &Mapping {
+        &self.map_x
+    }
+
+    pub fn map_y(&self) -> &Mapping {
+        &self.map_y
+    }
+
+    #[allow(clippy::len_without_is_empty)]
+    pub fn len(&self) -> usize {
+        debug_assert_eq!(self.map_x.len(), self.map_y.len());
+        self.map_x.len()
     }
 }
 
@@ -280,7 +298,7 @@ impl Alignment for MSA {
     /// # Ok(()) }
     /// ```
     fn from_aligned_unchecked(seqs: Sequences, tree: &Tree) -> MSA {
-        let msa_len = seqs.record(0).seq().len();
+        let msa_len = seqs[0].seq().len();
         let mut stack = HashMap::<NodeIdx, Mapping>::with_capacity(tree.len());
         let mut internal_alignments = InternalAlignments::with_capacity(tree.n);
         let mut idx_to_id = vec![String::new(); tree.len()];

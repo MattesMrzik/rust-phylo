@@ -63,7 +63,7 @@ impl<A: Alignment> PhyloInfo<A> {
         tree: &Tree,
     ) -> SeqMaps {
         let msa_len = match sub_root {
-            Internal(_) => internal_alignments[sub_root].map_x.len(),
+            Internal(_) => internal_alignments[sub_root].len(),
             Leaf(_) => seqs.record_by_id(tree.node_id(sub_root)).seq().len(),
         };
         let mut stack = HashMap::<NodeIdx, Mapping>::with_capacity(tree.len());
@@ -129,7 +129,7 @@ impl<A: Alignment> PhyloInfo<A> {
             let count = self
                 .msa
                 .seqs()
-                .iter()
+                .into_iter()
                 .map(|rec| rec.seq().iter().filter(|&c| c == &char).count())
                 .sum::<usize>() as f64;
             let mut char_freq = alphabet.char_encoding(char).clone();
