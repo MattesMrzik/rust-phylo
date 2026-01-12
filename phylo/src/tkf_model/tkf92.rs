@@ -35,7 +35,7 @@ pub struct TKF92IndelModel {
 }
 
 impl TKF92IndelModel {
-    pub(crate) fn r(&self) -> f64 {
+    pub fn r(&self) -> f64 {
         self.params[usize::from(TKF92Parameters::R)]
     }
 
@@ -109,30 +109,8 @@ impl TKFModel for TKF92IndelModel {
         }
     }
 
-    /// Determines the block borders from the alignment. A block border is defined as a
-    /// position where any sequence changes from gap to non-gap or vice versa. Returns a sorted
-    /// vector of the right exclusive block borders.
     fn get_blocks<AA: AncestralAlignment>(&self, msa: &AA) -> Vec<usize> {
-        let mut blocks: HashSet<usize> = HashSet::new();
-        for map in msa
-            .ancestral_maps()
-            .values()
-            .chain(msa.leaf_maps().values())
-        {
-            let mut previous_is_char = map[0].is_some();
-            for (i, c) in map.iter().skip(1).enumerate() {
-                let current_is_char = c.is_some();
-                // whenever there is a change from gap to not gap or vice versa, we have a block border
-                if previous_is_char ^ current_is_char {
-                    blocks.insert(i + 1);
-                }
-                previous_is_char = current_is_char;
-            }
-            blocks.insert(map.len());
-        }
-        let mut blocks: Vec<usize> = blocks.iter().copied().collect();
-        blocks.sort();
-        blocks
+        blocks_of_alignment(msa)
     }
 }
 
@@ -148,9 +126,9 @@ impl Display for TKF92IndelModel {
     }
 }
 
-/// Validates the TKF92 parameter r. If it is not valid, it is set to
-/// default value and a warning is logged.
-/// Returns valid r.
+/// Validates the TKF92 parameter `r`. If it is not valid, it is set to
+/// its default value and a warning is logged.
+/// Returns valid `r`.
 pub(super) fn validate_r(r: f64) -> f64 {
     let mut valid_r = r;
     if r == 0.0 {
@@ -165,7 +143,7 @@ pub(super) fn validate_r(r: f64) -> f64 {
     valid_r
 }
 
-/// Builder for TKF92 indel cost, i.e., without substitution model.
+/// Builder for the cost using [`TKF92IndelModel`], i.e., without a substitution model.
 pub struct TKF92IndelCostBuilder<AA: AncestralAlignment> {
     lambda: f64,
     mu: f64,
@@ -249,6 +227,32 @@ impl<Q: QMatrix, AA: AncestralAlignment> TKF92CostBuilder<Q, AA> {
             subst_cost: SCB::new(self.subst_model, self.phylo).build().unwrap(),
         })
     }
+}
+
+/// Determines the block borders from the alignment. A block border is defined as a
+/// position where any sequence changes from gap to non-gap or vice versa. Returns a sorted
+/// vector of the right exclusive block borders.
+pub(super) fn blocks_of_alignment<AA: AncestralAlignment>(msa: &AA) -> Vec<usize> {
+    let mut blocks: HashSet<usize> = HashSet::new();
+    for map in msa
+        .ancestral_maps()
+        .values()
+        .chain(msa.leaf_maps().values())
+    {
+        let mut previous_is_char = map[0].is_some();
+        for (i, c) in map.iter().skip(1).enumerate() {
+            let current_is_char = c.is_some();
+            // whenever there is a change from gap to not gap or vice versa, we have a block border
+            if previous_is_char ^ current_is_char {
+                blocks.insert(i + 1);
+            }
+            previous_is_char = current_is_char;
+        }
+        blocks.insert(map.len());
+    }
+    let mut blocks: Vec<usize> = blocks.iter().copied().collect();
+    blocks.sort();
+    blocks
 }
 
 #[cfg(test)]

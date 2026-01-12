@@ -1,15 +1,14 @@
 use std::cell::RefCell;
 use std::fmt::Display;
 
+use approx::assert_relative_eq;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use lazy_static::lazy_static;
 use nalgebra::{DMatrix, DVector};
 
 use crate::alignment::AncestralAlignment;
-use crate::likelihood::{
-    ModelSearchCost, ParamRange, TreeSeachCoestimateAncestors, TreeSearchCost,
-};
+use crate::likelihood::{ModelSearchCost, ParamRange, TreeSearchCost};
 use crate::phylo_info::PhyloInfo;
 use crate::random::DefaultGenerator;
 use crate::substitution_models::FreqVector;
@@ -42,10 +41,10 @@ pub trait TKFModel: Clone + Display {
     // because of the constraint that mu > lambda.
     fn lambda(&self) -> f64;
     fn mu(&self) -> f64;
-    /// [TKF91](crate::tkf_model::tkf91) has 2 parameters: lambda and mu, [TKF92](crate::tkf_model::tkf92)
-    /// has 3 parameters: lambda, mu and r.
-    /// The parameter r in [TKF92](crate::tkf_model::tkf92) is used to model the length distribution of inserted segments,
-    /// i.e., in [`crate::tkf_model::TKF92IndelModel::insertion_prob_at_non_root`] and
+    /// [TKF91](crate::tkf_model::tkf91) has 2 parameters: `lambda` and `mu`, [TKF92](crate::tkf_model::tkf92)
+    /// has 3 parameters: `lambda`, `mu` and `r`.
+    /// The parameter `r` in [TKF92](crate::tkf_model::tkf92) is used to model the length distribution of inserted segments,
+    /// i.e., in [`super::TKF92IndelModel::insertion_prob_at_non_root`] and
     /// [`super::TKF92IndelModel::insertion_prob_at_root`].
     fn params(&self) -> &[f64];
     fn set_param(&mut self, idx: usize, value: f64);
@@ -55,17 +54,18 @@ pub trait TKFModel: Clone + Display {
     /// Returns the factor corresponding to an insertion event at a non-root node.
     fn insertion_prob_at_non_root(&self, beta: f64) -> f64;
     /// Given the subtree event probability for the root (i.e., the tree event probability)
-    /// and the block length, returns the log probability of the block under the model.
+    /// and the block length, returns the log probability of the [block](`TKFModel::get_blocks`) under the model.
     fn block_prob(&self, tree_event_prob: f64, block_len: usize) -> f64;
-    // TODO: perhaps also make the get block lens pub through this trait
-    // but perhaps that would not help the restiamtio the
+    /// For every block (i.e., an alignment slice) as determined by this method and factors
+    /// corresponding to the evolutionary events in this block [`TKFModel::block_prob`] computes
+    /// the log probability of the block under the model.
     fn get_blocks<AA: AncestralAlignment>(&self, msa: &AA) -> Vec<usize>;
 }
 
 // TODO: link our paper once it is published. For now see original TKF92 paper: https://doi.org/10.1007/bf00163848
 /// This struct holds intermediate values for the computation of the log likelihood
 /// of an ancestral alignment and tree under a TKF indel model, i.e., without substitutions.
-/// The intermediate values are needed for re-alignment.
+/// The intermediate values are needed for re-alignment, which is not implemented yet.
 #[derive(Clone, Debug)]
 pub(super) struct TKFIndelModelInfo {
     /// node_event_prob[(node, block)] = the probability factor for the event
@@ -119,7 +119,7 @@ pub(super) struct TKFIndelModelInfo {
     pub(super) valid: FixedBitSet,
     /// valid_for_reestimation[node] = true if the intermediate values can be used for re-estimation.
     /// Since for re-estimation we don't need the subtree values for the internal nodes except the
-    /// root. So if many re-estimations are done for fixed tree and model, we can save time by not
+    /// root. So if many re-estimations are done for a fixed tree and model, we can save time by not
     /// recomputing subtree values for internal nodes that are not the root.
     pub(super) valid_for_reestimation: FixedBitSet,
 }
@@ -152,9 +152,13 @@ impl TKFIndelModelInfo {
     }
 }
 
-/// Computes the log likelihood of an ancestral alignment and tree under a TKF indel model,
-/// i.e., without substitutions. The model is generic over the specific TKF model (e.g., TKF91 or
-/// TKF92).
+/// Computes the log likelihood of an [ancestral alignment](`AncestralAlignment`)
+/// and tree under a TKF indel model, i.e., without substitutions.
+/// The model is generic over the specific TKF model (e.g.,
+/// [TKF91IndelModel](`crate::tkf_model::TKF91IndelModel`),
+/// [TKF91IndelModel](`crate::tkf_model::TKF92IndelModel`),
+/// [TKF92FixedIndelModel](`crate::tkf_model::TKF92FixedIndelModel`),
+/// [TKF92IndelModelAddBlocks](`crate::tkf_model::TKF92IndelModelAddBlocks`)).
 #[derive(Debug)]
 pub struct TKFIndelCost<T: TKFModel, AA: AncestralAlignment> {
     pub(super) model: T,
@@ -339,7 +343,7 @@ impl<T: TKFModel, AA: AncestralAlignment> TKFIndelCost<T, AA> {
     }
 
     /// Determines the event that happened on the edge above `node_idx` for the given `block_id`
-    /// based on the ancestral alignment.
+    /// based on the [ancestral alignment](`AncestralAlignment`).
     pub(super) fn determine_event(&self, node_idx: &NodeIdx, block_id: usize) -> Event {
         // the presence or absence of characters is the same for all sites in a block
         // so we can just check the last site of the block
@@ -367,6 +371,16 @@ impl<T: TKFModel, AA: AncestralAlignment> TKFIndelCost<T, AA> {
         }
     }
 
+    pub(super) fn event_prob_for_non_root(&self, node_idx: &NodeIdx, event: Event) -> f64 {
+        let node_id = usize::from(node_idx);
+        match event {
+            Event::Deletion => self.model_info.borrow().n0[node_id],
+            Event::Homolog => self.model_info.borrow().h1[node_id],
+            Event::Insertion => self.model_info.borrow().insertion[node_id],
+            Event::Nothing => 1.0,
+        }
+    }
+
     /// Returns eta if the current event is an insertion and the previous one was a deletion, 0
     /// otherwise.
     /// See [`eta`] function.
@@ -379,16 +393,6 @@ impl<T: TKFModel, AA: AncestralAlignment> TKFIndelCost<T, AA> {
             self.model_info.borrow().eta[usize::from(node_idx)]
         } else {
             0.0
-        }
-    }
-
-    pub(super) fn event_prob_for_non_root(&self, node_idx: &NodeIdx, event: Event) -> f64 {
-        let node_id = usize::from(node_idx);
-        match event {
-            Event::Deletion => self.model_info.borrow().n0[node_id],
-            Event::Homolog => self.model_info.borrow().h1[node_id],
-            Event::Insertion => self.model_info.borrow().insertion[node_id],
-            Event::Nothing => 1.0,
         }
     }
 }
@@ -430,13 +434,6 @@ impl<T: TKFModel, AA: AncestralAlignment> ModelSearchCost for TKFIndelCost<T, AA
     }
 }
 
-impl<T: TKFModel, AA: AncestralAlignment> TreeSeachCoestimateAncestors for TKFIndelCost<T, AA> {
-    fn masa(&mut self) -> &mut impl AncestralAlignment {
-        &mut self.phylo.msa
-    }
-    fn update_maps(&mut self) {}
-}
-
 impl<T: TKFModel, AA: AncestralAlignment> TreeSearchCost for TKFIndelCost<T, AA> {
     fn cost(&self) -> f64 {
         self.logl()
@@ -469,10 +466,8 @@ impl<T: TKFModel, AA: AncestralAlignment> TreeSearchCost for TKFIndelCost<T, AA>
             let v2 = self.tree().nodes[dirty_nodes[0]].idx;
             let rng = &mut DefaultGenerator::default();
             let mut reestimator = EdgeSeqsReestimator::new(self, rng);
-            reestimator.reestimate(&v2);
-            // TODO: I think i also have to set the children and siblings to dirty
-            // and i think after reestimation is correct. Since for reestimation i check
-            // if they are still valid (valid for the old tree that is)
+            let dp_logl = reestimator.reestimate(&v2);
+            assert_relative_eq!(dp_logl, self.logl(), epsilon = 1e-10);
         }
         self.phylo.tree.clean();
     }
@@ -482,7 +477,7 @@ impl<T: TKFModel, AA: AncestralAlignment> TreeSearchCost for TKFIndelCost<T, AA>
     }
 }
 
-/// Returns the value of beta(t) for a branch of length `time`.
+/// Returns the value of `beta(t)` for a branch of length/time `t`.
 /// It is called beta(t) in the TKF papers.
 #[inline]
 pub(super) fn beta(lambda: f64, mu: f64, time: f64) -> f64 {
@@ -490,26 +485,26 @@ pub(super) fn beta(lambda: f64, mu: f64, time: f64) -> f64 {
     (1.0 - exp_term) / (mu - lambda * exp_term)
 }
 
-/// Returns the log probability of a character being inserted right of the immortal link
+/// Returns the log probability of a character being inserted to the right of the immortal link
 /// along a branch of length `time`, i.e., at the very left of the sequence.
-/// The 'time' is implicitly included in beta.
-/// It is called p''_1() in the TKF papers.
+/// The `time` is also implicitly included in `beta`.
+/// It is called `p''_1` in the TKF papers.
 #[inline]
 pub(super) fn log_i1(lambda: f64, beta: f64) -> f64 {
     (1.0 - lambda * beta).ln()
 }
 
 /// Returns the probability of a homologous character surviving along a branch of length `time`.
-/// The 'time' is also implicitly included in beta.
-/// It is called p_1(t) in the TKF papers.
+/// The `time` is also implicitly included in `beta`.
+/// It is called `p_1` in the TKF papers.
 #[inline]
 pub(super) fn h1(lambda: f64, mu: f64, beta: f64, time: f64) -> f64 {
     (-mu * time).exp() * (1.0 - lambda * beta)
 }
 
 /// Returns the probability of a character being deleted along a branch of length `time`.
-/// It is called p'_0(t) in the TKF papers.
-/// The 'time' is also implicitly included in beta.
+/// It is called `p'_0` in the TKF papers.
+/// The `time` is implicitly included in `beta`.
 #[inline]
 pub(super) fn n0(mu: f64, beta: f64) -> f64 {
     mu * beta
@@ -517,19 +512,19 @@ pub(super) fn n0(mu: f64, beta: f64) -> f64 {
 
 /// Returns the log probability of a new character being inserted right of a character that is
 /// deleted along a branch of length `time`.
-/// The 'time' is also implicitly included in beta.
-/// It is called p'_1() in the TKF papers.
+/// The `time` is also implicitly included in beta.
+/// It is called `p'_1` in the TKF papers.
 #[inline]
 pub(super) fn log_n1(lambda: f64, mu: f64, beta: f64, time: f64) -> f64 {
     ((1.0 - (-mu * time).exp() - mu * beta) * (1.0 - lambda * beta)).ln()
 }
 
-/// Returns the log of the n1 / (n0 * lambda * beta).
+/// Returns the log of the `n1 / (n0 * lambda * beta)`.
 /// This is used in the case where an insertion follows a deletion,
-/// since the event factors included n0 for the deletion and lambda * beta for the insertion
-/// but under the TKF model they are not independent and instead n1 should be used.
-/// Eta corrects for that.
-/// The 'time' is also implicitly included in beta and n0.
+/// since the event factors included `n0` for the deletion and `lambda * beta` for the insertion
+/// but under the TKF model they are not independent and instead `n1` should be used.
+/// `Eta` corrects for that.
+/// The `time` is also implicitly included in `beta` and `n0`.
 #[inline]
 pub(super) fn eta(lambda: f64, mu: f64, beta: f64, n0: f64, time: f64) -> f64 {
     let mut eta = log_n1(lambda, mu, beta, time);

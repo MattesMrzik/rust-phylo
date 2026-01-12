@@ -13,6 +13,10 @@ pub mod reestimate;
 pub use reestimate::*;
 pub mod tkf_indel;
 pub use tkf_indel::*;
+pub mod tkf92_fixed_fragmentation;
+pub use tkf92_fixed_fragmentation::*;
+pub mod tkf92_additional_blocks;
+pub use tkf92_additional_blocks::*;
 
 #[derive(Clone, Debug)]
 pub struct TKFCost<Q: QMatrix + Display, T: TKFModel, AA: AncestralAlignment> {
@@ -99,6 +103,16 @@ impl<Q: QMatrix, T: TKFModel, AA: AncestralAlignment> TreeSearchCost for TKFCost
     }
 }
 
+impl<Q: QMatrix, T: TKFModel, AA: AncestralAlignment> TKFCost<Q, T, AA> {
+    pub fn masa(&self) -> &impl AncestralAlignment {
+        &self.indel_cost.phylo.msa
+    }
+
+    pub fn masa_mut(&mut self) -> &mut impl AncestralAlignment {
+        &mut self.indel_cost.phylo.msa
+    }
+}
+
 #[cfg(test)]
 #[cfg_attr(coverage, coverage(off))]
 mod tests;
@@ -106,7 +120,3 @@ mod tests;
 #[cfg(test)]
 #[cfg_attr(coverage, coverage(off))]
 mod brute_force_ancestors_tests;
-
-#[cfg(test)]
-#[cfg_attr(coverage, coverage(off))]
-mod tkf92_fixed_fragmentation;

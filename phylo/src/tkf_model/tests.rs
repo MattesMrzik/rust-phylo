@@ -861,25 +861,3 @@ fn tkf_modify_indel_model_params_costs_match() {
     modify_tkf92_indel_params_costs_match_template::<BLOSUM>(protein_alphabet());
     modify_tkf92_indel_params_costs_match_template::<HIVB>(protein_alphabet());
 }
-
-#[test]
-fn tkf92_update_tree() {
-    let tree = tree!("(((A1:2.0,B2:2.0)I3:0.3,C4:2.0)R5:1.0);");
-    let msa = MASA::from_aligned_with_ancestral(
-        Sequences::new(vec![
-            record!("A1", b"--GTGGA---"),
-            record!("B2", b"-------NNA"),
-            record!("I3", b"--T-------"),
-            record!("C4", b"AGG-------"),
-            record!("R5", b"--A-------"),
-        ]),
-        &tree,
-    )
-    .unwrap();
-    let phylo = PhyloInfo { msa, tree };
-
-    let subst_model = SubstModel::<GTR>::new(&[], &[]);
-    let _tkf_cost = TKF92CostBuilder::new(0.1, 0.2, 0.3, subst_model, phylo.clone())
-        .build()
-        .unwrap();
-}

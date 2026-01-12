@@ -1,26 +1,22 @@
 use std::cell::RefCell;
 use std::fmt::Display;
 
-use hashbrown::HashSet;
 use log::warn;
-use num_enum::{FromPrimitive, IntoPrimitive};
+use num_enum::FromPrimitive;
 
 use crate::likelihood::{ParamRange, PARAM_RANGE_UNIT_INTERVAL_EXCLUSIVE};
 use crate::phylo_info::PhyloInfo;
-use crate::tkf_model::{validate_lambda_and_mu, validate_r, TKFIndelCost, TKFIndelModelInfo};
+use crate::tkf_model::{
+    blocks_of_alignment, validate_lambda_and_mu, validate_r, TKF92Parameters, TKFIndelCost,
+    TKFIndelModelInfo,
+};
 use crate::Result;
 use crate::{alignment::AncestralAlignment, tkf_model::TKFModel};
 
-#[derive(Debug, Eq, PartialEq, FromPrimitive, IntoPrimitive)]
-#[repr(usize)]
-pub(crate) enum TKF92Parameters {
-    Lambda = 0,
-    Mu = 1,
-    R = 2,
-    #[num_enum(catch_all)]
-    Invalid(usize),
-}
-
+/// TKF92 indel model with a `fixed fragmentation` (and without a substitution model),
+/// which means that the provided fragmentation will be regarded as the true fragmentation.
+/// This is different to the [`crate::tkf_model::TKF92IndelModel`], which integrates
+/// over all possible fragmentations that confirm with the observed MSA.
 #[derive(Clone, Debug, PartialEq)]
 pub struct TKF92FixedIndelModel {
     pub(super) params: Vec<f64>,
@@ -30,9 +26,8 @@ pub struct TKF92FixedIndelModel {
     pub(super) fragmentation: Vec<usize>,
 }
 
-// TODO: this whole thing could be compiled only when testing
 impl TKF92FixedIndelModel {
-    pub(crate) fn r(&self) -> f64 {
+    pub fn r(&self) -> f64 {
         self.params[usize::from(TKF92Parameters::R)]
     }
 }
@@ -77,8 +72,7 @@ impl TKFModel for TKF92FixedIndelModel {
         self.lambda() / self.mu()
     }
 
-    // this is not a prob but a factor since it can be > 1
-    // TODO i really should rename also the node_event_prob to node_event_factor or something
+    // TODO: this is not a prob but a factor since it can be > 1, rename?
     fn insertion_prob_at_non_root(&self, beta: f64) -> f64 {
         self.lambda() * beta
     }
@@ -92,26 +86,8 @@ impl TKFModel for TKF92FixedIndelModel {
     }
 
     fn get_blocks<AA: AncestralAlignment>(&self, msa: &AA) -> Vec<usize> {
-        let mut blocks: HashSet<usize> = HashSet::new();
-        for map in msa
-            .ancestral_maps()
-            .values()
-            .chain(msa.leaf_maps().values())
-        {
-            let mut previous_is_char = map[0].is_some();
-            for (i, c) in map.iter().skip(1).enumerate() {
-                let current_is_char = c.is_some();
-                // whenever there is a change from gap to not gap or vice versa, we have a block border
-                if previous_is_char ^ current_is_char {
-                    blocks.insert(i + 1);
-                }
-                previous_is_char = current_is_char;
-            }
-            blocks.insert(map.len());
-        }
-        let mut blocks: Vec<usize> = blocks.iter().copied().collect();
-        blocks.sort();
-        merge_fragmentation_with_blocks(&self.fragmentation, &blocks)
+        let alignment_blocks = blocks_of_alignment(msa);
+        merge_fragmentation_with_blocks(&self.fragmentation, &alignment_blocks)
     }
 }
 
@@ -122,14 +98,13 @@ pub(super) fn merge_fragmentation_with_blocks(
     blocks: &[usize],
 ) -> Vec<usize> {
     let mut frag_iter = fragmentation.iter().peekable();
-    let mut missing = Vec::new();
+    let mut merged = Vec::new();
     for block in blocks.iter() {
         let mut next_block = false;
         while let Some(&frag) = frag_iter.peek() {
             if frag > block {
-                println!("Observed right border of block {block} in MSA not in fragmentation, adding it.");
                 warn!("Observed right border of block {block} in MSA not in fragmentation, adding it.");
-                missing.push(*block);
+                merged.push(*block);
                 next_block = true;
                 break;
             } else if frag == block {
@@ -142,26 +117,22 @@ pub(super) fn merge_fragmentation_with_blocks(
         if next_block {
             continue;
         } else {
-            println!(
-                "Observed right border of block {block} in MSA not in fragmentation, adding it."
-            );
             warn!("Observed right border of block {block} in MSA not in fragmentation, adding it.");
-            missing.push(*block);
+            merged.push(*block);
         }
     }
     for frag in fragmentation {
-        missing.push(*frag);
+        merged.push(*frag);
     }
-
-    missing.sort();
-    missing
+    merged.sort();
+    merged
 }
 
 impl Display for TKF92FixedIndelModel {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "TKF92 with lambda = {}, mu = {}, r = {}, fragmentation = {:?} (will be merged with observed block borders in MSA)",
+            "TKF92 with lambda = {}, mu = {}, r = {}, and fixed fragmentation = {:?}",
             self.lambda(),
             self.mu(),
             self.r(),
@@ -170,7 +141,7 @@ impl Display for TKF92FixedIndelModel {
     }
 }
 
-/// Builder for TKF92 indel cost, i.e., without substitution model and a fixed fragmentation
+/// Builder for the cost using [`TKF92FixedIndelModel`].
 pub struct TKF92FixedIndelCostBuilder<AA: AncestralAlignment> {
     lambda: f64,
     mu: f64,
@@ -179,7 +150,8 @@ pub struct TKF92FixedIndelCostBuilder<AA: AncestralAlignment> {
     phylo: PhyloInfo<AA>,
 }
 
-fn validate_fragmentation(fragmentation: &[usize], msa_len: usize) -> Vec<usize> {
+/// Removes duplicates and out-of-bounds entries.
+pub(super) fn validate_fragmentation(fragmentation: &[usize], msa_len: usize) -> Vec<usize> {
     let mut fragmentation = fragmentation.to_vec();
     let original_len = fragmentation.len();
     if original_len == 0 {
@@ -237,17 +209,19 @@ impl<AA: AncestralAlignment> TKF92FixedIndelCostBuilder<AA> {
 #[cfg(test)]
 mod private_tests {
 
+    use std::path::Path;
+
     use approx::assert_relative_eq;
 
     use crate::alignment::{Sequences, MASA};
-    use crate::phylo_info::PhyloInfo;
-    use crate::tkf_model::{TKF92IndelCostBuilder, DEFAULT_LAMBDA, DEFAULT_MU, DEFAULT_R};
+    use crate::phylo_info::{PhyloInfo, PhyloInfoBuilder};
+    use crate::tkf_model::TKF92IndelCostBuilder;
     use crate::{record_wo_desc as record, tree};
 
     use super::*;
 
     #[test]
-    fn test_validate_fragmentation() {
+    fn tkf_validate_fragmentation() {
         let fragmentation = vec![3, 19, 3, 4, 58, 13, 0, 1, 0, 3, 4, 15, 16];
         let msa_len = 15;
         let validated = validate_fragmentation(&fragmentation, msa_len);
@@ -255,7 +229,7 @@ mod private_tests {
     }
 
     #[test]
-    fn test_merge_fragmentations_with_blocks_case1() {
+    fn tkf_merge_fragmentations_with_blocks_case1() {
         let fragmentation = vec![3, 5, 7, 10];
         let blocks = vec![5, 10, 12];
         let merged = merge_fragmentation_with_blocks(&fragmentation, &blocks);
@@ -263,15 +237,15 @@ mod private_tests {
     }
 
     #[test]
-    fn test_merge_fragmentations_with_blocks_case2() {
+    fn tkf_merge_fragmentations_with_blocks_case2() {
         let fragmentation = vec![3, 7, 10, 12];
         let blocks = vec![5, 10, 12];
         let merged = merge_fragmentation_with_blocks(&fragmentation, &blocks);
-            assert_eq!(merged, vec![3, 5, 7, 10, 12]);
-        }
+        assert_eq!(merged, vec![3, 5, 7, 10, 12]);
+    }
 
     #[test]
-    fn test_merge_fragmentations_with_blocks_case3() {
+    fn tkf_merge_fragmentations_with_blocks_case3() {
         let fragmentation = vec![];
         let blocks = vec![5, 10, 12];
         let merged = merge_fragmentation_with_blocks(&fragmentation, &blocks);
@@ -279,7 +253,23 @@ mod private_tests {
     }
 
     #[test]
-    fn test_integration() {
+    fn tkf_merge_fragmentations_with_blocks_case4() {
+        let fragmentation = vec![1, 2, 3, 4];
+        let blocks = fragmentation.clone();
+        let merged = merge_fragmentation_with_blocks(&fragmentation, &blocks);
+        assert_eq!(merged, fragmentation.clone());
+    }
+
+    #[test]
+    fn tkf_merge_fragmentations_with_blocks_case5() {
+        let fragmentation = vec![1, 2, 4];
+        let blocks = vec![1, 2, 3, 4];
+        let merged = merge_fragmentation_with_blocks(&fragmentation, &blocks);
+        assert_eq!(merged, blocks.clone());
+    }
+
+    #[test]
+    fn tkf_manual_integration_over_fragmentations() {
         let tree = tree!("((A0:1.0,B1:1.0)I1:1.0);");
         let seqs = Sequences::new(vec![
             record!("A0", b"AAB---D"),
@@ -288,11 +278,13 @@ mod private_tests {
         ]);
         let msa = MASA::from_aligned_with_ancestral(seqs, &tree).unwrap();
         let phylo_info = PhyloInfo { msa, tree };
+        let lambda = 1.0;
+        let mu = 1.1;
+        let r = 0.5;
 
-        let tkf92_cost =
-            TKF92IndelCostBuilder::new(DEFAULT_LAMBDA, DEFAULT_MU, DEFAULT_R, phylo_info.clone())
-                .build()
-                .unwrap();
+        let tkf92_cost = TKF92IndelCostBuilder::new(lambda, mu, r, phylo_info.clone())
+            .build()
+            .unwrap();
         let cost = tkf92_cost.logl();
 
         let mut sum_over_fragmentations_cost = 0.0;
@@ -308,39 +300,29 @@ mod private_tests {
         ];
 
         for fragmentation in fragmentations {
-            let fragment_cost = TKF92FixedIndelCostBuilder::new(
-                DEFAULT_LAMBDA,
-                DEFAULT_MU,
-                DEFAULT_R,
-                fragmentation,
-                phylo_info.clone(),
-            )
-            .build()
-            .unwrap();
+            let fragment_cost =
+                TKF92FixedIndelCostBuilder::new(lambda, mu, r, fragmentation, phylo_info.clone())
+                    .build()
+                    .unwrap();
             sum_over_fragmentations_cost += fragment_cost.logl().exp();
         }
         sum_over_fragmentations_cost = sum_over_fragmentations_cost.ln();
         assert_relative_eq!(cost, sum_over_fragmentations_cost);
     }
 
-    // This uses the MASA from a simulation under the TKF92 model given a tree and parameters.
-    // Since it is a simulation, we know the true fragmentation. So we compute the log-likelihood
-    // using the fixed fragmentation and compare it to the log-likelihood obtained from the
-    // simulation.
     #[test]
-    fn test_simulation() {
-        let tree = tree!("((A:0.5,B:0.5)I1:0.7,(C:0.6,D:0.6)I2:0.6)R:1.0;");
-        let seqs = Sequences::new(vec![
-            record!("R", b"--------------AA------AAAA--------------A--------------AAA----------------A-AAAA-----------AA-----------A------A------A----------AAAAAA-A--AA---AAAAA---AAAAAAAA-----------------------AA--------AAAAAA------A--------------AAA-AA-A------A----A--------AAA---AAA----------------------------A-------------A------AA-A--------------AAAAAAA------------------AAAAA---------AA----AAA----"),
-            record!("I1", b"--------------TA-----TGCTT---------------------A-------ATC----GAACA--AA---AT--CAGAA-TA-----CA---AA-------------A--ACAA------------GCCTA-A----------AA--C--ATATTG-----------------------AA---------------A----A-----GG------A--C-AA--------C---------------------A------------AA----CAAAA-----A----AA---CC--T---------T------------ACATAAATC-------------AAG----------------AC---------TT"),
-            record!("A", b"-----CG--------------C-CTC--G------------------A------G-------TCACC--CAATTAT--GAGACTTA-----CC----A--CCGT-------A--GTAA------------GTTTAAA-----------------GATGAG--------CA--------------------------------TCG------C-CTTACC---CCTGG-----------------------------A--------------GCCG---AC-GAAC-T---AATGACC------------TCA----------CCATAAGTA-ATA---------AC-----------------TG---------TT"),
-            record!("B", b"--------------GA------GCCTTT--------------------CACGAT-GAACTGTGAACAACGA----T----GAA-G-AACGA-----AATC--------------CCGT------------CCCCT-A------------TTC--------GCTATTTT---------------AAGACC-----------AG---A-----T-------A--C-----------C----------------------------------------TA--GG----A-----------AGT---------T------------TT--------------------AAGCT--------------TGTCAC-------"),
-            record!("I2", b"-------CGGA--CAA-------------A-AG-------A---------------------------------A-GGCA-----------TA-----------C---AG-A------G-AAAAAGG---AGAAC-C---A-----------------------------AAAA--A---A--------A---CCAAAA------C--------------CCC-AA-A---G-AT---AA---GAAAA---A-----A---AAAGCCAC----------------T-A-----------AT-----TTAA--AATACGACG---ATATCGG----AGATCG-A---------AAA--------AA----AAAAA--"),
-            record!("C", b"----C--------G-----------------AC--------TGAGAA---------------------------A----------------TA-----------C---AG-C-C-----AACAATGG---AGAAC-----------------------------------GAAT-A-------------AATA-----A---------------------TC-----TGTATA-CTAA--TGTGATCT---ACA-----AAATAGCCAC----------------T--------------T-----T-A---AATCCTCCGA--GTCCCGGG----CTGCG-GA----------A-----ATAAG----AGA----"),
-            record!("D", b"GTGT---CGAATA-GCATATG--------ATAGTGCAGTAA---------------------------------A---TA-------------CCG---------AATTTG-T--------------CG-------CGC-ACAG--------------------------CAATT-ACAA-AG---------------AG-----CAATGG---------CT--CA-C------G---TG---CATGG----------C--CCAGCCGC-------------------AA----------TCTAGAT-A---TACACGACC---ATGCCTC----ACGGTATT---------AG-ATAAT----------------"),
-        ]);
-        let msa = MASA::from_aligned_with_ancestral(seqs, &tree).unwrap();
-        let phylo_info = PhyloInfo { msa, tree };
+    fn tkf_compare_to_simulation() {
+        // This uses the MASA from a simulation under the TKF92 model given a tree and parameters.
+        // Since it is a simulation, we know the true fragmentation. So we compute the log-likelihood
+        // using the fixed fragmentation and compare it to the log-likelihood obtained from the
+        // simulation. Note that we do not remove non-emitting columns from the alignment,
+        // since the simulation probability includes them.
+        let dir = Path::new("data/tkf/fixed_fragments/");
+        let sequence_file = dir.join("masa.fasta");
+        let tree_file = dir.join("tree.newick");
+        let phylo_info = PhyloInfoBuilder::with_attrs(sequence_file, tree_file)
+            .build_with_ancestors()
+            .unwrap();
 
         let fragmentation = vec![
             4, 5, 6, 7, 11, 12, 13, 14, 16, 21, 22, 23, 26, 28, 29, 30, 31, 33, 40, 41, 47, 48, 54,
@@ -355,15 +337,10 @@ mod private_tests {
             312, 321, 322, 324, 331, 332, 334, 335, 336, 341, 342, 343, 344, 346, 347, 349, 352,
             354, 355, 356, 359, 360, 363, 365, 369, 372, 374, 376,
         ];
-        let fragment_cost = TKF92FixedIndelCostBuilder::new(
-            DEFAULT_LAMBDA,
-            DEFAULT_MU,
-            DEFAULT_R,
-            fragmentation,
-            phylo_info,
-        )
-        .build()
-        .unwrap();
+        let fragment_cost =
+            TKF92FixedIndelCostBuilder::new(1.0, 1.1, 0.5, fragmentation, phylo_info)
+                .build()
+                .unwrap();
         // logl from simulation
         assert_relative_eq!(fragment_cost.logl(), -769.4115065236674, epsilon = 1e-10);
     }
