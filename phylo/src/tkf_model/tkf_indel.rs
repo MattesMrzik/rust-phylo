@@ -25,6 +25,7 @@ pub(super) static DEFAULT_MU: f64 = 1.1;
 pub(super) static DEFAULT_LAMBDA_MU_RATIO: f64 = 0.9;
 pub(super) static DEFAULT_R: f64 = 0.5;
 
+/// Events that can happen on a branch in the TKF model.
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub(super) enum Event {
     Insertion,

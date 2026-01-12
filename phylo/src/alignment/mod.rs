@@ -457,8 +457,9 @@ impl AncestralAlignment for MASA {
         &self.ancestral_maps
     }
 
-    // This is needed because with the TKF models we need to re-estimate the ancestral maps after
-    // a tree move is applied.
+    /// This is needed because with the [TKF models](`crate::tkf_model::TKFModel`),
+    /// we need to [re-estimate](`crate::tkf_model::reestimate::EdgeSeqsReestimator::reestimate`)
+    /// the ancestral maps after a [tree move](crate::likelihood::TreeSearchCost::update_tree) was applied.
     fn update_ancestral_map(&mut self, node_idx: &NodeIdx, map: Mapping) {
         if let Some(anc_map) = self.ancestral_maps.get_mut(node_idx) {
             *anc_map = map;
