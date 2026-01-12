@@ -970,6 +970,4 @@ mod private_tests {
             "after adding back quartet"
         );
     }
-
-
 }
