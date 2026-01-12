@@ -1,5 +1,5 @@
-use std::fs::OpenOptions;
-use std::io::{BufWriter, Write};
+use std::fs::{self, OpenOptions};
+use std::io::{self, BufWriter, Write};
 use std::path::Path;
 
 use approx::assert_relative_eq;
@@ -11,11 +11,12 @@ use rayon::prelude::*;
 
 use crate::alignment::{Alignment, AncestralAlignment, MASA};
 use crate::likelihood::ModelSearchCost;
-use crate::phylo_info::{PhyloInfo, PhyloInfoBuilder};
-use crate::random::DefaultGenerator;
+use crate::phylo_info::PhyloInfoBuilder;
+use crate::random::{DefaultGenerator, FakeGenerator};
 use crate::tkf_model::{
-    get_map_from_any_node, mapping_from_node_seq, EdgeSeqsReestimator, TKF92IndelCostBuilder,
-    TKFIndelCost, TKFModel,
+    mapping_from_node_seq, possible_assignments_of_edge, tests::get_mapping_for_any_node,
+    EdgeSeqsReestimator, TKF92IndelAddBlocksCostBuilder, TKF92IndelCostBuilder, TKFIndelCost,
+    TKFModel,
 };
 use crate::tree::NodeIdx;
 
@@ -50,7 +51,7 @@ fn edge_seqs(
 }
 
 #[test]
-fn test_decode_index() {
+fn test_edge_seqs() {
     let possible_edge_assignments = vec![
         vec![(true, true), (true, false), (false, true), (false, false)],
         vec![(true, true), (false, false)],
@@ -104,8 +105,15 @@ fn edge_seqs_to_mappings(
 fn print_progress(i: usize, number_of_possibilities: usize) {
     if (i + 1) % 10000 == 0 {
         let percent = i as f64 / number_of_possibilities as f64 * 100.0;
-        println!("Brute force progress for current edge {percent:.4}% ");
+        print!("\r\x1b[2KBrute force progress for current node {percent:.4}%");
+        io::stdout().flush().unwrap();
     }
+}
+
+#[cfg(test)]
+fn clear_progress_line() {
+    print!("\r\x1b[2K");
+    io::stdout().flush().unwrap();
 }
 
 #[cfg(test)]
@@ -116,6 +124,9 @@ fn number_of_possibilities(possible_edge_assignments: &[Vec<(bool, bool)>]) -> u
         .product()
 }
 
+/// After updating the mappings for `v2` and its parent `v1`, mark the relevant nodes as dirty
+/// so that tmp values in `model_info` are recomputed during the next likelihood calculation.
+#[cfg(test)]
 fn make_nodes_dirty<T: TKFModel>(cost: &mut TKFIndelCost<T, MASA>, v2_idx: &NodeIdx) {
     for child in &cost.phylo.tree.node(v2_idx).children {
         cost.model_info
@@ -127,31 +138,6 @@ fn make_nodes_dirty<T: TKFModel>(cost: &mut TKFIndelCost<T, MASA>, v2_idx: &Node
         .borrow_mut()
         .valid
         .set(usize::from(cost.phylo.tree.sibling(v2_idx).unwrap()), false);
-}
-
-#[cfg(test)]
-fn assert_masa_is_dollo<AA: AncestralAlignment>(phylo: &PhyloInfo<AA>) {
-    for col_idx in 0..phylo.msa.len() {
-        let mut num_insertions = 0;
-        for node in phylo.tree.postorder() {
-            if *node == phylo.tree.root {
-                if phylo.msa.ancestral_map(node)[col_idx].is_some() {
-                    num_insertions += 1;
-                }
-            } else {
-                let parent = phylo.tree.parent(node).unwrap();
-                let parent_site = phylo.msa.ancestral_map(&parent)[col_idx];
-                let node_site = get_map_from_any_node(&phylo.msa, node)[col_idx];
-                if parent_site.is_none() && node_site.is_some() {
-                    num_insertions += 1;
-                }
-            }
-        }
-        assert_eq!(
-            num_insertions, 1,
-            "Column {col_idx} has {num_insertions} insertions, not Dollo",
-        );
-    }
 }
 
 #[cfg(test)]
@@ -174,91 +160,10 @@ fn cost_for_edge_seqs<T: TKFModel>(
 }
 
 #[cfg(test)]
-fn brute_force_max_for_possibilities_single_thread<T: TKFModel>(
-    possible_edge_assignments: Vec<Vec<(bool, bool)>>,
-    number_of_possibilities: usize,
-    cost: &mut TKFIndelCost<T, MASA>,
-    v2_idx: &NodeIdx,
-) -> f64 {
-    let mut max: f64 = f64::MIN;
-    for i in 0..number_of_possibilities {
-        print_progress(i, number_of_possibilities);
-        let possibility = edge_seqs(i, &possible_edge_assignments);
-        let current = cost_for_edge_seqs(v2_idx, cost, &possibility);
-        max = max.max(current);
-    }
-    max
-}
-
-#[cfg(all(test, feature = "multi-thread"))]
-fn brute_force_max_for_possibilities_multi_thread(
-    possible_edge_assignments: Vec<Vec<(bool, bool)>>,
-    number_of_possibilities: usize,
-    cost: &TKFIndelCost<impl TKFModel + Send, MASA>,
-    v2_idx: &NodeIdx,
-    num_threads: usize,
-) -> f64 {
-    let chunk_size = number_of_possibilities.div_ceil(num_threads);
-    let cost_clones = vec![cost.clone(); num_threads];
-    let chunk_maxes: Vec<f64> = (0..number_of_possibilities)
-        .into_par_iter()
-        .chunks(chunk_size)
-        .enumerate()
-        .zip(cost_clones)
-        .into_par_iter()
-        .map(move |((chunk_id, chunk), mut thread_cost)| {
-            let mut max: f64 = f64::MIN;
-            for i in chunk {
-                if chunk_id == 0 {
-                    print_progress(i, number_of_possibilities / num_threads);
-                }
-                let possibility = edge_seqs(i, &possible_edge_assignments);
-                let current = cost_for_edge_seqs(v2_idx, &mut thread_cost, &possibility);
-                max = max.max(current);
-            }
-            max
-        })
-        .collect();
-    chunk_maxes.into_iter().fold(f64::MIN, |a, b| a.max(b))
-}
-
-#[cfg(test)]
-fn possible_assignments_of_edge(
-    t1_is_char: bool,
-    t2_is_char: bool,
-    t3_is_char: bool,
-    t4_is_char: bool,
-) -> Vec<(bool, bool)> {
-    let left_is_some = t1_is_char || t2_is_char;
-    let right_is_some = t3_is_char || t4_is_char;
-    let both_left_are_some = t1_is_char && t2_is_char;
-    let both_right_are_some = t3_is_char && t4_is_char;
-    if left_is_some && !right_is_some {
-        if both_left_are_some {
-            vec![(true, true), (true, false)]
-        } else {
-            vec![(true, true), (true, false), (false, false)]
-        }
-    } else if !left_is_some && right_is_some {
-        if both_right_are_some {
-            vec![(true, true), (false, true)]
-        } else {
-            vec![(true, true), (false, true), (false, false)]
-        }
-    } else if !left_is_some && !right_is_some {
-        vec![(false, false)]
-    } else {
-        vec![(true, true)]
-    }
-}
-
-#[cfg(test)]
 fn get_edge_assignment_possibilities(
     cost: &TKFIndelCost<impl TKFModel, MASA>,
     v2_idx: &NodeIdx,
 ) -> Vec<Vec<(bool, bool)>> {
-    use crate::tkf_model::tests::get_mapping_for_any_node;
-
     let blocks = &cost.model_info.borrow().blocks;
     let mut possible_edge_assignments = vec![vec![]; blocks.len()];
 
@@ -292,12 +197,36 @@ fn get_edge_assignment_possibilities(
     possible_edge_assignments
 }
 
+/// The parameter `possible_edge_assignments` contains for each block all possible edge
+/// assignments for the two nodes (v1 and v2).
+#[cfg(test)]
+fn brute_force_max_for_possibilities_single_thread<T: TKFModel>(
+    possible_edge_assignments: Vec<Vec<(bool, bool)>>,
+    number_of_possibilities: usize,
+    cost: &mut TKFIndelCost<T, MASA>,
+    v2_idx: &NodeIdx,
+) -> f64 {
+    let mut max: f64 = f64::MIN;
+    for i in 0..number_of_possibilities {
+        print_progress(i, number_of_possibilities);
+        let possibility = edge_seqs(i, &possible_edge_assignments);
+        let current = cost_for_edge_seqs(v2_idx, cost, &possibility);
+        max = max.max(current);
+    }
+    clear_progress_line();
+    max
+}
+
 // single thread calculation
 #[cfg(test)]
 #[cfg(not(feature = "multi-thread"))]
 fn brute_force_max<T: TKFModel + Send>(mut cost: TKFIndelCost<T, MASA>, v2_idx: &NodeIdx) -> f64 {
     let possible_edge_assignments = get_edge_assignment_possibilities(&cost, v2_idx);
     let number_of_possibilities = number_of_possibilities(&possible_edge_assignments);
+    println!(
+        "Total number of possibilities to evaluate: {}",
+        number_of_possibilities
+    );
     brute_force_max_for_possibilities_single_thread(
         possible_edge_assignments,
         number_of_possibilities,
@@ -306,13 +235,55 @@ fn brute_force_max<T: TKFModel + Send>(mut cost: TKFIndelCost<T, MASA>, v2_idx: 
     )
 }
 
+/// The parameter `possible_edge_assignments` contains for each block all possible edge
+/// assignments for the two nodes (v1 and v2).
+#[cfg(test)]
+#[cfg(all(test, feature = "multi-thread"))]
+fn brute_force_max_for_possibilities_multi_thread(
+    possible_edge_assignments: Vec<Vec<(bool, bool)>>,
+    number_of_possibilities: usize,
+    cost: &TKFIndelCost<impl TKFModel + Send, MASA>,
+    v2_idx: &NodeIdx,
+    num_threads: usize,
+) -> f64 {
+    let chunk_size = number_of_possibilities.div_ceil(num_threads);
+    let cost_clones = vec![cost.clone(); num_threads];
+    let chunk_maxes: Vec<f64> = (0..number_of_possibilities)
+        .into_par_iter()
+        .chunks(chunk_size)
+        .enumerate()
+        .zip(cost_clones)
+        .into_par_iter()
+        .map(move |((chunk_id, chunk), mut thread_cost)| {
+            let mut max: f64 = f64::MIN;
+            for i in chunk {
+                if chunk_id == 0 {
+                    print_progress(i, number_of_possibilities / num_threads);
+                }
+                let possibility = edge_seqs(i, &possible_edge_assignments);
+                let current = cost_for_edge_seqs(v2_idx, &mut thread_cost, &possibility);
+                max = max.max(current);
+            }
+            max
+        })
+        .collect();
+    clear_progress_line();
+    chunk_maxes.into_iter().fold(f64::MIN, |a, b| a.max(b))
+}
+
 // multi thread  calculation
 #[cfg(test)]
 #[cfg(feature = "multi-thread")]
 fn brute_force_max<T: TKFModel + Send>(mut cost: TKFIndelCost<T, MASA>, v2_idx: &NodeIdx) -> f64 {
     let possible_edge_assignments = get_edge_assignment_possibilities(&cost, v2_idx);
     let number_of_possibilities = number_of_possibilities(&possible_edge_assignments);
-    let num_threads = rayon::current_num_threads();
+    println!(
+        "Total number of possibilities to evaluate: {}, for node {}",
+        number_of_possibilities,
+        cost.phylo.tree.node(v2_idx).id,
+    );
+    let num_threads = rayon::current_num_threads() / 2;
+    // if the number of possibilities is small, do single thread
     if number_of_possibilities < num_threads * 2 {
         brute_force_max_for_possibilities_single_thread(
             possible_edge_assignments,
@@ -332,40 +303,14 @@ fn brute_force_max<T: TKFModel + Send>(mut cost: TKFIndelCost<T, MASA>, v2_idx: 
 }
 
 #[cfg(test)]
-fn log_iteration(iteration: usize, node_id: &str, prev_logl: f64, new_logl: f64) {
-    println!(
-        "Iteration {iteration}, node {node_id}, previous_logl = {prev_logl}, new_logl = {new_logl}, difference = {}",
-        new_logl - prev_logl
-    );
-}
-
-#[cfg(test)]
-fn log_msa_unchanged(prev_phylo: &PhyloInfo<MASA>, new_phylo: &PhyloInfo<MASA>) {
-    for check_node in new_phylo.tree.postorder() {
-        if new_phylo.tree.node(check_node).children.is_empty() || check_node == &new_phylo.tree.root
-        {
-            continue;
-        }
-        let prev_v2_mapping = prev_phylo.msa.ancestral_map(check_node).clone();
-        let new_v2_mapping = new_phylo.msa.ancestral_map(check_node).clone();
-        let v1_idx = new_phylo.tree.node(check_node).parent.unwrap();
-        let prev_v1_mapping = prev_phylo.msa.ancestral_map(&v1_idx).clone();
-        let new_v1_mapping = new_phylo.msa.ancestral_map(&v1_idx).clone();
-        if prev_v2_mapping != new_v2_mapping || prev_v1_mapping != new_v1_mapping {
-            println!(" node {} changed msa", new_phylo.tree.node(check_node).id);
-        }
-    }
-}
-
-#[cfg(test)]
 fn delete_existing_brute_force_max_file(file_path: &Path) {
-    use std::fs;
-    use std::path::Path;
     if Path::new(file_path).exists() {
         fs::remove_file(file_path).expect("Could not delete existing brute force max file");
     }
 }
 
+/// Struct to hold calculated brute force max values for each iteration and node. Is exported
+/// to a file.
 #[cfg(test)]
 struct IterationInfo {
     iteration: usize,
@@ -375,7 +320,6 @@ struct IterationInfo {
 
 #[cfg(test)]
 fn load_precalculated_brute_force_maxes(file_path: &Path, iteration_info: &mut Vec<IterationInfo>) {
-    use std::fs;
     let contents = fs::read_to_string(file_path);
     if contents.is_err() {
         println!("Precalculated brute force maxes file not found at {file_path:?}. Not loading any precalculated values.");
@@ -421,6 +365,7 @@ fn calc_or_lookup_brute_force_max(
     tkf_cost: &TKFIndelCost<impl TKFModel + Send, MASA>,
     node: &NodeIdx,
 ) -> f64 {
+    // lookup of pre-calculated value in iteration_info
     if iteration < iteration_info.len() {
         let saved = &iteration_info[iteration];
         let hint = "Consider rerunning with recompute-brute-force-max-ancestral-seqs feature";
@@ -436,7 +381,9 @@ fn calc_or_lookup_brute_force_max(
             precalculated_file
         );
         saved.logl
-    } else {
+    }
+    // no pre-calculated value available, calculating it and append to file
+    else {
         let max = brute_force_max(tkf_cost.clone(), node);
         append_result(
             precalculated_file.to_str().unwrap(),
@@ -451,75 +398,91 @@ fn calc_or_lookup_brute_force_max(
 
 #[test]
 fn tkf92_reestimate_large_tree_for_file_iterative() {
-    let dir = Path::new("data/tkf_brute_force_ancestors/simulation_01");
+    let dir = Path::new("data/tkf/brute_force_max/");
     let msa = dir.join("masa.fasta");
     let tree = dir.join("tree.newick");
-    let precalculated_file = dir.join("precalculated_brute_force_maxes.csv");
 
     let phylo = PhyloInfoBuilder::with_attrs(msa, tree)
         .build_with_ancestors()
         .unwrap();
-    assert_masa_is_dollo(&phylo);
+    phylo.check_dollos_constraint().unwrap();
     let lambda = 1.0;
     let mu = 2.0;
     let r = 0.3;
 
+    // Handle the pre-calculated brute force maxes file
+    let precalculated_file = dir.join("precalculated_brute_force_maxes.csv");
     if cfg!(feature = "recompute-brute-force-max-ancestral-seqs") {
         delete_existing_brute_force_max_file(&precalculated_file);
     }
     let mut iteration_info = Vec::<IterationInfo>::new();
     load_precalculated_brute_force_maxes(&precalculated_file, &mut iteration_info);
 
-    let mut tkf_cost = TKF92IndelCostBuilder::new(lambda, mu, r, phylo.clone())
+    // the cost to be used for repeated reestimation
+    let mut reestimator_cost = TKF92IndelCostBuilder::new(lambda, mu, r, phylo.clone())
         .build()
         .unwrap();
-    let mut prev_logl = tkf_cost.clone().cost();
+    // cloning here to leave the cost in a clean state before reestimation
+    let mut prev_logl = reestimator_cost.clone().cost();
+    let mut rng = FakeGenerator::default();
+    let mut reestimator = EdgeSeqsReestimator::new(&mut reestimator_cost, &mut rng);
 
     // iterating over nodes in random order multiple times
-    let mut rng = DefaultGenerator::new(41);
+    let mut rng = DefaultGenerator::new(42);
     let repeat = 5;
     let mut random_nodes = phylo
         .tree
         .postorder()
         .iter()
+        .filter(|node| *node != &phylo.tree.root && !phylo.tree.node(node).children.is_empty())
         .collect::<Vec<_>>()
         .repeat(repeat);
     rng.shuffle(&mut random_nodes);
 
-        let rng = &mut DefaultGenerator::default();
-    let mut reestimator = EdgeSeqsReestimator::new(&mut tkf_cost, rng);
-    let mut n_skipped = 0;
+    // Since the inference of the observed blocks may change after reestimation (an so does the
+    // cost calculation of a clean cost struct that we use to compare against), we store the
+    // initial blocks here and create the clean cost to compare against with these as additional
+    // blocks.
+    let initial_msa_blocking = reestimator.cost.model_info.borrow().blocks.clone();
     for (iteration, node) in random_nodes.into_iter().enumerate() {
-        if node == &phylo.tree.root || phylo.tree.node(node).children.is_empty() {
-            n_skipped += 1;
-            continue;
-        }
-        let previous_phylo = reestimator.get_phylo().clone();
-        log_msa_unchanged(&previous_phylo, reestimator.get_phylo());
-
+        // Perform Dynamic Programming reestimation
         let max_dp = reestimator.reestimate(node);
-        assert!(max_dp >= prev_logl);
-        let tkf_cost = TKF92IndelCostBuilder::new(lambda, mu, r, reestimator.get_phylo().clone())
-            .build()
-            .unwrap();
-        assert_masa_is_dollo(&tkf_cost.phylo);
-        let new_logl = tkf_cost.cost();
-        log_iteration(iteration, &phylo.tree.node(node).id, prev_logl, new_logl);
-        assert_relative_eq!(max_dp, new_logl, epsilon = 1e-10);
-
+        // Perform brute force calculation
+        let cost_for_brute_force = TKF92IndelAddBlocksCostBuilder::new(
+            lambda,
+            mu,
+            r,
+            initial_msa_blocking.clone(),
+            reestimator.phylo().clone(),
+        )
+        .build()
+        .unwrap();
+        let _ = cost_for_brute_force.cost();
         let max_brute_force = calc_or_lookup_brute_force_max(
-            iteration - n_skipped,
+            iteration,
             &iteration_info,
             &precalculated_file,
-            &tkf_cost,
+            &cost_for_brute_force.clone(),
             node,
         );
+        // Create a clean cost to compare against
+        let clean_cost = TKF92IndelAddBlocksCostBuilder::new(
+            lambda,
+            mu,
+            r,
+            initial_msa_blocking.clone(),
+            reestimator.phylo().clone(),
+        )
+        .build()
+        .unwrap();
+        let logl_from_clean_cost = clean_cost.cost();
+
+        assert_relative_eq!(max_dp, logl_from_clean_cost, epsilon = 1e-10);
         assert_relative_eq!(max_dp, max_brute_force, epsilon = 1e-10);
-        iteration_info.push(IterationInfo {
-            iteration,
-            node_id: phylo.tree.node(node).id.clone(),
-            logl: max_brute_force,
-        });
-        prev_logl = new_logl;
+        assert_ne!(max_dp, f64::NEG_INFINITY);
+        assert!(logl_from_clean_cost >= prev_logl);
+        prev_logl = logl_from_clean_cost;
     }
 }
+
+// TODO: also check in test whether valid are false and valid_for_reestimation are true after reestimation
