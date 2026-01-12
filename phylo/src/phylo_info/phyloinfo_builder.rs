@@ -6,7 +6,7 @@ use log::{info, warn};
 use rand::{Rng, SeedableRng};
 
 use crate::alignment::{Aligner, Alignment, AncestralAlignment, Sequences, MASA, MSA};
-use crate::alphabets::{dna_alphabet, protein_alphabet, Alphabet};
+use crate::alphabets::Alphabet;
 use crate::asr::AncestralSequenceReconstruction;
 use crate::evolutionary_distances::{LevenshteinDNACorrected, LevenshteinProteinCorrected};
 use crate::io::{self, DataError};
@@ -26,7 +26,7 @@ pub struct PhyloInfoBuilder<A: Alignment, AA: AncestralAlignment> {
     // but since we access the alignment on a regular basis (or do we actually? Since we instead use the encoding)
     aligner: Option<Box<dyn Aligner<A>>>,
     asr: Option<Box<dyn AncestralSequenceReconstruction<A, AA>>>,
-    alphabet: Option<Alphabet>,
+    alphabet: Option<&'static Alphabet>,
 }
 
 impl PhyloInfoBuilder<MSA, MASA> {
@@ -97,19 +97,20 @@ impl<A: Alignment, AA: AncestralAlignment> PhyloInfoBuilder<A, AA> {
         self
     }
 
-    /// TODO: fix docstring
+    /// Sets the alphabet for the PhyloInfoBuilder struct.
+    /// Returns the PhyloInfoBuilder struct with the required alphabet.
     ///
     /// # Example
     /// ```
-    /// use phylo::alphabets::protein_alphabet;
+    /// use phylo::alphabets::Alphabet;
     /// use phylo::phylo_info::PhyloInfoBuilder;
     /// use phylo::alignment::{Alignment};
     /// # fn main() -> std::result::Result<(), anyhow::Error> {
-    /// let info = PhyloInfoBuilder::new("./examples/data/sequences_DNA_small.fasta").alphabet(Some(protein_alphabet())).build()?;
-    /// assert_eq!(info.msa.alphabet(), &protein_alphabet());
+    /// let info = PhyloInfoBuilder::new("./examples/data/sequences_DNA_small.fasta").alphabet(Some(Alphabet::protein())).build()?;
+    /// assert_eq!(info.msa.alphabet(), Alphabet::protein());
     /// # Ok(()) }
     /// ```
-    pub fn alphabet(mut self, alphabet: Option<Alphabet>) -> PhyloInfoBuilder<A, AA> {
+    pub fn alphabet(mut self, alphabet: Option<&'static Alphabet>) -> PhyloInfoBuilder<A, AA> {
         self.alphabet = alphabet;
         self
     }
@@ -234,10 +235,10 @@ impl<A: Alignment, AA: AncestralAlignment> PhyloInfoBuilder<A, AA> {
         sequences: &Sequences,
     ) -> Result<Tree> {
         info!("Building NJ tree from sequences");
-        if sequences.alphabet() == &dna_alphabet() {
+        if sequences.alphabet() == Alphabet::dna() {
             info!("Using corrected Levenshtein DNA distance for distance calculation");
             NJTreeBuilder::new(LevenshteinDNACorrected {}).build(sequences, rng)
-        } else if sequences.alphabet() == &protein_alphabet() {
+        } else if sequences.alphabet() == Alphabet::protein() {
             info!("Using corrected Levenshtein protein distance for distance calculation");
             NJTreeBuilder::new(LevenshteinProteinCorrected {}).build(sequences, rng)
         } else {
@@ -319,7 +320,7 @@ pub(crate) fn set_missing_tree_node_ids(tree: &Tree) -> Result<Tree> {
 pub fn validate_taxa_ids(tree: &Tree, sequences: &Sequences) -> Result<()> {
     let tip_ids: HashSet<String> = HashSet::from_iter(tree.leaf_ids());
     let sequence_ids: HashSet<String> =
-        HashSet::from_iter(sequences.iter().map(|rec| rec.id().to_string()));
+        HashSet::from_iter(sequences.into_iter().map(|rec| rec.id().to_string()));
     info!("Checking that tree tip and sequence IDs match");
     let mut missing_tips = sequence_ids.difference(&tip_ids).collect::<Vec<_>>();
     if !missing_tips.is_empty() {
@@ -347,7 +348,7 @@ pub fn validate_ids_with_ancestors(tree: &Tree, sequences: &Sequences) -> Result
             .map(|node_idx| tree.node_id(node_idx).to_string()),
     );
     let sequence_ids: HashSet<String> =
-        HashSet::from_iter(sequences.iter().map(|rec| rec.id().to_string()));
+        HashSet::from_iter(sequences.into_iter().map(|rec| rec.id().to_string()));
     info!("Checking that tree and sequence IDs match");
     let mut missing_nodes = sequence_ids.difference(&tree_ids).collect::<Vec<_>>();
     if !missing_nodes.is_empty() {

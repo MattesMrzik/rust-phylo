@@ -787,7 +787,7 @@ pub(super) fn get_map_from_any_node<'a, AA: AncestralAlignment>(
 mod private_tests {
     use std::path::Path;
 
-    use crate::alphabets::dna_alphabet;
+    use crate::alphabets::Alphabet;
     use crate::phylo_info::PhyloInfoBuilder;
     use crate::random::DefaultGenerator;
     use crate::tkf_model::{tests::setup_test_phylo, EdgeSeqsReestimator, TKF92IndelCostBuilder};
@@ -893,7 +893,7 @@ mod private_tests {
 
     #[test]
     fn tkf_remove_and_add_back_quartet() {
-        let phylo = setup_test_phylo(dna_alphabet());
+        let phylo = setup_test_phylo(Alphabet::dna());
         let mut cost = TKF92IndelCostBuilder::new(0.4, 0.5, 0.8, phylo)
             .build()
             .unwrap();

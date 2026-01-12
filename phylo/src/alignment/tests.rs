@@ -5,7 +5,7 @@ use crate::alignment::{
     Alignment, AncestralAlignment, InternalAlignments, PairwiseAlignment as PA, SeqMaps, Sequences,
     MASA, MSA,
 };
-use crate::alphabets::{dna_alphabet, protein_alphabet, AMINOACIDS, NUCLEOTIDES};
+use crate::alphabets::{Alphabet, AMINOACIDS, NUCLEOTIDES};
 use crate::io::read_sequences;
 use crate::phylo_info::PhyloInfo;
 use crate::tree::{
@@ -69,7 +69,7 @@ fn sequences_from_aligned() {
     assert!(!sequences.is_empty());
     assert!(sequences.aligned);
     for (i, rec) in seqs.iter().enumerate() {
-        assert_eq!(sequences.record(i), rec);
+        assert_eq!(&sequences[i], rec);
     }
 }
 
@@ -87,7 +87,7 @@ fn sequences_from_unaligned() {
     assert!(!sequences.is_empty());
     assert!(!sequences.aligned);
     for (i, rec) in seqs.iter().enumerate() {
-        assert_eq!(sequences.record(i), rec);
+        assert_eq!(&sequences[i], rec);
     }
 }
 
@@ -109,15 +109,15 @@ fn sequences_with_alphabet() {
         record!("E4", Some("E4 sequence"), b"-A-AAA"),
     ];
 
-    let dna_seqs = Sequences::with_alphabet(records.clone(), dna_alphabet());
+    let dna_seqs = Sequences::with_alphabet(records.clone(), Alphabet::dna());
     assert_eq!(dna_seqs.alphabet().symbols(), NUCLEOTIDES);
     assert_ne!(dna_seqs.alphabet().symbols(), AMINOACIDS);
-    assert_eq!(*dna_seqs.alphabet(), dna_alphabet());
+    assert_eq!(dna_seqs.alphabet(), Alphabet::dna());
 
-    let protein_seqs = Sequences::with_alphabet(records.clone(), protein_alphabet());
+    let protein_seqs = Sequences::with_alphabet(records.clone(), Alphabet::protein());
     assert_eq!(protein_seqs.alphabet().symbols(), AMINOACIDS);
     assert_ne!(protein_seqs.alphabet().symbols(), NUCLEOTIDES);
-    assert_eq!(*protein_seqs.alphabet(), protein_alphabet());
+    assert_eq!(protein_seqs.alphabet(), Alphabet::protein());
 }
 
 #[test]
@@ -400,7 +400,7 @@ fn masa_compile_subroot() {
     let subroot_id = "C";
     let mut true_compiled = Sequences::new(
         sequences
-            .iter()
+            .into_iter()
             .filter(|f| f.id() == subroot_id)
             .cloned()
             .collect(),
@@ -428,7 +428,7 @@ fn removing_gap_cols() {
     ]);
     seqs.remove_gap_cols();
     assert_eq!(seqs.len(), 5);
-    for seq in seqs.iter() {
+    for seq in &seqs {
         assert_eq!(seq.seq().len(), 6);
     }
 
@@ -439,13 +439,13 @@ fn removing_gap_cols() {
         record!("D3", Some("D3 sequence"), b"-----A--A"),
         record!("E4", Some("E4 sequence"), b"--A--AA-A"),
     ]);
-    for seq in seqs2.iter() {
+    for seq in &seqs2 {
         assert_eq!(seq.seq().len(), 9);
     }
 
     seqs2.remove_gap_cols();
     assert_eq!(seqs2.len(), 5);
-    for seq in seqs2.iter() {
+    for seq in &seqs2 {
         assert_eq!(seq.seq().len(), 6);
     }
     assert_eq!(seqs, seqs2)
@@ -462,4 +462,15 @@ fn removing_gap_cols_on_unaligned() {
         record!("E4", None, b"AAAA"),
     ]);
     seqs.remove_gap_cols();
+}
+
+#[test]
+fn sequence_iterator_access() {
+    let records = vec![record!("seq1", None, b"A"), record!("seq2", None, b"C")];
+    let seqs = Sequences::new(records);
+    let mut iter = seqs.into_iter();
+    assert_eq!(iter.next().unwrap().id(), "seq1");
+    let second = iter.next();
+    assert!(second.is_some());
+    assert_eq!(second.unwrap().id(), "seq2");
 }

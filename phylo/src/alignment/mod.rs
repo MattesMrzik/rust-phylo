@@ -31,14 +31,32 @@ pub type SeqMaps = HashMap<NodeIdx, Mapping>;
 /// Represents a pairwise alignment of two sequences or MSAs. Used in [`InternalAlignments`].
 #[derive(Clone, Debug, PartialEq)]
 pub struct PairwiseAlignment {
-    pub map_x: Mapping,
-    pub map_y: Mapping,
+    pub(crate) map_x: Mapping,
+    pub(crate) map_y: Mapping,
 }
 
 impl PairwiseAlignment {
     pub fn new(map_x: Mapping, map_y: Mapping) -> PairwiseAlignment {
-        debug_assert!((map_x.len() == map_y.len()) || map_y.is_empty());
+        assert_eq!(
+            map_x.len(),
+            map_y.len(),
+            "Mappings must have the same length"
+        );
         PairwiseAlignment { map_x, map_y }
+    }
+
+    pub fn map_x(&self) -> &Mapping {
+        &self.map_x
+    }
+
+    pub fn map_y(&self) -> &Mapping {
+        &self.map_y
+    }
+
+    #[allow(clippy::len_without_is_empty)]
+    pub fn len(&self) -> usize {
+        debug_assert_eq!(self.map_x.len(), self.map_y.len());
+        self.map_x.len()
     }
 }
 
@@ -173,9 +191,8 @@ impl Alignment for MSA {
     /// # Example
     /// ```
     /// # use bio::io::fasta::Record;
-    /// use phylo::alignment::{MSA, Alignment};
-    /// use phylo::alignment::Sequences;
-    /// use phylo::alphabets::dna_alphabet;
+    /// use phylo::alignment::{Alignment, MSA, Sequences};
+    /// use phylo::alphabets::Alphabet;
     /// use phylo::{record, tree};
     /// # fn main() -> std::result::Result<(), anyhow::Error> {
     /// let tree = tree!("(((A0:1.0,B1:1.0):1.0,C2:1.0):1.0);");
@@ -183,13 +200,13 @@ impl Alignment for MSA {
     ///     record!("A0", Some("A0 sequence"), b"AAAA"),
     ///     record!("B1", Some("B1 sequence"), b"---A"),
     ///     record!("C2", Some("C2 sequence"), b"AA--"),
-    /// ], dna_alphabet());
+    /// ], Alphabet::dna());
     /// let msa = MSA::from_aligned(seqs, &tree)?;
-    /// assert_eq!(*msa.alphabet(), dna_alphabet());
+    /// assert_eq!(msa.alphabet(), Alphabet::dna());
     /// # Ok(()) }
     ///
     fn alphabet(&self) -> &Alphabet {
-        &self.seqs.alphabet
+        self.seqs.alphabet
     }
 
     fn seqs(&self) -> &Sequences {
@@ -282,7 +299,7 @@ impl Alignment for MSA {
     /// # Ok(()) }
     /// ```
     fn from_aligned_unchecked(seqs: Sequences, tree: &Tree) -> MSA {
-        let msa_len = seqs.record(0).seq().len();
+        let msa_len = seqs[0].seq().len();
         let mut stack = HashMap::<NodeIdx, Mapping>::with_capacity(tree.len());
         let mut internal_alignments = InternalAlignments::with_capacity(tree.n);
         let mut idx_to_id = vec![String::new(); tree.len()];
@@ -354,7 +371,7 @@ impl Display for MASA {
 
 impl Alignment for MASA {
     fn alphabet(&self) -> &Alphabet {
-        &self.leaf_seqs.alphabet
+        self.leaf_seqs.alphabet
     }
 
     fn seqs(&self) -> &Sequences {
