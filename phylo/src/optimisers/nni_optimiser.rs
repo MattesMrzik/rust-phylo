@@ -50,6 +50,7 @@ impl MoveOptimiser for NniOptimiser {
         let mut max_cost = f64::MIN;
         for child_idx in &cost.tree().node(node_idx).children {
             // TODO: parallelization?
+            // TODO: can we avoid cloning the whole cost.model_info?
             let move_cost_info =
                 calc_nni_cost_with_blen_opt(node_idx, child_idx, base_cost, cost.clone())?;
             if move_cost_info.cost > max_cost {
@@ -100,13 +101,14 @@ fn rooted_nni(tree: &Tree, node_idx: &NodeIdx, child_idx: &NodeIdx) -> Result<Tr
     Ok(rooted_nni_unchecked(tree, node_idx, child_idx))
 }
 
-/// .           |
-/// .      -- parent --
-/// .      |          |
-/// .  --node--      sibling
-/// .  |      |
-/// .  .    child
-///     
+/// ```text
+///            |
+///       -- parent --
+///       |          |
+///   --node--      sibling
+///   |      |
+///   .    child
+/// ```    
 /// Swapping child with sibling.
 fn rooted_nni_unchecked(tree: &Tree, node_idx: &NodeIdx, child_idx: &NodeIdx) -> Tree {
     let mut new_tree = tree.clone();
