@@ -311,6 +311,7 @@ mod private_tests {
     }
 
     #[test]
+    #[cfg_attr(feature = "ci_coverage", ignore)]
     fn tkf_compare_to_simulation() {
         // This uses the MASA from a simulation under the TKF92 model given a tree and parameters.
         // Since it is a simulation, we know the true fragmentation. So we compute the log-likelihood

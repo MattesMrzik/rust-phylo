@@ -910,6 +910,7 @@ mod private_tests {
     }
 
     #[test]
+    #[cfg_attr(feature = "ci_coverage", ignore)]
     fn tkf_remove_and_add_back_quartet_large_tree() {
         let dir = Path::new("data/tkf/reestimate/");
         let msa = dir.join("masa.fasta");
@@ -941,6 +942,7 @@ mod private_tests {
     }
 
     #[test]
+    #[cfg_attr(feature = "ci_coverage", ignore)]
     fn tkf_remove_and_add_back_quartet_large_tree_child_of_root() {
         let dir = Path::new("data/tkf/reestimate/");
         let msa = dir.join("masa.fasta");
