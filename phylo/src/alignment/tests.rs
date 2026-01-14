@@ -12,7 +12,7 @@ use crate::tree::{
     NodeIdx::{Internal as I, Leaf as L},
     Tree,
 };
-use crate::{align, record, tree};
+use crate::{align, record, record_wo_desc, tree};
 
 #[cfg(test)]
 fn test_alignment(ids: &[&str]) -> Sequences {
@@ -473,4 +473,80 @@ fn sequence_iterator_access() {
     let second = iter.next();
     assert!(second.is_some());
     assert_eq!(second.unwrap().id(), "seq2");
+}
+
+#[test]
+fn update_ancestral_maps() {
+    let tree = tree!("(((A1:2.0,B2:2.0)I3:0.3,C4:2.0)R5:1.0);");
+    let mut msa = MASA::from_aligned_with_ancestral(
+        Sequences::new(vec![
+            record_wo_desc!("A1", b"--GTGGA---"),
+            record_wo_desc!("B2", b"-------NNA"),
+            record_wo_desc!("I3", b"--T-GC----"),
+            record_wo_desc!("C4", b"AGG-------"),
+            record_wo_desc!("R5", b"--A-------"),
+        ]),
+        &tree,
+    )
+    .unwrap();
+
+    // the actual chars are not important here, just the presence/absence of gaps
+    let new_map = align!(b"A-AA-AAA-A");
+    let node_id = "I3";
+    let node_idx = &tree.idx(node_id);
+    msa.update_ancestral_map(node_idx, new_map.clone());
+    assert_eq!(msa.ancestral_map(node_idx), &new_map);
+    assert_eq!(msa.ancestral_seqs().record_by_id(node_id).seq(), b"XTXCXXX");
+
+    let new_map = align!(b"---A-A---A");
+    msa.update_ancestral_map(node_idx, new_map.clone());
+    assert_eq!(msa.ancestral_map(node_idx), &new_map);
+    assert_eq!(msa.ancestral_seqs().record_by_id(node_id).seq(), b"XCX");
+
+    let new_map = align!(b"-----A--A-");
+    msa.update_ancestral_map(node_idx, new_map.clone());
+    assert_eq!(msa.ancestral_map(node_idx), &new_map);
+    assert_eq!(msa.ancestral_seqs().record_by_id(node_id).seq(), b"CX");
+}
+
+#[test]
+#[should_panic]
+fn update_ancestral_maps_fails_on_leaf() {
+    let tree = tree!("(((A1:2.0,B2:2.0)I3:0.3,C4:2.0)R5:1.0);");
+    let mut msa = MASA::from_aligned_with_ancestral(
+        Sequences::new(vec![
+            record_wo_desc!("A1", b"--GTGGA---"),
+            record_wo_desc!("B2", b"-------NNA"),
+            record_wo_desc!("I3", b"--T-GC----"),
+            record_wo_desc!("C4", b"AGG-------"),
+            record_wo_desc!("R5", b"--A-------"),
+        ]),
+        &tree,
+    )
+    .unwrap();
+    let new_map = align!(b"A-AA-AAA-A");
+    let node_id = "A1";
+    let node_idx = &tree.idx(node_id);
+    msa.update_ancestral_map(node_idx, new_map.clone());
+}
+
+#[test]
+#[should_panic]
+fn update_ancestral_maps_fails_wrong_length() {
+    let tree = tree!("(((A1:2.0,B2:2.0)I3:0.3,C4:2.0)R5:1.0);");
+    let mut msa = MASA::from_aligned_with_ancestral(
+        Sequences::new(vec![
+            record_wo_desc!("A1", b"--GTGGA---"),
+            record_wo_desc!("B2", b"-------NNA"),
+            record_wo_desc!("I3", b"--T-GC----"),
+            record_wo_desc!("C4", b"AGG-------"),
+            record_wo_desc!("R5", b"--A-------"),
+        ]),
+        &tree,
+    )
+    .unwrap();
+    let new_map = align!(b"A-AAAA-A");
+    let node_id = "I3";
+    let node_idx = &tree.idx(node_id);
+    msa.update_ancestral_map(node_idx, new_map.clone());
 }

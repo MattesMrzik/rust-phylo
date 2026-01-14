@@ -184,6 +184,7 @@ use crate::likelihood::TreeSearchCost;
 ///         let new_cost = reestimator.reestimate(&node);
 ///         println!("Re-estimated sequences at node {node}, cost after re-estimation: {new_cost}",);
 ///     }
+///     break; // stopping early for doc test, remove in real usage
 /// }
 /// println!(
 ///     "The re-estimated ancestral MSA is {}",

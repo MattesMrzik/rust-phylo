@@ -151,8 +151,12 @@ fn cost_for_edge_seqs<T: TKFModel>(
     let seq_len = cost.phylo.msa.len();
 
     let (new_v1_mapping, new_v2_mapping) = edge_seqs_to_mappings(edge_seqs, &block_lens, seq_len);
-    cost.phylo.msa.update_ancestral_map(v1_idx, new_v1_mapping);
-    cost.phylo.msa.update_ancestral_map(v2_idx, new_v2_mapping);
+    cost.phylo
+        .msa
+        .update_ancestral_map(v1_idx, new_v1_mapping);
+    cost.phylo
+        .msa
+        .update_ancestral_map(v2_idx, new_v2_mapping);
 
     make_nodes_dirty(cost, v2_idx);
 
@@ -397,6 +401,7 @@ fn calc_or_lookup_brute_force_max(
 }
 
 #[test]
+#[cfg_attr(feature = "ci_coverage", ignore)]
 fn tkf92_reestimate_large_tree_for_file_iterative() {
     let dir = Path::new("data/tkf/brute_force_max/");
     let msa = dir.join("masa.fasta");

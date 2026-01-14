@@ -4,7 +4,7 @@ use anyhow::bail;
 use hashbrown::HashMap;
 use itertools::Itertools;
 
-use crate::alphabets::Alphabet;
+use crate::alphabets::{Alphabet, AMB_CHAR};
 use crate::asr::AncestralSequenceReconstruction;
 use crate::parsimony_presence_absence::ParsimonyPresenceAbsence;
 use crate::phylo_info::{
@@ -478,8 +478,30 @@ impl AncestralAlignment for MASA {
     /// we need to [re-estimate](`crate::tkf_model::reestimate::EdgeSeqsReestimator::reestimate`)
     /// the ancestral maps after a [tree move](crate::likelihood::TreeSearchCost::update_tree) was applied.
     fn update_ancestral_map(&mut self, node_idx: &NodeIdx, map: Mapping) {
+        if map.len() != self.len() {
+            panic!(
+                "Mapping length {} does not match MSA length {}",
+                map.len(),
+                self.len()
+            );
+        }
         if let Some(anc_map) = self.ancestral_maps.get_mut(node_idx) {
+            let id = &self.idx_to_id[usize::from(*node_idx)];
+            let old_record = self.ancestral_seqs.record_by_id(id);
+            let old_seq = old_record.seq();
+            let mut new_seq = Vec::new();
+            for (old_site, new_site) in anc_map.iter_mut().zip(map.iter()) {
+                if let Some(old_site_id) = old_site {
+                    if new_site.is_some() {
+                        new_seq.push(old_seq[*old_site_id]);
+                    }
+                } else if new_site.is_some() {
+                    new_seq.push(AMB_CHAR);
+                }
+            }
             *anc_map = map;
+            let new_record = record!(id, old_record.desc(), &new_seq);
+            self.ancestral_seqs.update_record(id, new_record);
         } else {
             panic!("NodeIdx {node_idx} is not an internal node");
         }
