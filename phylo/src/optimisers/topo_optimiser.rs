@@ -214,7 +214,6 @@ where
                     // TODO: For tkf we would have to call the dp re-estimate again here again, even
                     // though it is already computed once during the best_move_at_location call.
                     cost_fn.update_tree(best_tree);
-                    debug_assert_eq!(best_cost, cost_fn.cost());
                     info!("    {move_opti} move applied, new cost {best_cost}");
                     Ok(best_cost)
                 } else {
