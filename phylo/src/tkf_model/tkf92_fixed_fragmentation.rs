@@ -207,8 +207,8 @@ impl<AA: AncestralAlignment> TKF92FixedIndelCostBuilder<AA> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage, coverage(off))]
 mod private_tests {
-
     use std::path::Path;
 
     use approx::assert_relative_eq;
@@ -308,6 +308,68 @@ mod private_tests {
         }
         sum_over_fragmentations_cost = sum_over_fragmentations_cost.ln();
         assert_relative_eq!(cost, sum_over_fragmentations_cost);
+    }
+
+    #[test]
+    fn tkf_manual_integration_over_fragmentations_not_passing_all_fragments() {
+        // By manually summing over unobserved fragmentations we can verify that
+        // the TKF92 model integrates over all possible fragmentations.
+        let tree = tree!("((A0:1.0,B1:1.0)I1:1.0);");
+        let seqs = Sequences::new(vec![
+            record!("A0", b"AAB---D"),
+            record!("B1", b"-ARAAAW"),
+            record!("I1", b"AAA---A"),
+        ]);
+        let msa = MASA::from_aligned_with_ancestral(seqs, &tree).unwrap();
+        let phylo_info = PhyloInfo { msa, tree };
+        let lambda = 1.0;
+        let mu = 1.1;
+        let r = 0.5;
+
+        let tkf92_cost = TKF92IndelCostBuilder::new(lambda, mu, r, phylo_info.clone())
+            .build()
+            .unwrap();
+        let cost = tkf92_cost.logl();
+
+        let mut sum_over_fragmentations_cost = 0.0;
+        // its not necessary to pass the fragments that are inferred from the MSA
+        // i.e., one can omit the indices 1, 3, 6, 7 and still get the same result
+        // see also `tkf_manual_integration_over_fragmentations`
+        let fragmentations = [
+            vec![1, 6, 7],
+            vec![1, 2, 3],
+            vec![1, 4, 6],
+            vec![1, 3, 5, 6, 7],
+            vec![4, 5, 6, 7],
+            vec![1, 2, 4, 6, 7],
+            vec![1, 2, 3, 5, 6, 7],
+            vec![2, 4, 5],
+        ];
+
+        for fragmentation in fragmentations {
+            let fragment_cost =
+                TKF92FixedIndelCostBuilder::new(lambda, mu, r, fragmentation, phylo_info.clone())
+                    .build()
+                    .unwrap();
+            sum_over_fragmentations_cost += fragment_cost.logl().exp();
+        }
+        sum_over_fragmentations_cost = sum_over_fragmentations_cost.ln();
+        assert_relative_eq!(cost, sum_over_fragmentations_cost);
+    }
+    #[test]
+    fn tkf92_fixed_model_fmt() {
+        let tkf_indel_model = TKF92FixedIndelModel {
+            params: vec![1.1, 2.0, 0.3],
+            log_r: 0.0, // cache filled with dummy since it is not printed
+            fragmentation: vec![1, 2],
+        };
+
+        let fmt = format!("{}", tkf_indel_model);
+
+        assert_eq!(
+            fmt,
+            "TKF92 with lambda = 1.1, mu = 2, r = 0.3, and fixed fragmentation = [1, 2]"
+        );
     }
 
     #[test]

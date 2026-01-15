@@ -107,10 +107,6 @@ impl<Q: QMatrix, T: TKFModel, AA: AncestralAlignment> TKFCost<Q, T, AA> {
     pub fn masa(&self) -> &impl AncestralAlignment {
         &self.indel_cost.phylo.msa
     }
-
-    pub fn masa_mut(&mut self) -> &mut impl AncestralAlignment {
-        &mut self.indel_cost.phylo.msa
-    }
 }
 
 #[cfg(test)]

@@ -474,6 +474,29 @@ fn tkf91_param_range() {
     }
 }
 
+#[cfg(test)]
+fn tkf92_subst_param_range<Q: QMatrix, T: TKFModel, AA: AncestralAlignment>(
+    cost: &TKFCost<Q, T, AA>,
+) {
+    for subst_param_idx in 3..cost.param_count() {
+        let subst_range = cost.param_range(subst_param_idx);
+        let true_subst_range = PARAM_RANGE_POSITIVE;
+        assert_eq!(subst_range, true_subst_range);
+    }
+}
+
+#[cfg(test)]
+fn tkf92_indel_param_range<T: TKFModel, AA: AncestralAlignment>(cost: &TKFIndelCost<T, AA>) {
+    let lambda_range = cost.param_range(usize::from(TKF92Parameters::Lambda));
+    let true_lambda_range = (f64::EPSILON, 2.0 - f64::EPSILON);
+    assert_eq!(lambda_range, true_lambda_range);
+    let mu_range = cost.param_range(usize::from(TKF92Parameters::Mu));
+    let true_mu_range = (1.0 + f64::EPSILON, f64::MAX);
+    assert_eq!(mu_range, true_mu_range);
+    let r_range = cost.param_range(usize::from(TKF92Parameters::R));
+    let true_r_range = PARAM_RANGE_UNIT_INTERVAL_EXCLUSIVE;
+    assert_eq!(r_range, true_r_range);
+}
 #[test]
 fn tkf92_param_range() {
     let subst_model = SubstModel::<GTR>::new(&[], &[]);
@@ -486,21 +509,31 @@ fn tkf92_param_range() {
     )
     .build()
     .unwrap();
-    let lambda_range = tkf_cost.param_range(usize::from(TKF92Parameters::Lambda));
-    let true_lambda_range = (f64::EPSILON, 2.0 - f64::EPSILON);
-    assert_eq!(lambda_range, true_lambda_range);
-    let mu_range = tkf_cost.param_range(usize::from(TKF92Parameters::Mu));
-    let true_mu_range = (1.0 + f64::EPSILON, f64::MAX);
-    assert_eq!(mu_range, true_mu_range);
-    let r_range = tkf_cost.param_range(usize::from(TKF92Parameters::R));
-    let true_r_range = PARAM_RANGE_UNIT_INTERVAL_EXCLUSIVE;
-    assert_eq!(r_range, true_r_range);
+    tkf92_subst_param_range(&tkf_cost);
+    tkf92_indel_param_range(&tkf_cost.indel_cost);
+}
 
-    for subst_param_idx in 3..tkf_cost.param_count() {
-        let subst_range = tkf_cost.param_range(subst_param_idx);
-        let true_subst_range = PARAM_RANGE_POSITIVE;
-        assert_eq!(subst_range, true_subst_range);
-    }
+#[test]
+fn tkf92_fixed_param_range() {
+    let tkf_cost =
+        TKF92FixedIndelCostBuilder::new(1.0, 2.0, 0.3, vec![], setup_test_phylo(Alphabet::dna()))
+            .build()
+            .unwrap();
+    tkf92_indel_param_range(&tkf_cost);
+}
+
+#[test]
+fn tkf92_add_param_range() {
+    let tkf_cost = TKF92IndelAddBlocksCostBuilder::new(
+        1.0,
+        2.0,
+        0.3,
+        vec![],
+        setup_test_phylo(Alphabet::dna()),
+    )
+    .build()
+    .unwrap();
+    tkf92_indel_param_range(&tkf_cost);
 }
 
 #[test]

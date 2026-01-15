@@ -238,16 +238,10 @@ where
             warn!(
                 "Reestimation can only be performed on non root internal nodes. Skipping root {v2_id}"
             );
-            println!(
-                "Reestimation can only be performed on non root internal nodes. Skipping root {v2_id}"
-            );
             return self.cost.logl();
         }
         if let Leaf(_) = v2_idx {
             warn!(
-                "Reestimation can only be performed on non root internal nodes. Skipping {v2_id}"
-            );
-            println!(
                 "Reestimation can only be performed on non root internal nodes. Skipping {v2_id}"
             );
             return self.cost.logl();

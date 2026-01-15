@@ -98,10 +98,11 @@ impl Display for TKF92IndelModelAddBlocks {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "TKF92 with lambda = {}, mu = {}, r = {}",
+            "TKF92 with lambda = {}, mu = {}, r = {}, and additional blocks = {:?}",
             self.lambda(),
             self.mu(),
             self.r(),
+            self.additional_blocks
         )
     }
 }
@@ -149,5 +150,108 @@ impl<AA: AncestralAlignment> TKF92IndelAddBlocksCostBuilder<AA> {
             phylo: self.phylo.clone(),
             model_info: RefCell::new(info),
         })
+    }
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage, coverage(off))]
+mod private_tests {
+    use approx::assert_relative_eq;
+
+    use crate::alignment::{Sequences, MASA};
+    use crate::tkf_model::TKF92FixedIndelCostBuilder;
+    use crate::{record_wo_desc as record, tree};
+
+    use super::*;
+
+    #[test]
+    #[should_panic]
+    fn tkf92_param_range_invalid_index() {
+        let model = TKF92IndelModelAddBlocks {
+            params: vec![0.5, 1.0, 0.3],
+            log_r: 0.0,              // cache filled with dummy since it is not printed
+            one_minus_r_over_r: 0.0, // cache filled with dummy since it is not printed
+            additional_blocks: vec![],
+        };
+        // Use an invalid index
+        model.param_range(3);
+    }
+
+    #[test]
+    fn tkf92_add_blocks_model_fmt() {
+        let tkf_indel_model = TKF92IndelModelAddBlocks {
+            params: vec![1.1, 2.0, 0.3],
+            log_r: 0.0,              // cache filled with dummy since it is not printed
+            one_minus_r_over_r: 0.0, // cache filled with dummy since it is not printed
+            additional_blocks: vec![1, 2],
+        };
+
+        let fmt = format!("{}", tkf_indel_model);
+
+        assert_eq!(
+            fmt,
+            "TKF92 with lambda = 1.1, mu = 2, r = 0.3, and additional blocks = [1, 2]"
+        );
+    }
+
+    #[test]
+    fn tkf92_add_blocks_indel_set_param() {
+        let mut model = TKF92IndelModelAddBlocks {
+            params: vec![1.0, 2.0, 0.3],
+            log_r: 0.0,                // dummy
+            one_minus_r_over_r: 0.0,   // dummy
+            additional_blocks: vec![], // dummy
+        };
+        model.set_param(usize::from(TKF92Parameters::Lambda), 1.1);
+        assert_eq!(model.lambda(), 1.1);
+        model.set_param(usize::from(TKF92Parameters::Mu), 2.1);
+        assert_eq!(model.mu(), 2.1);
+        model.set_param(usize::from(TKF92Parameters::R), 0.4);
+        assert_eq!(model.r(), 0.4);
+        assert_eq!(model.log_r, 0.4f64.ln());
+        assert_eq!(model.one_minus_r_over_r, (1.0 - 0.4) / 0.4);
+    }
+
+    #[test]
+    fn tkf_add_blocks_manual_integration_over_fragmentations() {
+        // By manually summing over unobserved fragmentations (that confirm with the additionally
+        // provided block borders) we can verify that this TKF92 model integrates over all possible
+        // fragmentations that are consistent with the MSA and the additional block borders.
+        let tree = tree!("((A0:1.0,B1:1.0)I1:1.0);");
+        let seqs = Sequences::new(vec![
+            record!("A0", b"AAB---DD"),
+            record!("B1", b"-ARAAAWD"),
+            record!("I1", b"AAA---AD"),
+        ]);
+        let msa = MASA::from_aligned_with_ancestral(seqs, &tree).unwrap();
+        let phylo_info = PhyloInfo { msa, tree };
+        let lambda = 1.0;
+        let mu = 1.1;
+        let r = 0.5;
+        let additional_blocks = vec![2, 4];
+
+        let tkf92_cost = TKF92IndelAddBlocksCostBuilder::new(
+            lambda,
+            mu,
+            r,
+            additional_blocks,
+            phylo_info.clone(),
+        )
+        .build()
+        .unwrap();
+        let cost = tkf92_cost.logl();
+
+        let mut sum_over_fragmentations_cost = 0.0;
+
+        let fragmentations = [vec![2, 4], vec![2, 4, 5], vec![2, 4, 7], vec![2, 4, 5, 7]];
+        for fragmentation in fragmentations {
+            let fragment_cost =
+                TKF92FixedIndelCostBuilder::new(lambda, mu, r, fragmentation, phylo_info.clone())
+                    .build()
+                    .unwrap();
+            sum_over_fragmentations_cost += fragment_cost.logl().exp();
+        }
+        sum_over_fragmentations_cost = sum_over_fragmentations_cost.ln();
+        assert_relative_eq!(cost, sum_over_fragmentations_cost);
     }
 }

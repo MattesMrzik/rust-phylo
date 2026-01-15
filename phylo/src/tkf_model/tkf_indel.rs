@@ -550,6 +550,7 @@ pub fn get_block_lengths(blocks: &[usize]) -> Vec<usize> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage, coverage(off))]
 mod private_tests {
 
     use super::*;

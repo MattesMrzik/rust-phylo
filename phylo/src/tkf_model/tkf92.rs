@@ -255,6 +255,7 @@ pub(super) fn blocks_of_alignment<AA: AncestralAlignment>(msa: &AA) -> Vec<usize
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage, coverage(off))]
 mod private_tests {
     use super::*;
 
@@ -284,7 +285,7 @@ mod private_tests {
     }
 
     #[test]
-    fn tkf92_indel_set_param_r() {
+    fn tkf92_indel_set_param() {
         let mut model = TKF92IndelModel {
             params: vec![1.0, 2.0, 0.3],
             log_r: 0.0,              // dummy
