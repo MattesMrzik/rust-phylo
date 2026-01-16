@@ -262,6 +262,25 @@ fn rooted_spr(tree: &Tree, prune_idx: &NodeIdx, regraft_idx: &NodeIdx) -> Result
     Ok(rooted_spr_unchecked(tree, prune_idx, regraft_idx))
 }
 
+/// ```text
+/// before:                       |
+///                     -----prune_grpar-----
+///                     |                   |
+///               --prune_par--       --regraft_par--
+///               |           |       |             |
+///          prune_sib      prune     .             --------
+///                                                        |
+///                                                      regraft
+///
+/// after:                        |
+///                     -----prune_grpar-----
+///                     |                   |
+///               -------             --regraft_par--
+///               |                   |             |
+///          prune_sib                .        --prune_par--
+///                                            |           |
+///                                          prune       regraft
+/// ```
 fn rooted_spr_unchecked(tree: &Tree, prune_idx: &NodeIdx, regraft_idx: &NodeIdx) -> Tree {
     let prune = tree.node(prune_idx);
     let prune_sib = tree.node(&tree.sibling(&prune.idx).unwrap());
