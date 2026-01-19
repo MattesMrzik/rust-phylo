@@ -4,6 +4,7 @@ use std::fmt::{Debug, Display};
 use anyhow::bail;
 use fixedbitset::FixedBitSet;
 use inc_stats::Percentiles;
+use log::warn;
 
 use crate::alignment::Sequences;
 use crate::parsimony::Rounding;
@@ -66,6 +67,7 @@ pub struct Tree {
     postorder: Vec<NodeIdx>,
     preorder: Vec<NodeIdx>,
     leaf_ids: Vec<String>,
+    // TODO: what is meant by this?
     pub complete: bool,
     /// The number of leaves in the tree.
     pub n: usize,
@@ -168,9 +170,6 @@ impl Tree {
     }
 
     /// Returns true if `query` is in the subtree rooted at `node`.
-    /// This assumes that the matching between [ids](`Node::id`) and [idx](`Node::idx`) is the
-    /// same in the two trees. That means even if [`Tree::almost_eq`] returns true, this method
-    /// here can return false if you pass the two roots.
     pub(crate) fn is_subtree(&self, query: &NodeIdx, node: &NodeIdx) -> bool {
         let order = self.preorder_subroot(node);
         order.contains(query)
@@ -382,8 +381,9 @@ impl Tree {
     }
 
     /// Compares two trees for approximate equality, allowing for small differences in branch
-    /// lengths. The order of children of a node is ignored, i.e., they are compared as sets.
-    /// Returning false in the case of `NaN` branch lengths.
+    /// lengths. Not caring about the order of nodes in the internal representation or correspondence
+    /// of [`Node`]s and [`NodeIdx`]s. The order of children of a node is ignored, i.e.,
+    /// they are compared as sets. Returning `false` in the case of `NaN` branch lengths.
     ///
     /// # Errors
     ///
@@ -400,43 +400,57 @@ impl Tree {
             || other.length.is_nan()
             || (self.length - other.length).abs() > epsilon
         {
-            println!("Total lengths differ");
+            warn!("Tree lengths differ: {} vs {}", self.length, other.length);
             return false;
         }
         if self.n != other.n
             || self.complete != other.complete
             || self.nodes.len() != other.nodes.len()
         {
-            println!("Root, n, complete, nodes.len, preorder, or postorder differ");
+            warn!(
+                "Tree structures differ: n (= number of leaves): {} vs {}, complete: {} vs {}, number of nodes: {} vs {}",
+                self.n,
+                other.n,
+                self.complete,
+                other.complete,
+                self.nodes.len(),
+                other.nodes.len()
+            );
             return false;
         }
 
+        // For each leaf, traverse up to the root and compare the nodes along the way
         for leaf_id in &self.leaf_ids {
+            // this is never None
             let mut n1_option = self.nodes.iter().find(|node| node.id == *leaf_id);
+            // this might be None
             let mut n2_option = other.nodes.iter().find(|node| node.id == *leaf_id);
 
-            if n1_option.is_none() || n2_option.is_none() {
-                println!("Leaf id {} not found in both trees", leaf_id);
+            if n2_option.is_none() {
+                warn!("Leaf id '{}' not found in other tree", leaf_id);
                 return false;
             }
             while let Some(n1) = n1_option {
                 let n2 = match n2_option {
                     Some(n) => n,
                     None => {
-                        println!("Node id {} not found in both trees", n1.id);
+                        warn!("Lineage for leaf '{}' is shorther in other tree", leaf_id);
                         return false;
                     }
                 };
                 // checking the ids
                 if n1.id != n2.id {
-                    println!("Node ids differ: {} vs {}", n1.id, n2.id);
+                    warn!(
+                        "Node ids differ: '{}' vs '{}', in the lineage for leaf '{}'",
+                        n1.id, n2.id, leaf_id
+                    );
                     return false;
                 }
                 // checking the branch lengths
                 if n1.blen.is_nan() || n2.blen.is_nan() || (n1.blen - n2.blen).abs() > epsilon {
-                    println!(
-                        "Branch lengths differ for node {}: {} vs {}",
-                        n1.id, n1.blen, n2.blen
+                    warn!(
+                        "Branch lengths differ for node '{}': {} vs {}, in the lineage for leaf '{}'",
+                        n1.id, n1.blen, n2.blen, leaf_id
                     );
                     return false;
                 }
@@ -450,9 +464,8 @@ impl Tree {
                     None => None,
                 };
             }
-            // checking if n2_option is None as well
             if n2_option.is_some() {
-                println!("Trees differ in structure above leaf id {}", leaf_id);
+                warn!("Lineage for leaf id '{}' is longer in other tree", leaf_id);
                 return false;
             }
         }

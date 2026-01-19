@@ -832,5 +832,3 @@ fn almost_eq_trees_with_wrong_internal_id() {
     let epsilon = 100.0;
     assert!(!tree1.almost_eq(&tree2, epsilon));
 }
-
-// test Tree::is_subtree
