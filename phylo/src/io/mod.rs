@@ -8,6 +8,7 @@ use anyhow::bail;
 use bio::io::fasta::{Reader, Record, Writer};
 use log::info;
 
+use crate::alignment::{Alignment, AncestralAlignment};
 use crate::alphabets::{Alphabet, GAP, POSSIBLE_GAPS};
 use crate::tree::{tree_parser, Tree};
 use crate::{record, Result};
@@ -128,6 +129,39 @@ pub fn write_sequences_to_file(sequences: &[Record], path: impl AsRef<Path>) -> 
     for rec in sequences {
         writer.write_record(rec)?;
     }
+    info!("Finished writing successfully");
+    Ok(())
+}
+
+/// Writes the MSA to the given file path as a fasta file with the sequences sorted by ID.
+/// Will return an error if the file already exists.
+pub fn write_msa_to_file<A: Alignment>(msa: &A, path: impl AsRef<Path>) -> Result<()> {
+    info!("Writing MSA to file {}", path.as_ref().display());
+    if path.as_ref().exists() {
+        bail!(DataError {
+            message: String::from("File already exists")
+        });
+    }
+    let mut file = File::create(path)?;
+    write!(file, "{}", msa)?;
+
+    info!("Finished writing successfully");
+    Ok(())
+}
+
+/// Writes the MASA to the given file path as a fasta file with the sequences sorted by ID.
+/// That is, both leaf and ancestral sequences are written.
+/// Will return an error if the file already exists.
+pub fn write_masa_to_file<AA: AncestralAlignment>(msa: &AA, path: impl AsRef<Path>) -> Result<()> {
+    info!("Writing MASA to file {}", path.as_ref().display());
+    if path.as_ref().exists() {
+        bail!(DataError {
+            message: String::from("File already exists")
+        });
+    }
+    let mut file = File::create(path)?;
+    write!(file, "{}", msa)?;
+
     info!("Finished writing successfully");
     Ok(())
 }
