@@ -299,6 +299,8 @@ fn newick_parse_whitespace() {
     let tree0 = &trees.unwrap()[0];
     let tree1 = &from_newick("(((((A:1,B:1)F:1,C:2)G:1,D:3)H:1,E:4)I:1);").unwrap()[0];
     assert_eq!(tree0.nodes, tree1.nodes);
+    let epsilon = 0.0;
+    assert!(tree0.almost_eq(tree1, epsilon))
 }
 
 #[test]
@@ -739,3 +741,96 @@ fn rf_distance_against_raxml() {
     assert_eq!(tree_phyml.robinson_foulds(tree_from_nj), 0);
     assert_eq!(tree.robinson_foulds(tree_from_nj), 0);
 }
+
+#[test]
+fn almost_eq_trees_with_internal_ids() {
+    let tree1 = tree!("((A:1,B:2)E:5,(C:3,D:4)F:6)G:7;");
+    let tree2 = tree!("((D:4.1,C:2.9)F:6.1,(B:2.1,A:0.9)E:4.9)G:7;");
+    let epsilon_ok = 0.10001;
+    assert!(tree1.almost_eq(&tree2, epsilon_ok));
+    let epsilon_not_ok = 0.1;
+    assert!(!tree1.almost_eq(&tree2, epsilon_not_ok));
+}
+
+#[test]
+fn almost_eq_trees_wrong_total_len() {
+    let tree1 = tree!("((A:1,B:2)E:5,(C:3,D:4)F:6)G:7;");
+    let tree2 = tree!("((D:4.1,C:3.1)F:6.1,(B:2.1,A:0.9)E:4.9)G:7;");
+    let epsilon_ok = 0.20001; // > 0.1 is not sufficient even though all blens differ only by 0.1
+                              // because total length differs by 0.2
+    assert!(tree1.almost_eq(&tree2, epsilon_ok));
+    let epsilon_not_ok = 0.1;
+    assert!(!tree1.almost_eq(&tree2, epsilon_not_ok));
+}
+
+#[test]
+fn almost_eq_trees_with_out_internal_ids() {
+    let tree1 = tree!("((A:1,B:2):5,(C:3,D:4):6)G:7;");
+    let tree2 = tree!("((D:4.1,C:2.9):6.1,(B:2.1,A:0.9):4.9)G:7;");
+    let epsilon_ok = 0.10001;
+    assert!(tree1.almost_eq(&tree2, epsilon_ok));
+    let epsilon_not_ok = 0.1;
+    assert!(!tree1.almost_eq(&tree2, epsilon_not_ok));
+}
+
+#[test]
+fn almost_eq_trees_with_wrong_children() {
+    let tree1 = tree!("((A:1,C:3)E:5,(B:2,D:4)F:6)G:7;");
+    let tree2 = tree!("((D:4.1,C:2.9)F:6.1,(B:2.1,A:0.9)E:4.9)G:7;");
+    let epsilon = 100.0;
+    assert!(!tree1.almost_eq(&tree2, epsilon));
+}
+
+#[test]
+#[should_panic]
+fn almost_eq_trees_non_unique_ids_in_first_tree() {
+    // id `A` appears twice
+    let tree1 = tree!("((A:1,B:2)E:5,(A:3,D:4)F:6)G:7;");
+    let tree2 = tree!("((D:4.1,C:2.9)F:6.1,(B:2.1,A:0.9)E:4.9)G:7;");
+    let epsilon = 1.0;
+    assert!(tree1.almost_eq(&tree2, epsilon));
+}
+
+#[test]
+#[should_panic]
+fn almost_eq_trees_non_unique_ids_in_second_tree() {
+    // id `A` appears twice
+    let tree1 = tree!("((A:1,B:2)E:5,(C:3,D:4)F:6)G:7;");
+    let tree2 = tree!("((D:4.1,D:2.9)F:6.1,(B:2.1,A:0.9)E:4.9)G:7;");
+    let epsilon = 1.0;
+    assert!(tree1.almost_eq(&tree2, epsilon));
+}
+
+#[test]
+fn almost_eq_trees_with_missing_internal_ids_in_first_tree() {
+    let tree1 = tree!("((A:1,B:2)E:5,(C:3,D:4):6)G:7;");
+    let tree2 = tree!("((D:4.1,C:2.9)F:6.1,(B:2.1,A:0.9)E:4.9)G:7;");
+    let epsilon = 100.0;
+    assert!(!tree1.almost_eq(&tree2, epsilon));
+}
+
+#[test]
+fn almost_eq_trees_with_missing_internal_ids_in_second_tree() {
+    let tree1 = tree!("((A:1,B:2)E:5,(C:3,D:4):6)G:7;");
+    let tree2 = tree!("((D:4.1,C:2.9):6.1,(B:2.1,A:0.9):4.9)G:7;");
+    let epsilon = 100.0;
+    assert!(!tree1.almost_eq(&tree2, epsilon));
+}
+
+#[test]
+fn almost_eq_trees_with_wrong_leaf_id() {
+    let tree1 = tree!("((A:1,B:2)E:5,(C:3,D:4)F:6)G:7;");
+    let tree2 = tree!("((D:4.1,C:2.9)F:6.1,(B:2.1,T:0.9)E:4.9)G:7;");
+    let epsilon = 100.0;
+    assert!(!tree1.almost_eq(&tree2, epsilon));
+}
+
+#[test]
+fn almost_eq_trees_with_wrong_internal_id() {
+    let tree1 = tree!("((A:1,B:2)E:5,(C:3,D:4):6)G:7;");
+    let tree2 = tree!("((D:4.1,C:2.9):6.1,(B:2.1,A:0.9)T:4.9)G:7;");
+    let epsilon = 100.0;
+    assert!(!tree1.almost_eq(&tree2, epsilon));
+}
+
+// test Tree::is_subtree
