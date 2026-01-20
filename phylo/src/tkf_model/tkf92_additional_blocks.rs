@@ -12,7 +12,7 @@ use crate::tkf_model::{
 };
 use crate::Result;
 
-/// TKF92 indel model with additional block borders (and without a substitution model),
+/// [TKF92IndelModel](`super::TKF92IndelModel`) with additional block borders (and without a substitution model),
 /// which means that the provided blocks will be used in addition to the blocks determined from
 /// the alignment, see [`super::TKFModel::get_blocks`].
 #[derive(Clone, Debug, PartialEq)]
@@ -73,7 +73,6 @@ impl TKFModel for TKF92IndelModelAddBlocks {
         self.lambda() / self.mu() * self.one_minus_r_over_r
     }
 
-    // TODO: this is not a prob but a factor since it can be > 1, rename?
     fn insertion_prob_at_non_root(&self, beta: f64) -> f64 {
         self.lambda() * beta * self.one_minus_r_over_r
     }
@@ -107,7 +106,7 @@ impl Display for TKF92IndelModelAddBlocks {
     }
 }
 
-/// Builder for the cost using [`TKF92IndelModelAddBlocks`].
+/// Builder for the cost using the [`TKF92IndelModelAddBlocks`].
 pub struct TKF92IndelAddBlocksCostBuilder<AA: AncestralAlignment> {
     lambda: f64,
     mu: f64,
@@ -169,8 +168,8 @@ mod private_tests {
     fn tkf92_param_range_invalid_index() {
         let model = TKF92IndelModelAddBlocks {
             params: vec![0.5, 1.0, 0.3],
-            log_r: 0.0,              // cache filled with dummy since it is not printed
-            one_minus_r_over_r: 0.0, // cache filled with dummy since it is not printed
+            log_r: 0.0,              // cache filled with dummy since it is not needed here
+            one_minus_r_over_r: 0.0, // cache filled with dummy since it is not needed here
             additional_blocks: vec![],
         };
         // Use an invalid index

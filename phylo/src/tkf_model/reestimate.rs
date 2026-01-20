@@ -10,18 +10,18 @@ use crate::tree::NodeIdx::{self, Internal, Leaf};
 use crate::Result;
 
 /// Assignment of chars present/absent at `v1` and `v2` (see [`QuartetEdges`])
-/// and current [block](`super::TKFModel::get_blocks`).
+/// and at current [block](`super::TKFModel::get_blocks`).
 type EdgeAssignment = (bool, bool);
 type EdgeAssignmentPossibilities = Vec<EdgeAssignment>;
 /// Represents whether chars are present or absent for every [block](`super::TKFModel::get_blocks`)
 /// for a given [node](`crate::tree::Node`).
 type NodeSeq = FixedBitSet;
-/// Represent whether the previous event on each edge in the quartet was a deletion or not.
+/// Represent whether the previous event on each edge in the [quartet](`QuartetEdges`) was a deletion or not.
 type QuartetDelOrNot = [bool; N_EDGES_IN_QUARTET];
 type QuartetDelOrNotPossibilities = Vec<QuartetDelOrNot>;
 type QuartetEvents = [Event; N_EDGES_IN_QUARTET];
 
-/// 2 (assignments) * 2 (deletion or not) ^ 5 (edges) = 128, see [`QuartetEdges`].
+/// Size of the dynamic programming column: 2 (assignments) * 2 (deletion or not) ^ 5 (edges) = 128, see [`QuartetEdges`].
 const DP_ASSIGNMENT_AND_EVENTS_SIZE: usize = 128;
 const BACKTRACKING_INVALID: usize = DP_ASSIGNMENT_AND_EVENTS_SIZE + 1;
 /// #{v1, v2, t2, t3, t4}, see [`QuartetEdges`].
@@ -137,7 +137,7 @@ impl QuartetEdges {
 struct BackTrackingResult {
     v1_bitset: FixedBitSet,
     v2_bitset: FixedBitSet,
-    pub logl: f64,
+    logl: f64,
 }
 
 #[cfg(doc)]
@@ -194,11 +194,9 @@ use crate::likelihood::TreeSearchCost;
 /// # Ok(()) }
 /// ```
 pub struct EdgeSeqsReestimator<'a, T: TKFModel, AA: AncestralAlignment, R: Rng + SeedableRng> {
-    // TODO: remove these pubs
-    pub dp_table: Vec<[f64; DP_ASSIGNMENT_AND_EVENTS_SIZE]>,
-    pub backtracking_table: Vec<[usize; DP_ASSIGNMENT_AND_EVENTS_SIZE]>,
-    // TODO: remove this pub
-    pub cost: &'a mut TKFIndelCost<T, AA>,
+    dp_table: Vec<[f64; DP_ASSIGNMENT_AND_EVENTS_SIZE]>,
+    backtracking_table: Vec<[usize; DP_ASSIGNMENT_AND_EVENTS_SIZE]>,
+    pub(super) cost: &'a mut TKFIndelCost<T, AA>,
     quartet_edges: QuartetEdges,
     // TODO: alternatively, own the rng inside a refcell,
     rng: &'a mut RandomGenerator<R>,
@@ -353,8 +351,7 @@ where
         for block_id in 0..num_blocks {
             for edge in self.quartet_edges.edges() {
                 let event = self.cost.determine_event(edge, block_id);
-                // even though the edge can be the root, i thinks its still fine to call these
-                let node_event_prob = self.cost.event_prob_for_non_root(edge, event);
+                let node_event_prob = self.cost.event_prob(edge, event);
                 let node_eta = self.cost.eta_for_non_root(edge, event);
                 self.cost.update_previous_event(edge, event);
                 let mut model_info = self.cost.model_info.borrow_mut();
@@ -420,8 +417,7 @@ where
     /// compatible with the `current_events` even though some of these might
     /// not be reached since the previous possible assignment might not produce
     /// these `del_or_not` scenarios. See the implementation of [`EdgeSeqsReestimator::fill_dp_table`].
-    /// More sophisticated filtering could be
-    /// done, but might add more complexity and is perhaps not worth it.
+    /// More sophisticated filtering could be done, but might add more complexity and is perhaps not worth it.
     fn max_over_previous(
         &mut self,
         current_del_or_not: &QuartetDelOrNot,
@@ -495,7 +491,7 @@ where
         possibilities_for_del_or_not(&choices, &no_choices)
     }
 
-    /// Returns all possible combinations of deletion or not for each edge in the quartet
+    /// Returns all possible combinations of `deletion or not` for each edge in the quartet
     /// given the (current) events taken on those edges.
     fn possible_del_or_not(
         &self,

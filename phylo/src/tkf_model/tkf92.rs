@@ -142,7 +142,7 @@ pub(super) fn validate_r(r: f64) -> f64 {
     valid_r
 }
 
-/// Builder for the cost using [`TKF92IndelModel`], i.e., without a substitution model.
+/// Builder for the cost using the [`TKF92IndelModel`], i.e., without a substitution model.
 pub struct TKF92IndelCostBuilder<AA: AncestralAlignment> {
     lambda: f64,
     mu: f64,
@@ -177,7 +177,7 @@ impl<AA: AncestralAlignment> TKF92IndelCostBuilder<AA> {
     }
 }
 
-/// Builder for TKF92 cost, i.e., with a substitution model.
+/// Builder for the TKF92 cost, i.e., with a substitution model.
 pub struct TKF92CostBuilder<Q: QMatrix, AA: AncestralAlignment> {
     lambda: f64,
     mu: f64,
@@ -264,8 +264,8 @@ mod private_tests {
     fn tkf92_param_range_invalid_index() {
         let model = TKF92IndelModel {
             params: vec![0.5, 1.0, 0.3],
-            log_r: 0.0,              // cache filled with dummy since it is not printed
-            one_minus_r_over_r: 0.0, // cache filled with dummy since it is not printed
+            log_r: 0.0,              // cache filled with dummy since it is not needed here
+            one_minus_r_over_r: 0.0, // cache filled with dummy since it is not needed here
         };
         // Use an invalid index
         model.param_range(3);

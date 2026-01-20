@@ -309,8 +309,7 @@ fn delete_existing_brute_force_max_file(file_path: &Path) {
     }
 }
 
-/// Struct to hold calculated brute force max values for each iteration and node. Is exported
-/// to a file.
+/// Struct to hold calculated brute force max values for each iteration and node. Is exported to a file.
 #[cfg(test)]
 struct IterationInfo {
     iteration: usize,
@@ -349,11 +348,8 @@ fn load_precalculated_brute_force_maxes(file_path: &Path, iteration_info: &mut V
 #[cfg(test)]
 pub fn append_result(path: &str, iteration: usize, node: String, logl: f64) -> std::io::Result<()> {
     let file = OpenOptions::new().create(true).append(true).open(path)?;
-
     let mut writer = BufWriter::new(file);
-
     writeln!(writer, "{iteration},{node},{logl}")?;
-
     Ok(())
 }
 

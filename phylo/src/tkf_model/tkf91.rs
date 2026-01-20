@@ -123,7 +123,7 @@ pub(super) fn validate_lambda_and_mu(lambda: f64, mu: f64) -> (f64, f64) {
     (valid_lambda, valid_mu)
 }
 
-/// Builder for the cost using [`TKF91IndelModel`], i.e., without a substitution model.
+/// Builder for the cost using the [`TKF91IndelModel`], i.e., without a substitution model.
 pub struct TKF91IndelCostBuilder<AA: AncestralAlignment> {
     lambda: f64,
     mu: f64,
@@ -149,7 +149,7 @@ impl<AA: AncestralAlignment> TKF91IndelCostBuilder<AA> {
     }
 }
 
-/// Builder for TKF91 cost, i.e., with a substitution model.
+/// Builder for the TKF91 cost, i.e., with a substitution model.
 pub struct TKF91CostBuilder<Q: QMatrix, AA: AncestralAlignment> {
     lambda: f64,
     mu: f64,

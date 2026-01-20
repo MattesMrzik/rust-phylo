@@ -34,8 +34,10 @@ pub(super) enum Event {
     Nothing,
 }
 
-/// Trait for TKF indel models (i.e., [TKF91](crate::tkf_model::tkf91) and
-/// [TKF92](crate::tkf_model::tkf92)).
+/// Trait for TKF indel models (i.e., [TKF91IndelModel](`crate::tkf_model::TKF91IndelModel`),
+/// [TKF92IndelModel](`crate::tkf_model::TKF92IndelModel`),
+/// [TKF92FixedIndelModel](`crate::tkf_model::TKF92FixedIndelModel`),
+/// [TKF92IndelModelAddBlocks](`crate::tkf_model::TKF92IndelModelAddBlocks`)).
 #[allow(clippy::upper_case_acronyms)]
 pub trait TKFModel: Clone + Display {
     // TODO: it might be better for model optimisation to have parameter lambda and scale s = mu/lambda,
@@ -154,12 +156,7 @@ impl TKFIndelModelInfo {
 }
 
 /// Computes the log likelihood of an [ancestral alignment](`AncestralAlignment`)
-/// and tree under a TKF indel model, i.e., without substitutions.
-/// The model is generic over the specific TKF model (e.g.,
-/// [TKF91IndelModel](`crate::tkf_model::TKF91IndelModel`),
-/// [TKF91IndelModel](`crate::tkf_model::TKF92IndelModel`),
-/// [TKF92FixedIndelModel](`crate::tkf_model::TKF92FixedIndelModel`),
-/// [TKF92IndelModelAddBlocks](`crate::tkf_model::TKF92IndelModelAddBlocks`)).
+/// and tree under a [TKF](`TKFModel`) indel model, i.e., without substitutions.
 #[derive(Debug)]
 pub struct TKFIndelCost<T: TKFModel, AA: AncestralAlignment> {
     pub(super) model: T,
@@ -230,23 +227,21 @@ impl<T: TKFModel, AA: AncestralAlignment> TKFIndelCost<T, AA> {
 
     fn set_root(&self) {
         let root_idx = &self.phylo.tree.root;
-        if self.model_info.borrow().valid[usize::from(root_idx)] {
+        let root_id = usize::from(root_idx);
+        if self.model_info.borrow().valid[root_id] {
             return;
         }
         self.reset_cache(root_idx);
         let n_blocks = self.model_info.borrow().blocks.len();
         for block_id in 0..n_blocks {
-            let x = self.event_prob_for_root(block_id);
-            self.set_node_values(root_idx, block_id, x, 0.0);
+            let event = self.determine_event(root_idx, block_id);
+            let node_event_prob = self.event_prob(root_idx, event);
+            let node_eta = 0.0;
+            self.set_node_values(root_idx, block_id, node_event_prob, node_eta);
         }
-        self.model_info
-            .borrow_mut()
-            .valid
-            .set(usize::from(root_idx), true);
-        self.model_info
-            .borrow_mut()
-            .valid_for_reestimation
-            .set(usize::from(root_idx), true);
+        let mut model_info = self.model_info.borrow_mut();
+        model_info.valid.set(root_id, true);
+        model_info.valid_for_reestimation.set(root_id, true);
     }
 
     fn set_non_root(&self, node_idx: &NodeIdx) {
@@ -264,7 +259,7 @@ impl<T: TKFModel, AA: AncestralAlignment> TKFIndelCost<T, AA> {
                     .set(usize::from(node_idx), false);
             }
             let event = self.determine_event(node_idx, block_id);
-            let node_event_prob = self.event_prob_for_non_root(node_idx, event);
+            let node_event_prob = self.event_prob(node_idx, event);
             let node_eta = self.eta_for_non_root(node_idx, event);
             self.set_node_values(node_idx, block_id, node_event_prob, node_eta);
             self.update_previous_event(node_idx, event);
@@ -333,16 +328,6 @@ impl<T: TKFModel, AA: AncestralAlignment> TKFIndelCost<T, AA> {
         model_info.subtree_eta[(node_id, block_id)] = subtree_eta;
     }
 
-    fn event_prob_for_root(&self, block_id: usize) -> f64 {
-        let root_idx = &self.phylo.tree.root;
-        let site = self.model_info.borrow().blocks[block_id] - 1;
-        let char_present_at_root = self.phylo.msa.ancestral_map(root_idx)[site].is_some();
-        if char_present_at_root {
-            return self.model_info.borrow().insertion[usize::from(root_idx)];
-        }
-        1.0
-    }
-
     /// Determines the event that happened on the edge above `node_idx` for the given `block_id`
     /// based on the [ancestral alignment](`AncestralAlignment`).
     pub(super) fn determine_event(&self, node_idx: &NodeIdx, block_id: usize) -> Event {
@@ -372,7 +357,7 @@ impl<T: TKFModel, AA: AncestralAlignment> TKFIndelCost<T, AA> {
         }
     }
 
-    pub(super) fn event_prob_for_non_root(&self, node_idx: &NodeIdx, event: Event) -> f64 {
+    pub(super) fn event_prob(&self, node_idx: &NodeIdx, event: Event) -> f64 {
         let node_id = usize::from(node_idx);
         match event {
             Event::Deletion => self.model_info.borrow().n0[node_id],
@@ -536,8 +521,7 @@ pub(super) fn eta(lambda: f64, mu: f64, beta: f64, n0: f64, time: f64) -> f64 {
 
 /// Given the right exclusive block borders, returns the lengths of the blocks.
 /// For example, given [3, 5, 8], the block lengths are [3, 2, 3].
-// TODO: or only have this pub super and re-implement it in the tkf brute force helper
-pub fn get_block_lengths(blocks: &[usize]) -> Vec<usize> {
+pub(super) fn get_block_lengths(blocks: &[usize]) -> Vec<usize> {
     let mut block_lens = vec![0; blocks.len()];
     for (i, block) in blocks.iter().enumerate() {
         block_lens[i] = if i == 0 {

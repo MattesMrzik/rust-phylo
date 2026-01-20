@@ -15,8 +15,8 @@ use crate::{alignment::AncestralAlignment, tkf_model::TKFModel};
 
 /// TKF92 indel model with a `fixed fragmentation` (and without a substitution model),
 /// which means that the provided fragmentation will be regarded as the true fragmentation.
-/// This is different to the [`crate::tkf_model::TKF92IndelModel`], which integrates
-/// over all possible fragmentations that confirm with the observed MSA.
+/// This is different to the [TKF92IndelModel](`crate::tkf_model::TKF92IndelModel`), which integrates
+/// over all possible fragmentations that confirm with the observed alignment.
 #[derive(Clone, Debug, PartialEq)]
 pub struct TKF92FixedIndelModel {
     pub(super) params: Vec<f64>,
@@ -72,7 +72,6 @@ impl TKFModel for TKF92FixedIndelModel {
         self.lambda() / self.mu()
     }
 
-    // TODO: this is not a prob but a factor since it can be > 1, rename?
     fn insertion_prob_at_non_root(&self, beta: f64) -> f64 {
         self.lambda() * beta
     }
@@ -93,6 +92,8 @@ impl TKFModel for TKF92FixedIndelModel {
 
 /// Merges the user defined fragmentation with the observed block borders in the MSA.
 /// Assumes both inputs are sorted and within MSA length.
+/// This is basically a union of the two sets and then returning the sorted result.
+/// This implementations achieves a better run time than the naive approach.
 pub(super) fn merge_fragmentation_with_blocks(
     fragmentation: &[usize],
     blocks: &[usize],
@@ -141,7 +142,7 @@ impl Display for TKF92FixedIndelModel {
     }
 }
 
-/// Builder for the cost using [`TKF92FixedIndelModel`].
+/// Builder for the cost using the [`TKF92FixedIndelModel`].
 pub struct TKF92FixedIndelCostBuilder<AA: AncestralAlignment> {
     lambda: f64,
     mu: f64,
@@ -158,6 +159,7 @@ pub(super) fn validate_fragmentation(fragmentation: &[usize], msa_len: usize) ->
         return fragmentation.to_vec();
     }
     fragmentation.sort();
+    // dedup() must be called after sorting
     fragmentation.dedup();
     let deduped_len = fragmentation.len();
     if deduped_len < original_len {
@@ -220,6 +222,15 @@ mod private_tests {
 
     use super::*;
 
+    #[cfg(test)]
+    fn naive_merge(set1: &[usize], set2: &[usize]) -> Vec<usize> {
+        let mut merged: Vec<usize> = set1.to_vec();
+        merged.extend(set2.iter().cloned());
+        merged.sort();
+        merged.dedup();
+        merged
+    }
+
     #[test]
     fn tkf_validate_fragmentation() {
         let fragmentation = vec![3, 19, 3, 4, 58, 13, 0, 1, 0, 3, 4, 15, 16];
@@ -234,6 +245,7 @@ mod private_tests {
         let blocks = vec![5, 10, 12];
         let merged = merge_fragmentation_with_blocks(&fragmentation, &blocks);
         assert_eq!(merged, vec![3, 5, 7, 10, 12]);
+        assert_eq!(merged, naive_merge(&fragmentation, &blocks));
     }
 
     #[test]
@@ -242,6 +254,7 @@ mod private_tests {
         let blocks = vec![5, 10, 12];
         let merged = merge_fragmentation_with_blocks(&fragmentation, &blocks);
         assert_eq!(merged, vec![3, 5, 7, 10, 12]);
+        assert_eq!(merged, naive_merge(&fragmentation, &blocks));
     }
 
     #[test]
@@ -250,6 +263,7 @@ mod private_tests {
         let blocks = vec![5, 10, 12];
         let merged = merge_fragmentation_with_blocks(&fragmentation, &blocks);
         assert_eq!(merged, vec![5, 10, 12]);
+        assert_eq!(merged, naive_merge(&fragmentation, &blocks));
     }
 
     #[test]
@@ -258,6 +272,7 @@ mod private_tests {
         let blocks = fragmentation.clone();
         let merged = merge_fragmentation_with_blocks(&fragmentation, &blocks);
         assert_eq!(merged, fragmentation.clone());
+        assert_eq!(merged, naive_merge(&fragmentation, &blocks));
     }
 
     #[test]
@@ -266,6 +281,7 @@ mod private_tests {
         let blocks = vec![1, 2, 3, 4];
         let merged = merge_fragmentation_with_blocks(&fragmentation, &blocks);
         assert_eq!(merged, blocks.clone());
+        assert_eq!(merged, naive_merge(&fragmentation, &blocks));
     }
 
     #[test]
@@ -334,7 +350,7 @@ mod private_tests {
         let mut sum_over_fragmentations_cost = 0.0;
         // its not necessary to pass the fragments that are inferred from the MSA
         // i.e., one can omit the indices 1, 3, 6, 7 and still get the same result
-        // see also `tkf_manual_integration_over_fragmentations`
+        // see also the test `tkf_manual_integration_over_fragmentations`
         let fragmentations = [
             vec![1, 6, 7],
             vec![1, 2, 3],
@@ -356,6 +372,19 @@ mod private_tests {
         sum_over_fragmentations_cost = sum_over_fragmentations_cost.ln();
         assert_relative_eq!(cost, sum_over_fragmentations_cost);
     }
+
+    #[test]
+    #[should_panic]
+    fn tkf92_param_range_invalid_index() {
+        let model = TKF92FixedIndelModel {
+            params: vec![0.5, 1.0, 0.3],
+            log_r: 0.0, // cache filled with dummy since it is not needed here
+            fragmentation: vec![],
+        };
+        // Use an invalid index
+        model.param_range(3);
+    }
+
     #[test]
     fn tkf92_fixed_model_fmt() {
         let tkf_indel_model = TKF92FixedIndelModel {
@@ -378,7 +407,7 @@ mod private_tests {
         // This uses the MASA from a simulation under the TKF92 model given a tree and parameters.
         // Since it is a simulation, we know the true fragmentation. So we compute the log-likelihood
         // using the fixed fragmentation and compare it to the log-likelihood obtained from the
-        // simulation. Note that we do not remove non-emitting columns from the alignment,
+        // simulation. Note that, we do not remove non-emitting columns from the alignment,
         // since the simulation probability includes them.
         let dir = Path::new("data/tkf/fixed_fragments/");
         let sequence_file = dir.join("masa.fasta");
@@ -400,6 +429,7 @@ mod private_tests {
             312, 321, 322, 324, 331, 332, 334, 335, 336, 341, 342, 343, 344, 346, 347, 349, 352,
             354, 355, 356, 359, 360, 363, 365, 369, 372, 374, 376,
         ];
+        // parameters from simulation
         let fragment_cost =
             TKF92FixedIndelCostBuilder::new(1.0, 1.1, 0.5, fragmentation, phylo_info)
                 .build()
