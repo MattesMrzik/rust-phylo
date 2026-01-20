@@ -385,7 +385,7 @@ impl Tree {
     /// or correspondence of [`Node`]s and [`NodeIdx`]s. The order of children of a node is ignored,
     /// i.e., they are compared as sets. It returns `false` in the case of `NaN` branch lengths.
     ///
-    /// # Errors
+    /// # Panics
     ///
     /// Panics if the ids of the leaves are not unique;
     pub fn almost_eq(&self, other: &Self, epsilon: f64) -> bool {
