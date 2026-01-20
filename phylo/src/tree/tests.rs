@@ -764,7 +764,7 @@ fn almost_eq_trees_wrong_total_len() {
 }
 
 #[test]
-fn almost_eq_trees_with_out_internal_ids() {
+fn almost_eq_trees_without_internal_ids() {
     let tree1 = tree!("((A:1,B:2):5,(C:3,D:4):6)G:7;");
     let tree2 = tree!("((D:4.1,C:2.9):6.1,(B:2.1,A:0.9):4.9)G:7;");
     let epsilon_ok = 0.10001;
