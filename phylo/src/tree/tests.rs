@@ -300,7 +300,7 @@ fn newick_parse_whitespace() {
     let tree1 = &from_newick("(((((A:1,B:1)F:1,C:2)G:1,D:3)H:1,E:4)I:1);").unwrap()[0];
     assert_eq!(tree0.nodes, tree1.nodes);
     let epsilon = 0.0;
-    assert!(tree0.almost_eq(tree1, epsilon))
+    assert!(tree0.almost_eq(tree1, epsilon));
 }
 
 #[test]
