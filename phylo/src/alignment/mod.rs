@@ -152,8 +152,12 @@ impl Display for MSA {
             let aligned_seq = aligned_seq!(seq_map, record.seq());
             aligned_records.push(record!(id, record.desc(), &aligned_seq));
         }
-        // sort records by id to have a consistent output
-        aligned_records.sort_by(|a, b| a.id().cmp(b.id()));
+        // sort records to have a consistent output
+        aligned_records.sort_by(|a, b| {
+            a.id()
+                .cmp(b.id())
+                .then(a.desc().cmp(&b.desc()).then(a.seq().cmp(b.seq())))
+        });
         write!(f, "{}", Sequences::new(aligned_records))
     }
 }
@@ -364,8 +368,12 @@ impl Display for MASA {
             let aligned_seq = aligned_seq!(seq_map, record.seq());
             aligned_records.push(record!(id, record.desc(), &aligned_seq));
         }
-        // sort records by id to have a consistent output
-        aligned_records.sort_by(|a, b| a.id().cmp(b.id()));
+        // sort records to have a consistent output
+        aligned_records.sort_by(|a, b| {
+            a.id()
+                .cmp(b.id())
+                .then(a.desc().cmp(&b.desc()).then(a.seq().cmp(b.seq())))
+        });
         write!(f, "{}", Sequences::new(aligned_records))
     }
 }
