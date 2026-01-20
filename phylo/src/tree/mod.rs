@@ -434,7 +434,7 @@ impl Tree {
                 let n2 = match n2_option {
                     Some(n) => n,
                     None => {
-                        warn!("Lineage for leaf '{}' is shorther in other tree", leaf_id);
+                        warn!("Lineage for leaf '{}' is shorter in other tree", leaf_id);
                         return false;
                     }
                 };
