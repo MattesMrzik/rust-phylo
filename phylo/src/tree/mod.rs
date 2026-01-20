@@ -381,9 +381,9 @@ impl Tree {
     }
 
     /// Compares two trees for approximate equality, allowing for small differences in branch
-    /// lengths. Not caring about the order of nodes in the internal representation or correspondence
-    /// of [`Node`]s and [`NodeIdx`]s. The order of children of a node is ignored, i.e.,
-    /// they are compared as sets. Returning `false` in the case of `NaN` branch lengths.
+    /// lengths. This comparison does not care about the order of nodes in the internal representation
+    /// or correspondence of [`Node`]s and [`NodeIdx`]s. The order of children of a node is ignored,
+    /// i.e., they are compared as sets. It returns `false` in the case of `NaN` branch lengths.
     ///
     /// # Errors
     ///
