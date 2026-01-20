@@ -231,7 +231,7 @@ impl<Q: QMatrix, AA: AncestralAlignment> TKF92CostBuilder<Q, AA> {
 /// Determines the block borders from the alignment. A block border is defined as a
 /// position where any sequence changes from gap to non-gap or vice versa. Returns a sorted
 /// vector of the right exclusive block borders.
-pub(super) fn blocks_of_alignment<AA: AncestralAlignment>(msa: &AA) -> Vec<usize> {
+pub(crate) fn blocks_of_alignment<AA: AncestralAlignment>(msa: &AA) -> Vec<usize> {
     let mut blocks: HashSet<usize> = HashSet::new();
     for map in msa
         .ancestral_maps()

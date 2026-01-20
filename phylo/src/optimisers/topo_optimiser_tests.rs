@@ -18,7 +18,7 @@ use crate::substitution_models::{
     dna_models::*, protein_models::*, QMatrix, SubstModel, SubstitutionCost,
     SubstitutionCostBuilder as SCB,
 };
-use crate::tkf_model::TKF92CostBuilder;
+use crate::tkf_model::{blocks_of_alignment, TKF92CostBuilder, TKF92IndelAddBlocksCostBuilder};
 use crate::{record_wo_desc as record, tree};
 
 // Macros for tests where precomputed results can be used to speed up local testing
@@ -940,24 +940,25 @@ fn example_main_from_readme() {
 }
 
 #[test]
+#[cfg_attr(feature = "ci_coverage", ignore)]
 fn tkf92_update_tree() {
     let dir = Path::new("data/tkf/reestimate/");
     let msa = dir.join("masa.fasta");
     let tree = dir.join("tree.newick");
-    let mut phylo = PIB::with_attrs(msa, tree).build_with_ancestors().unwrap();
-    let post_order = phylo.tree.postorder().to_vec();
-    for node in post_order {
-        phylo.tree.node_mut(&node).blen = 0.1;
-    }
+    let phylo = PIB::with_attrs(msa, tree).build_with_ancestors().unwrap();
     phylo.check_dollos_constraint().unwrap();
     let subst_model = SubstModel::<GTR>::new(&[], &[]);
-    let tkf_cost = TKF92CostBuilder::new(0.1, 0.2, 0.3, subst_model.clone(), phylo.clone())
+    let lambda = 0.1;
+    let mu = 0.2;
+    let r = 0.3;
+    let tkf_cost = TKF92CostBuilder::new(lambda, mu, r, subst_model.clone(), phylo.clone())
         .build()
         .unwrap();
     let unopt_cost = tkf_cost.cost();
     let mut prev_cost = tkf_cost.clone();
     assert_ne!(unopt_cost, f64::NEG_INFINITY);
     let mut rng = FakeGenerator::default();
+    let initial_msa_blocking = blocks_of_alignment(&phylo.msa);
     for _ in 0..5 {
         let result = TopologyOptimiser::with_stop_condition(
             prev_cost.clone(),
@@ -972,11 +973,19 @@ fn tkf92_update_tree() {
             msa: masa,
             tree: result.cost.tree().clone(),
         };
-        let new_cost = TKF92CostBuilder::new(0.1, 0.2, 0.3, subst_model.clone(), new_phylo)
-            .build()
-            .unwrap();
+        let new_indel_cost = TKF92IndelAddBlocksCostBuilder::new(
+            lambda,
+            mu,
+            r,
+            initial_msa_blocking.clone(),
+            new_phylo.clone(),
+        )
+        .build()
+        .unwrap();
+        let new_subst_cost = SCB::new(subst_model.clone(), new_phylo).build().unwrap();
+        let new_cost = new_indel_cost.cost() + new_subst_cost.cost();
 
         prev_cost = result.cost.clone();
-        assert_relative_eq!(new_cost.cost(), result.final_cost, epsilon = 1e-7);
+        assert_relative_eq!(new_cost, result.final_cost, epsilon = 1e-7);
     }
 }
