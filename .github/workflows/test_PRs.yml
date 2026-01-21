@@ -55,7 +55,7 @@ jobs:
     - name: tests with cargo2junit
       run: |
         cargo test --manifest-path ./phylo/Cargo.toml -- -Z unstable-options --format json --report-time | cargo2junit > results.xml
-    - name: Debug print of results to see failed test. Since PRs from forked repos cannot be published.
+    - name: Debug print of results to see failed test names
       run: |
         cat results.xml
     - name: Publish test results
