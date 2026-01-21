@@ -56,11 +56,17 @@ jobs:
       run: |
         cargo test failing --manifest-path ./phylo/Cargo.toml -- -Z unstable-options --format json --report-time > cargo_test.out
     - name: Display cargo test output 
+      if: always()
       run: |
         cat cargo_test.out 
     - name: Run cargo2junit
+      if: always()
       run: |
         cargo2junit < cargo_test.out > results.xml
+    - name: Display cargo2junit output
+      if: always()
+      run: |
+        cat results.xml
     - name: Publish test results
       uses: EnricoMi/publish-unit-test-result-action@v2
       if: always()
