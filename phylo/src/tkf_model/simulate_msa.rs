@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 
-use anyhow::bail;
 use hashbrown::HashMap;
+use log::warn;
 use rand::{Rng, RngCore, SeedableRng};
 use rand_distr::{Distribution, Geometric};
 
@@ -36,12 +36,19 @@ pub struct TKF92MSASimulationResult {
     logl: f64,
 }
 
+/// All the descendant links associated to a single branch.
 type BranchLinkChildren = Vec<TKFLink>;
+
 struct TKFLink {
+    /// The in the tree the link is associated with.
     node: NodeIdx,
+    /// True if the link is immortal. It's the link to the very left of the sequence.
     is_immortal: bool,
+    /// How many characters are associated to the right of this link.
     length: usize,
+    /// For every child node/branch of this link's node, the descendant links.
     children: Vec<BranchLinkChildren>,
+    /// For every child node/branch of this link's node, the [`LinkFate`] of this link.
     fates: Vec<LinkFate>,
     is_insertion: bool,
 }
@@ -82,8 +89,11 @@ impl TKFLink {
 
 #[derive(Clone)]
 enum LinkFate {
+    /// The link is deleted.
     Deletion,
+    /// The link survives on the branch and produces `usize` many insertions to the right of it.
     Homolog(usize),
+    /// The link is deleted but produces `usize` many insertions to the right of it.
     NonHomolog(usize),
 }
 
@@ -131,56 +141,105 @@ impl<Q: QMatrix, R: Rng + SeedableRng + RngCore> TKF92MSASimulator<Q, R> {
             msa: result.msa.clone(),
             tree: self.tree.clone(),
         };
+        // TODO: wait until the tkf tree seach cost pr is merged, then i can use that here
         Ok(())
     }
 
-    fn sample_tkf_link_fate(&self, time: f64) -> Result<LinkFate> {
+    fn sample_tkf_link_fate(&self, time: f64) -> LinkFate {
         let uniform_sample = self.rng.borrow_mut().random::<f64>();
         let lambda = self.indel_model.lambda();
         let mu = self.indel_model.mu();
         let beta = beta(lambda, mu, time);
         let n_0 = n0(self.indel_model.mu(), beta);
+        let homolog_prob_integrated = homolog_prob_integrated(mu, time);
+        let non_homolog_prob_integrated = non_homolog_prob_integrated(mu, beta, time);
+        debug_assert!(
+            (n_0 + homolog_prob_integrated + non_homolog_prob_integrated - 1.0).abs() < 1e-10
+        );
+        // Link is deleted without producing any insertions
         if uniform_sample < n_0 {
             *self.cumulative_logl.borrow_mut() += (n_0).ln();
-            return Ok(LinkFate::Deletion);
+            LinkFate::Deletion
+        } else if uniform_sample < n_0 + homolog_prob_integrated {
+            // Link survives homologously
+            let adjusted_sample = uniform_sample - n_0;
+            self.sample_homolog_fate(time, adjusted_sample)
+        } else {
+            // Link is deleted but has non-homologous insertions
+            debug_assert!(1.0 - uniform_sample < non_homolog_prob_integrated);
+            let adjusted_sample = uniform_sample - n_0 - homolog_prob_integrated;
+            self.sample_non_homolog_fate(time, adjusted_sample)
         }
-        let mut cumulative_prob = n_0;
-        for n in 1..self.max_insertion_length {
+    }
+
+    fn sample_homolog_fate(&self, time: f64, uniform_sample: f64) -> LinkFate {
+        let lambda = self.indel_model.lambda();
+        let mu = self.indel_model.mu();
+        let beta = beta(lambda, mu, time);
+        let mut cumulative_prob = 0.0;
+        for n in 1..self.max_insertion_length + 1 {
             let homolog_prob = homolog_prob(n, lambda, mu, beta, time);
             cumulative_prob += homolog_prob;
             if uniform_sample < cumulative_prob {
                 *self.cumulative_logl.borrow_mut() += homolog_prob.ln();
-                return Ok(LinkFate::Homolog(n - 1)); // n-1 bc we are not counting the original link
+                return LinkFate::Homolog(n - 1); // n - 1 because we are not counting the original link
             }
+        }
+        // didnt return in the loop, capping insertion at length max_insertion_length
+        let homolog_prob_integrated = homolog_prob_integrated(mu, time);
+        let homolog_prob = homolog_prob_integrated - cumulative_prob;
+        *self.cumulative_logl.borrow_mut() += homolog_prob.ln();
+        warn!(
+            "Capping homologous insertion length at {}",
+            self.max_insertion_length
+        );
+        LinkFate::Homolog(self.max_insertion_length)
+    }
+
+    fn sample_non_homolog_fate(&self, time: f64, uniform_sample: f64) -> LinkFate {
+        let lambda = self.indel_model.lambda();
+        let mu = self.indel_model.mu();
+        let beta = beta(lambda, mu, time);
+        let mut cumulative_prob = 0.0;
+        for n in 1..self.max_insertion_length {
             let non_homolog_prob = non_homolog_prob(n, lambda, mu, beta, time);
             cumulative_prob += non_homolog_prob;
             if uniform_sample < cumulative_prob {
                 *self.cumulative_logl.borrow_mut() += non_homolog_prob.ln();
-                return Ok(LinkFate::NonHomolog(n));
+                return LinkFate::NonHomolog(n);
             }
         }
-        bail!("Sampling TKF92 link fate exceeded maximum insertion length");
+        // didnt return ind the loop, capping insertion at length max_insertion_length
+        let non_homolog_prob_integrated = non_homolog_prob_integrated(mu, beta, time);
+        let non_homolog_prob = non_homolog_prob_integrated - cumulative_prob;
+        *self.cumulative_logl.borrow_mut() += non_homolog_prob.ln();
+        warn!(
+            "Capping non-homologous insertion length at {}",
+            self.max_insertion_length
+        );
+        LinkFate::NonHomolog(self.max_insertion_length)
     }
 
-    fn sample_tkf_immortal_link_fate(&self, time: f64) -> Result<usize> {
+    // TODO: this is geometric and can be sampled directly
+    // However, then I should also cap the max number of insertions
+    fn sample_tkf_immortal_link_fate(&self, time: f64) -> usize {
         let uniform_sample = self.rng.borrow_mut().random::<f64>();
         let lambda = self.indel_model.lambda();
         let beta = beta(lambda, self.indel_model.mu(), time);
         let mut comulative_prob = 0.0;
         for n in 1..self.max_insertion_length {
-            // TODO: the immortal link distribution is just geometric, we can sample directly.
-            // Perhaps also cap the max number of insertions. How? Also bail? or capping?
             let immortal_prob = immortal_prob(n, lambda, beta);
             comulative_prob += immortal_prob;
             if uniform_sample < comulative_prob {
                 *self.cumulative_logl.borrow_mut() += immortal_prob.ln();
-                return Ok(n - 1);
+                return n - 1;
             }
         }
-        bail!("Sampling TKF92 immortal link fate exceeded maximum insertion length");
+        let immortal_prob = 1.0 - comulative_prob;
+        *self.cumulative_logl.borrow_mut() += immortal_prob.ln();
+        self.max_insertion_length
     }
 
-    // geometric and can be zero
     fn sample_num_root_links(&self) -> usize {
         let prob_of_success = 1.0 - self.indel_model.lambda() / self.indel_model.mu(); // ie stopping the links
         let geom = Geometric::new(prob_of_success).unwrap();
@@ -196,12 +255,12 @@ impl<Q: QMatrix, R: Rng + SeedableRng + RngCore> TKF92MSASimulator<Q, R> {
         let choice = geom.sample(&mut self.rng.borrow_mut().rng);
         let prob = (1.0 - prob_of_success).powi((choice) as i32) * prob_of_success;
         *self.cumulative_logl.borrow_mut() += prob.ln();
-        (choice + 1) as usize
+        (choice + 1) as usize // each fragment contains at least one character
     }
 
     fn build_root_links(&self) -> Vec<TKFLink> {
         let num_root_links = self.sample_num_root_links();
-        let mut root_links = Vec::with_capacity(num_root_links + 1); // +1 for immortal link
+        let mut root_links = Vec::with_capacity(num_root_links + 1); // +1 for the immortal link
         root_links.push(TKFLink::new_immortal(self.tree.root));
         for _ in 0..num_root_links {
             let length = self.sample_fragment_length();
@@ -230,16 +289,17 @@ impl<Q: QMatrix, R: Rng + SeedableRng + RngCore> TKF92MSASimulator<Q, R> {
                 link.children[branch_id].push(child_link);
                 self.evolve_link_down_tree(link.children[branch_id].last_mut().unwrap());
                 // new insertions
-                let num_insertions = self.sample_tkf_immortal_link_fate(branch_length).unwrap();
+                let num_insertions = self.sample_tkf_immortal_link_fate(branch_length);
                 self.evolve_insertions(num_insertions, link, branch_id);
             } else {
-                let fate = self.sample_tkf_link_fate(branch_length).unwrap();
+                let fate = self.sample_tkf_link_fate(branch_length);
                 link.fates.push(fate.clone());
                 match fate {
                     LinkFate::Deletion => {
                         // link is deleted, do nothing
                     }
                     LinkFate::Homolog(num_children) => {
+                        // the surviving homologous link
                         let child_link = TKFLink::new(*child_node, link.length);
                         link.children[branch_id].push(child_link);
                         self.evolve_link_down_tree(link.children[branch_id].last_mut().unwrap());
@@ -247,9 +307,9 @@ impl<Q: QMatrix, R: Rng + SeedableRng + RngCore> TKF92MSASimulator<Q, R> {
                         self.evolve_insertions(num_children, link, branch_id);
                     }
                     LinkFate::NonHomolog(num_children) => {
+                        // original link is deleted, do not evolve_link_down_tree
                         // new insertions
                         self.evolve_insertions(num_children, link, branch_id);
-                        // original link is deleted, do not evolve_link_down_tree
                     }
                 }
             }
@@ -264,22 +324,31 @@ impl<Q: QMatrix, R: Rng + SeedableRng + RngCore> TKF92MSASimulator<Q, R> {
         root_links
     }
 
-    fn insertion_gaps(
+    /// Used for the conversion of the link structure to an MSA.
+    /// Inserts gaps in the MSA
+    ///
+    fn insertion_gaps(&self, length: usize, msa: &mut Seqs, insertion_node: &NodeIdx) {
+        self.insertion_gaps_subtree(length, msa, &self.tree.root, insertion_node);
+    }
+
+    fn insertion_gaps_subtree(
         &self,
         length: usize,
         msa: &mut Seqs,
-        node: &NodeIdx,
+        subtree_node: &NodeIdx,
         insertion_node: &NodeIdx,
     ) {
-        if node == insertion_node {
+        if subtree_node == insertion_node {
             return;
         }
-        msa.get_mut(node)
+        msa.get_mut(subtree_node)
             .unwrap()
             .extend_from_slice(&vec![NOTHING_CHAR; length]);
-        msa.get_mut(node).unwrap().push(FRAGMENT_BOUNDARY_CHAR);
-        for child_node in self.tree.children(node) {
-            self.insertion_gaps(length, msa, child_node, insertion_node);
+        msa.get_mut(subtree_node)
+            .unwrap()
+            .push(FRAGMENT_BOUNDARY_CHAR);
+        for child_node in self.tree.children(subtree_node) {
+            self.insertion_gaps_subtree(length, msa, child_node, insertion_node);
         }
     }
 
@@ -365,12 +434,7 @@ impl<Q: QMatrix, R: Rng + SeedableRng + RngCore> TKF92MSASimulator<Q, R> {
                     // normal link
                     if current_link.is_insertion {
                         // this should not be called on the root
-                        self.insertion_gaps(
-                            current_link.length,
-                            msa,
-                            &self.tree.root,
-                            &current_link.node,
-                        );
+                        self.insertion_gaps(current_link.length, msa, &current_link.node);
                     }
                     for (branch_id, child_links) in current_link.children.iter().enumerate() {
                         match &current_link.fates[branch_id] {
@@ -414,11 +478,21 @@ impl<Q: QMatrix, R: Rng + SeedableRng + RngCore> TKF92MSASimulator<Q, R> {
     }
 }
 
+fn homolog_prob_integrated(mu: f64, time: f64) -> f64 {
+    (-mu * time).exp()
+}
+
+fn non_homolog_prob_integrated(mu: f64, beta: f64, time: f64) -> f64 {
+    1.0 - (-mu * time).exp() - mu * beta
+}
+
+/// In the TKF model n is at least 1 (the original link)
 fn homolog_prob(n: usize, lambda: f64, mu: f64, beta: f64, time: f64) -> f64 {
     let h1_val = h1(lambda, mu, beta, time);
     h1_val * (lambda * beta).powi((n - 1) as i32)
 }
 
+/// In the TKF model n is at least 1 bc otherwise we should have used n0
 fn non_homolog_prob(n: usize, lambda: f64, mu: f64, beta: f64, time: f64) -> f64 {
     let t1 = 1.0 - (-mu * time).exp() - mu * beta;
     let t2 = 1.0 - lambda * beta;
@@ -426,6 +500,7 @@ fn non_homolog_prob(n: usize, lambda: f64, mu: f64, beta: f64, time: f64) -> f64
     t1 * t2 * t3
 }
 
+/// In the TKF model n is at least 1 because the immortal link cannot die
 fn immortal_prob(n: usize, lambda: f64, beta: f64) -> f64 {
     (1.0 - lambda * beta) * (lambda * beta).powi((n - 1) as i32)
 }
@@ -434,20 +509,37 @@ fn immortal_prob(n: usize, lambda: f64, beta: f64) -> f64 {
 #[cfg_attr(coverage, coverage(off))]
 mod private_tests {
     use approx::assert_relative_eq;
+    use rstest::rstest;
 
     use crate::alignment::AncestralAlignment;
     use crate::phylo_info::PhyloInfo;
     use crate::random::DefaultGenerator;
     use crate::substitution_models::{SubstModel, JC69};
-    use crate::tkf_model::beta;
-    use crate::tkf_model::h1;
-    use crate::tkf_model::log_i1;
-    use crate::tkf_model::log_n1;
-    use crate::tkf_model::n0;
-    use crate::tkf_model::tests::get_mapping_for_any_node;
-    use crate::tkf_model::TKFModel;
-    use crate::tkf_model::{simulate_msa::TKF92MSASimulator, TKF92IndelModel};
+    use crate::tkf_model::{
+        beta, h1, log_i1, log_n1, n0, tests::get_mapping_for_any_node, TKFModel,
+    };
     use crate::tree::tree_parser::from_newick;
+
+    use super::*;
+
+    #[rstest]
+    #[case(0.1, 0.2, 0.5)]
+    #[case(0.5, 0.7, 1.0)]
+    #[case(1.0, 1.5, 0.0001)]
+    fn tkf_integrated_probs(#[case] lambda: f64, #[case] mu: f64, #[case] time: f64) {
+        // arrange
+        let beta = beta(lambda, mu, time);
+        //act
+        let homolog_integrated = homolog_prob_integrated(mu, time);
+        let non_homolog_integrated = non_homolog_prob_integrated(mu, beta, time);
+        let n0 = n0(mu, beta);
+        // assert
+        assert_relative_eq!(
+            homolog_integrated + non_homolog_integrated + n0,
+            1.0,
+            epsilon = 1e-10
+        );
+    }
 
     #[cfg(test)]
     fn naive_merge(set1: &[usize], set2: &[usize]) -> Vec<usize> {
@@ -551,7 +643,7 @@ mod private_tests {
             jc69,
             tree.clone(),
             DefaultGenerator::default(),
-            10, // max insertion length
+            12, // max insertion length
         );
         let (msa, logl, fragmentation) = simulator.simulate_msa();
         assert_eq!(msa.len(), 7);
