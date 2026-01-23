@@ -38,6 +38,16 @@ impl TKF92IndelModel {
     pub fn r(&self) -> f64 {
         self.params[usize::from(TKF92Parameters::R)]
     }
+
+    #[cfg(test)]
+    pub(crate) fn new(lambda: f64, mu: f64, r: f64) -> Self {
+        let valid_r = validate_r(r);
+        Self {
+            params: vec![lambda, mu, valid_r],
+            log_r: valid_r.ln(),
+            one_minus_r_over_r: (1.0 - valid_r) / valid_r,
+        }
+    }
 }
 
 impl Default for TKF92IndelModel {
