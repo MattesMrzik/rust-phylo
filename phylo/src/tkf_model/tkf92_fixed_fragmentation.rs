@@ -17,6 +17,7 @@ use crate::{alignment::AncestralAlignment, tkf_model::TKFModel};
 /// which means that the provided fragmentation will be regarded as the true fragmentation.
 /// This is different to the [TKF92IndelModel](`crate::tkf_model::TKF92IndelModel`), which integrates
 /// over all possible fragmentations that confirm with the observed alignment.
+#[cfg(test)]
 #[derive(Clone, Debug, PartialEq)]
 pub struct TKF92FixedIndelModel {
     pub(super) params: Vec<f64>,
@@ -26,12 +27,14 @@ pub struct TKF92FixedIndelModel {
     pub(super) fragmentation: Vec<usize>,
 }
 
+#[cfg(test)]
 impl TKF92FixedIndelModel {
     pub fn r(&self) -> f64 {
         self.params[usize::from(TKF92Parameters::R)]
     }
 }
 
+#[cfg(test)]
 impl TKFModel for TKF92FixedIndelModel {
     fn lambda(&self) -> f64 {
         self.params[usize::from(TKF92Parameters::Lambda)]
@@ -94,6 +97,7 @@ impl TKFModel for TKF92FixedIndelModel {
 /// Assumes both inputs are sorted and within MSA length.
 /// This is basically a union of the two sets and then returning the sorted result.
 /// This implementations achieves a better run time than the naive approach.
+#[cfg(test)]
 pub(super) fn merge_fragmentation_with_blocks(
     fragmentation: &[usize],
     blocks: &[usize],
@@ -129,6 +133,7 @@ pub(super) fn merge_fragmentation_with_blocks(
     merged
 }
 
+#[cfg(test)]
 impl Display for TKF92FixedIndelModel {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
@@ -143,6 +148,7 @@ impl Display for TKF92FixedIndelModel {
 }
 
 /// Builder for the cost using the [`TKF92FixedIndelModel`].
+#[cfg(test)]
 pub struct TKF92FixedIndelCostBuilder<AA: AncestralAlignment> {
     lambda: f64,
     mu: f64,
@@ -152,6 +158,7 @@ pub struct TKF92FixedIndelCostBuilder<AA: AncestralAlignment> {
 }
 
 /// Removes duplicates and out-of-bounds entries.
+#[cfg(test)]
 pub(super) fn validate_fragmentation(fragmentation: &[usize], msa_len: usize) -> Vec<usize> {
     let mut fragmentation = fragmentation.to_vec();
     let original_len = fragmentation.len();
@@ -173,6 +180,7 @@ pub(super) fn validate_fragmentation(fragmentation: &[usize], msa_len: usize) ->
     fragmentation.to_vec()
 }
 
+#[cfg(test)]
 impl<AA: AncestralAlignment> TKF92FixedIndelCostBuilder<AA> {
     pub fn new(
         lambda: f64,

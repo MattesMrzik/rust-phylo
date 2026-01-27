@@ -29,9 +29,8 @@ pub struct TKF91IndelModel {
     params: Vec<f64>,
 }
 
-impl TKF91IndelModel {
-    #[cfg(test)]
-    pub(super) fn default() -> Self {
+impl Default for TKF91IndelModel {
+    fn default() -> Self {
         Self {
             params: vec![DEFAULT_LAMBDA, DEFAULT_MU],
         }

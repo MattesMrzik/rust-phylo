@@ -15,6 +15,7 @@ use crate::Result;
 /// [TKF92IndelModel](`super::TKF92IndelModel`) with additional block borders (and without a substitution model),
 /// which means that the provided blocks will be used in addition to the blocks determined from
 /// the alignment, see [`super::TKFModel::get_blocks`].
+#[cfg(test)]
 #[derive(Clone, Debug, PartialEq)]
 pub struct TKF92IndelModelAddBlocks {
     params: Vec<f64>,
@@ -26,12 +27,14 @@ pub struct TKF92IndelModelAddBlocks {
     additional_blocks: Vec<usize>,
 }
 
+#[cfg(test)]
 impl TKF92IndelModelAddBlocks {
     pub fn r(&self) -> f64 {
         self.params[usize::from(TKF92Parameters::R)]
     }
 }
 
+#[cfg(test)]
 impl TKFModel for TKF92IndelModelAddBlocks {
     fn lambda(&self) -> f64 {
         self.params[usize::from(TKF92Parameters::Lambda)]
@@ -93,6 +96,7 @@ impl TKFModel for TKF92IndelModelAddBlocks {
     }
 }
 
+#[cfg(test)]
 impl Display for TKF92IndelModelAddBlocks {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
@@ -107,6 +111,7 @@ impl Display for TKF92IndelModelAddBlocks {
 }
 
 /// Builder for the cost using the [`TKF92IndelModelAddBlocks`].
+#[cfg(test)]
 pub struct TKF92IndelAddBlocksCostBuilder<AA: AncestralAlignment> {
     lambda: f64,
     mu: f64,
@@ -115,6 +120,7 @@ pub struct TKF92IndelAddBlocksCostBuilder<AA: AncestralAlignment> {
     additional_blocks: Vec<usize>,
 }
 
+#[cfg(test)]
 impl<AA: AncestralAlignment> TKF92IndelAddBlocksCostBuilder<AA> {
     pub fn new(
         lambda: f64,

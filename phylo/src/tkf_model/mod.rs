@@ -13,10 +13,6 @@ pub mod reestimate;
 pub use reestimate::*;
 pub mod tkf_indel;
 pub use tkf_indel::*;
-pub mod tkf92_fixed_fragmentation;
-pub use tkf92_fixed_fragmentation::*;
-pub mod tkf92_additional_blocks;
-pub use tkf92_additional_blocks::*;
 
 #[derive(Clone, Debug)]
 pub struct TKFCost<Q: QMatrix + Display, T: TKFModel, AA: AncestralAlignment> {
@@ -116,3 +112,19 @@ mod tests;
 #[cfg(test)]
 #[cfg_attr(coverage, coverage(off))]
 mod brute_force_ancestors_tests;
+
+#[cfg(test)]
+#[cfg_attr(coverage, coverage(off))]
+mod tkf92_additional_blocks;
+
+#[cfg(test)]
+#[cfg_attr(coverage, coverage(off))]
+pub use tkf92_additional_blocks::*;
+
+#[cfg(test)]
+#[cfg_attr(coverage, coverage(off))]
+mod tkf92_fixed_fragmentation;
+
+#[cfg(test)]
+#[cfg_attr(coverage, coverage(off))]
+pub use tkf92_fixed_fragmentation::*;

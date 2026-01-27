@@ -6,13 +6,15 @@ use hashbrown::HashSet;
 use log::warn;
 use num_enum::{FromPrimitive, IntoPrimitive};
 
+use crate::alignment::AncestralAlignment;
 use crate::likelihood::{ParamRange, PARAM_RANGE_UNIT_INTERVAL_EXCLUSIVE};
+use crate::phylo_info::PhyloInfo;
 use crate::substitution_models::{QMatrix, SubstModel, SubstitutionCostBuilder as SCB};
 use crate::tkf_model::{
-    validate_lambda_and_mu, TKFCost, TKFIndelCost, TKFIndelModelInfo, DEFAULT_R,
+    validate_lambda_and_mu, TKFCost, TKFIndelCost, TKFIndelModelInfo, TKFModel, DEFAULT_LAMBDA,
+    DEFAULT_MU, DEFAULT_R,
 };
 use crate::Result;
-use crate::{alignment::AncestralAlignment, phylo_info::PhyloInfo, tkf_model::TKFModel};
 
 #[derive(Debug, Eq, PartialEq, FromPrimitive, IntoPrimitive)]
 #[repr(usize)]
@@ -37,11 +39,10 @@ impl TKF92IndelModel {
     pub fn r(&self) -> f64 {
         self.params[usize::from(TKF92Parameters::R)]
     }
+}
 
-    #[cfg(test)]
-    pub(super) fn default() -> Self {
-        use crate::tkf_model::{DEFAULT_LAMBDA, DEFAULT_MU};
-
+impl Default for TKF92IndelModel {
+    fn default() -> Self {
         let r = DEFAULT_R;
         Self {
             params: vec![DEFAULT_LAMBDA, DEFAULT_MU, r],
