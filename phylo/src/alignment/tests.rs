@@ -528,7 +528,7 @@ fn update_ancestral_maps_fails_on_leaf() {
     let node_id = "A1";
     let node_idx = &tree.idx(node_id);
     // fails because A1 is a leaf and we call update to ancestral map
-    msa.update_ancestral_map(node_idx, new_map.clone());
+    msa.update_ancestral_map(node_idx, new_map);
 }
 
 #[test]
@@ -549,5 +549,5 @@ fn update_ancestral_maps_fails_wrong_length() {
     let new_map = align!(b"A-AAAA-A");
     let node_id = "I3";
     let node_idx = &tree.idx(node_id);
-    msa.update_ancestral_map(node_idx, new_map.clone());
+    msa.update_ancestral_map(node_idx, new_map);
 }
