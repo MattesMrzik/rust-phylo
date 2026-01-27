@@ -324,7 +324,7 @@ fn load_precalculated_brute_force_maxes(file_path: &Path, iteration_info: &mut V
         println!("Precalculated brute force maxes file not found at {file_path:?}. Not loading any precalculated values.");
         return;
     }
-    let rerun_hint = "Consider rerunning with recompute-brute-force-max-ancestral-seqs feature";
+    let rerun_hint = "Consider rerunning with recompute-brute-force-ancestors feature";
     for line in contents.unwrap().lines() {
         let parts: Vec<&str> = line.trim().split(',').collect();
         if parts.len() != 3 {
@@ -364,7 +364,7 @@ fn calc_or_lookup_brute_force_max(
     // lookup of pre-calculated value in iteration_info
     if iteration < iteration_info.len() {
         let saved = &iteration_info[iteration];
-        let hint = "Consider rerunning with recompute-brute-force-max-ancestral-seqs feature";
+        let hint = "Consider rerunning with recompute-brute-force-ancestors feature";
         assert_eq!(
             saved.iteration, iteration,
             "Mismatched iteration number in save file {:?} at iteration {iteration}. {hint}",
@@ -409,7 +409,7 @@ fn tkf92_reestimate_large_tree_for_file_iterative() {
 
     // Handle the pre-calculated brute force maxes file
     let precalculated_file = dir.join("precalculated_brute_force_maxes.csv");
-    if cfg!(feature = "recompute-brute-force-max-ancestral-seqs") {
+    if cfg!(feature = "recompute-brute-force-ancestors") {
         delete_existing_brute_force_max_file(&precalculated_file);
     }
     let mut iteration_info = Vec::<IterationInfo>::new();

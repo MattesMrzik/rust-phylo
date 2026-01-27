@@ -26,7 +26,7 @@ precomputed-test-results = []
 par-regraft = ["dep:rayon"]
 par-regraft-chunk = ["dep:rayon"]
 par-regraft-manual = ["dep:rayon"]
-recompute-brute-force-max-ancestral-seqs = []
+recompute-brute-force-ancestors = []
 multi-thread = ["dep:rayon"]
 
 [lib]
