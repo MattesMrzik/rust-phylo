@@ -477,6 +477,10 @@ impl AncestralAlignment for MASA {
     /// This is needed because with the [TKF models](`crate::tkf_model::TKFModel`),
     /// we need to [re-estimate](`crate::tkf_model::reestimate::EdgeSeqsReestimator::reestimate`)
     /// the ancestral maps after a [tree move](crate::likelihood::TreeSearchCost::update_tree) was applied.
+    /// Iterating through the aligned sequence (i.e., the old and new mappings), if the
+    /// presence of a character is maintained the actual character from the old sequence is
+    /// taken. If a character is newly introduced (i.e., was a gap before), an ambiguous
+    /// character is inserted.
     fn update_ancestral_map(&mut self, node_idx: &NodeIdx, map: Mapping) {
         if map.len() != self.len() {
             panic!(
@@ -485,23 +489,8 @@ impl AncestralAlignment for MASA {
                 self.len()
             );
         }
-        if let Some(anc_map) = self.ancestral_maps.get_mut(node_idx) {
-            let id = &self.idx_to_id[usize::from(*node_idx)];
-            let old_record = self.ancestral_seqs.record_by_id(id);
-            let old_seq = old_record.seq();
-            let mut new_seq = Vec::new();
-            for (old_site, new_site) in anc_map.iter_mut().zip(map.iter()) {
-                if let Some(old_site_id) = old_site {
-                    if new_site.is_some() {
-                        new_seq.push(old_seq[*old_site_id]);
-                    }
-                } else if new_site.is_some() {
-                    new_seq.push(AMB_CHAR);
-                }
-            }
-            *anc_map = map;
-            let new_record = record!(id, old_record.desc(), &new_seq);
-            self.ancestral_seqs.update_record(id, new_record);
+        if self.ancestral_maps.get(node_idx).is_some() {
+            self.update_ancestral_map_unchecked(node_idx, map);
         } else {
             panic!("NodeIdx {node_idx} is not an internal node");
         }
@@ -573,6 +562,37 @@ impl AncestralAlignment for MASA {
             idx_to_id,
             internal_alignments: HashMap::<NodeIdx, PairwiseAlignment>::new(),
         }
+    }
+}
+
+impl MASA {
+    fn update_ancestral_map_unchecked(&mut self, node_idx: &NodeIdx, new_map: Mapping) {
+        let old_map = self.ancestral_maps.get_mut(node_idx).unwrap();
+        let id = &self.idx_to_id[usize::from(*node_idx)];
+        let old_record = self.ancestral_seqs.record_by_id(id);
+        let old_seq = old_record.seq();
+        // The length of this 'new_seq' vector will be equal to the number of Some(_) in 'map'
+        // which indicates the presence and absence of characters.
+        let mut new_seq = Vec::new();
+        for (old_site, new_site) in old_map.iter_mut().zip(new_map.iter()) {
+            if let Some(old_site_id) = old_site {
+                // The presence of the character is maintained
+                if new_site.is_some() {
+                    // Character is kept
+                    new_seq.push(old_seq[*old_site_id]);
+                }
+                // The presence of the character is not maintained, no character is added to new_seq
+            }
+            // A character is newly introduced
+            else if new_site.is_some() {
+                // Through the parameter 'map' we only know that a character is introduced, but
+                // not which. Therefore, we insert an ambiguous character.
+                new_seq.push(AMB_CHAR);
+            }
+        }
+        *old_map = new_map;
+        let new_record = record!(id, old_record.desc(), &new_seq);
+        self.ancestral_seqs.update_record(id, new_record);
     }
 }
 
