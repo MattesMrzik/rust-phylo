@@ -395,7 +395,7 @@ fn calc_or_lookup_brute_force_max(
 #[test]
 #[cfg_attr(feature = "ci_coverage", ignore)]
 fn tkf92_reestimate_large_tree_for_file_iterative() {
-    let dir = Path::new("data/tkf/brute_force_max/");
+    let dir = Path::new("data/tkf/reestimate/");
     let msa = dir.join("masa.fasta");
     let tree = dir.join("tree.newick");
 

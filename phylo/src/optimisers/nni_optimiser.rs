@@ -49,8 +49,6 @@ impl MoveOptimiser for NniOptimiser {
         let mut max_cost_info = None;
         let mut max_cost = f64::MIN;
         for child_idx in &cost.tree().node(node_idx).children {
-            // TODO: parallelization?
-            // TODO: can we avoid cloning the whole cost.model_info?
             let move_cost_info =
                 calc_nni_cost_with_blen_opt(node_idx, child_idx, base_cost, cost.clone())?;
             if move_cost_info.cost > max_cost {
