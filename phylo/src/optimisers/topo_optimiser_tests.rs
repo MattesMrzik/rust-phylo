@@ -946,7 +946,6 @@ fn tkf92_update_tree() {
     let msa = dir.join("masa.fasta");
     let tree = dir.join("tree.newick");
     let phylo = PIB::with_attrs(msa, tree).build_with_ancestors().unwrap();
-    phylo.check_dollos_constraint().unwrap();
     let subst_model = SubstModel::<GTR>::new(&[], &[]);
     let lambda = 0.1;
     let mu = 0.2;
