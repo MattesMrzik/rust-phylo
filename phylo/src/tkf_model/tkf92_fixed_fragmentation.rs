@@ -410,7 +410,7 @@ mod private_tests {
         // simulation. Note that, we do not remove non-emitting columns from the alignment,
         // since the simulation probability includes them.
         let dir = Path::new("data/tkf/fixed_fragments/");
-        let sequence_file = dir.join("masa.fasta");
+        let sequence_file = dir.join("masa_dna.fasta");
         let tree_file = dir.join("tree.newick");
         let phylo_info = PhyloInfoBuilder::with_attrs(sequence_file, tree_file)
             .build_with_ancestors()
