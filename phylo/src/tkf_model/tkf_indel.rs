@@ -450,6 +450,7 @@ impl<T: TKFModel, AA: AncestralAlignment> TreeSearchCost for TKFIndelCost<T, AA>
         self.phylo.tree = tree;
         if update_due_to_nni {
             let v2 = self.tree().nodes[dirty_nodes[0]].idx;
+            // TODO: see issue #142 https://github.com/acg-team/rust-phylo/issues/142
             let rng = &mut DefaultGenerator::default();
             let mut reestimator = EdgeSeqsReestimator::new(self, rng);
             let dp_logl = reestimator.reestimate(&v2);
