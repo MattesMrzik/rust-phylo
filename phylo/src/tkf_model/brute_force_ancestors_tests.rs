@@ -6,7 +6,7 @@ use approx::assert_relative_eq;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 
-#[cfg(feature = "multi-thread")]
+#[cfg(feature = "multithread-brute-force-asr")]
 use rayon::prelude::*;
 
 use crate::alignment::{Alignment, AncestralAlignment, MASA};
@@ -30,7 +30,7 @@ use crate::tree::NodeIdx;
 ///   alignment, the outer vector is over blocks, the inner vector is over possible assignments for
 ///   the edge.
 ///
-/// # Examples
+/// # Example
 ///  ```
 ///  let possibilities= vec![vec![(true, true), (true, false)], vec![(false, false)]];
 ///  let first = edge_seqs(0, &possibilities); // returns vec![(true, true), (false, false)]
@@ -219,7 +219,7 @@ fn brute_force_max_for_possibilities_single_thread<T: TKFModel>(
 
 // single thread calculation
 #[cfg(test)]
-#[cfg(not(feature = "multi-thread"))]
+#[cfg(not(feature = "multithread-brute-force-asr"))]
 fn brute_force_max<T: TKFModel + Send>(mut cost: TKFIndelCost<T, MASA>, v2_idx: &NodeIdx) -> f64 {
     let possible_edge_assignments = get_edge_assignment_possibilities(&cost, v2_idx);
     let number_of_possibilities = number_of_possibilities(&possible_edge_assignments);
@@ -238,7 +238,7 @@ fn brute_force_max<T: TKFModel + Send>(mut cost: TKFIndelCost<T, MASA>, v2_idx: 
 /// The parameter `possible_edge_assignments` contains for each block all possible edge
 /// assignments for the two nodes (v1 and v2).
 #[cfg(test)]
-#[cfg(all(test, feature = "multi-thread"))]
+#[cfg(all(test, feature = "multithread-brute-force-asr"))]
 fn brute_force_max_for_possibilities_multi_thread(
     possible_edge_assignments: Vec<Vec<(bool, bool)>>,
     number_of_possibilities: usize,
@@ -273,7 +273,7 @@ fn brute_force_max_for_possibilities_multi_thread(
 
 // multi thread  calculation
 #[cfg(test)]
-#[cfg(feature = "multi-thread")]
+#[cfg(feature = "multithread-brute-force-asr")]
 fn brute_force_max<T: TKFModel + Send>(mut cost: TKFIndelCost<T, MASA>, v2_idx: &NodeIdx) -> f64 {
     let possible_edge_assignments = get_edge_assignment_possibilities(&cost, v2_idx);
     let number_of_possibilities = number_of_possibilities(&possible_edge_assignments);
@@ -324,7 +324,7 @@ fn load_precalculated_brute_force_maxes(file_path: &Path, iteration_info: &mut V
         println!("Precalculated brute force maxes file not found at {file_path:?}. Not loading any precalculated values.");
         return;
     }
-    let rerun_hint = "Consider rerunning with recompute-brute-force-ancestors feature";
+    let rerun_hint = "Consider rerunning with recompute-brute-force-asr feature";
     for line in contents.unwrap().lines() {
         let parts: Vec<&str> = line.trim().split(',').collect();
         if parts.len() != 3 {
@@ -364,7 +364,7 @@ fn calc_or_lookup_brute_force_max(
     // lookup of pre-calculated value in iteration_info
     if iteration < iteration_info.len() {
         let saved = &iteration_info[iteration];
-        let hint = "Consider rerunning with recompute-brute-force-ancestors feature";
+        let hint = "Consider rerunning with recompute-brute-force-asr feature";
         assert_eq!(
             saved.iteration, iteration,
             "Mismatched iteration number in save file {:?} at iteration {iteration}. {hint}",
@@ -409,7 +409,7 @@ fn tkf92_reestimate_large_tree_for_file_iterative() {
 
     // Handle the pre-calculated brute force maxes file
     let precalculated_file = dir.join("precalculated_brute_force_maxes.csv");
-    if cfg!(feature = "recompute-brute-force-ancestors") {
+    if cfg!(feature = "recompute-brute-force-asr") {
         delete_existing_brute_force_max_file(&precalculated_file);
     }
     let mut iteration_info = Vec::<IterationInfo>::new();
