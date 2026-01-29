@@ -386,11 +386,11 @@ where
                         // meaning, so we can just skip all other `del_or_not` combinations.
                         continue;
                     }
-                    let (max_prev, argmax) =
-                        self.max_over_previous(&q_del_or_not, &events, block_id);
-                    if max_prev == f64::NEG_INFINITY {
+                    let Some((max_prev, argmax)) =
+                        self.max_over_previous(&q_del_or_not, &events, block_id)
+                    else {
                         continue;
-                    }
+                    };
 
                     self.backtracking_table[block_id][dp_index] = argmax;
                     let root_id = usize::from(self.cost.phylo.tree.root);
@@ -413,17 +413,17 @@ where
 
     /// Finds the max over previous `assignments` and `del_or_not` that lead to the provided
     /// `del_or_not`. Since if we have [`Event::Nothing`] we have to pass through the previous `del_or_not`.
-    /// May return [`f64::NEG_INFINITY`] since we consider all possible `del_or_not` that are
+    /// May return [`None`] since we consider all possible `del_or_not` that are
     /// compatible with the `current_events` even though some of these might
     /// not be reached since the previous possible assignment might not produce
     /// these `del_or_not` scenarios. See the implementation of [`EdgeSeqsReestimator::fill_dp_table`].
-    /// More sophisticated filtering could be done, but might add more complexity and is perhaps not worth it.
+    // TODO: More sophisticated filtering could be done, but might add more complexity and is perhaps not worth it.
     fn max_over_previous(
         &mut self,
         current_del_or_not: &QuartetDelOrNot,
         current_events: &QuartetEvents,
         block_id: usize,
-    ) -> (f64, usize) {
+    ) -> Option<(f64, usize)> {
         let mut max = f64::NEG_INFINITY;
         let mut argmaxes = Vec::new();
 
@@ -450,13 +450,13 @@ where
                 }
             }
         }
-        let argmax = if argmaxes.is_empty() {
+        if argmaxes.is_empty() {
             debug_assert!(max == f64::NEG_INFINITY);
-            42 // dummy value, will get ignored anyway since max is -inf
+            None
         } else {
-            argmaxes[self.rng.random_range(0..argmaxes.len())]
-        };
-        (max, argmax)
+            let argmax = argmaxes[self.rng.random_range(0..argmaxes.len())];
+            Some((max, argmax))
+        }
     }
 
     fn quartet_eta(&self, events: &QuartetEvents, prev_events: &[bool]) -> f64 {
