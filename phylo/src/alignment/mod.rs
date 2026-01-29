@@ -571,9 +571,10 @@ impl MASA {
         let id = &self.idx_to_id[usize::from(*node_idx)];
         let old_record = self.ancestral_seqs.record_by_id(id);
         let old_seq = old_record.seq();
-        // The length of this 'new_seq' vector will be equal to the number of Some(_) in 'map'
-        // which indicates the presence and absence of characters.
-        let mut new_seq = Vec::new();
+        // The length of this 'new_seq' vector will be equal to the number 'of Some(_)' in 'map'
+        // which indicates the presence of characters. We can therefore pre-allocate memory that is
+        // needed in the maximal case and then shrink later.
+        let mut new_seq = Vec::with_capacity(new_map.len());
         for (old_site, new_site) in old_map.iter_mut().zip(new_map.iter()) {
             if let Some(old_site_id) = old_site {
                 // The presence of the character is maintained
@@ -591,6 +592,7 @@ impl MASA {
             }
         }
         *old_map = new_map;
+        new_seq.shrink_to_fit();
         let new_record = record!(id, old_record.desc(), &new_seq);
         self.ancestral_seqs.update_record(id, new_record);
     }
