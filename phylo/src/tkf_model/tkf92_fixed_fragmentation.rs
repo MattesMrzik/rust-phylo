@@ -3,6 +3,7 @@ use std::fmt::Display;
 
 use log::warn;
 use num_enum::FromPrimitive;
+use rstest::rstest;
 
 use crate::likelihood::{ParamRange, PARAM_RANGE_UNIT_INTERVAL_EXCLUSIVE};
 use crate::phylo_info::PhyloInfo;
@@ -163,7 +164,7 @@ pub(super) fn validate_fragmentation(fragmentation: &[usize], msa_len: usize) ->
     let mut fragmentation = fragmentation.to_vec();
     let original_len = fragmentation.len();
     if original_len == 0 {
-        return fragmentation.to_vec();
+        return vec![];
     }
     fragmentation.sort();
     // dedup() must be called after sorting
@@ -247,48 +248,19 @@ mod private_tests {
         assert_eq!(validated, vec![1, 3, 4, 13, 15]);
     }
 
-    #[test]
-    fn tkf_merge_fragmentations_with_blocks_case1() {
-        let fragmentation = vec![3, 5, 7, 10];
-        let blocks = vec![5, 10, 12];
+    #[rstest]
+    #[case( vec![3, 5, 7, 10], vec![5, 10, 12], vec![3, 5, 7, 10, 12])]
+    #[case( vec![3, 7, 10, 12], vec![5, 10, 12], vec![3, 5, 7, 10, 12])]
+    #[case( vec![], vec![5, 10, 12], vec![5, 10, 12])]
+    #[case( vec![1, 2, 3, 4], vec![1, 2, 3, 4], vec![1, 2, 3, 4])]
+    #[case( vec![1, 2, 4], vec![1, 2, 3, 4], vec![1, 2, 3, 4])]
+    fn tkf_merge_fragmentations_with_blocks(
+        #[case] fragmentation: Vec<usize>,
+        #[case] blocks: Vec<usize>,
+        #[case] expected: Vec<usize>,
+    ) {
         let merged = merge_fragmentation_with_blocks(&fragmentation, &blocks);
-        assert_eq!(merged, vec![3, 5, 7, 10, 12]);
-        assert_eq!(merged, naive_merge(&fragmentation, &blocks));
-    }
-
-    #[test]
-    fn tkf_merge_fragmentations_with_blocks_case2() {
-        let fragmentation = vec![3, 7, 10, 12];
-        let blocks = vec![5, 10, 12];
-        let merged = merge_fragmentation_with_blocks(&fragmentation, &blocks);
-        assert_eq!(merged, vec![3, 5, 7, 10, 12]);
-        assert_eq!(merged, naive_merge(&fragmentation, &blocks));
-    }
-
-    #[test]
-    fn tkf_merge_fragmentations_with_blocks_case3() {
-        let fragmentation = vec![];
-        let blocks = vec![5, 10, 12];
-        let merged = merge_fragmentation_with_blocks(&fragmentation, &blocks);
-        assert_eq!(merged, vec![5, 10, 12]);
-        assert_eq!(merged, naive_merge(&fragmentation, &blocks));
-    }
-
-    #[test]
-    fn tkf_merge_fragmentations_with_blocks_case4() {
-        let fragmentation = vec![1, 2, 3, 4];
-        let blocks = fragmentation.clone();
-        let merged = merge_fragmentation_with_blocks(&fragmentation, &blocks);
-        assert_eq!(merged, fragmentation.clone());
-        assert_eq!(merged, naive_merge(&fragmentation, &blocks));
-    }
-
-    #[test]
-    fn tkf_merge_fragmentations_with_blocks_case5() {
-        let fragmentation = vec![1, 2, 4];
-        let blocks = vec![1, 2, 3, 4];
-        let merged = merge_fragmentation_with_blocks(&fragmentation, &blocks);
-        assert_eq!(merged, blocks.clone());
+        assert_eq!(merged, expected);
         assert_eq!(merged, naive_merge(&fragmentation, &blocks));
     }
 

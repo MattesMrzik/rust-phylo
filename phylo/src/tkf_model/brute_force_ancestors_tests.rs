@@ -191,8 +191,9 @@ fn get_edge_assignment_possibilities(
         let t2_is_char = t2_mapping[site].is_some();
         let t3_is_char = t3_mapping[site].is_some();
         let t4_is_char = t4_mapping[site].is_some();
+        // TODO: perhaps the return type could be changed such that to_vec is not needed here
         *possible_edge_assignment =
-            possible_assignments_of_edge(t1_is_char, t2_is_char, t3_is_char, t4_is_char);
+            possible_assignments_of_edge(t1_is_char, t2_is_char, t3_is_char, t4_is_char).to_vec();
     }
     possible_edge_assignments
 }
