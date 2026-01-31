@@ -941,7 +941,7 @@ fn example_main_from_readme() {
 
 #[test]
 #[cfg_attr(feature = "ci_coverage", ignore)]
-fn tkf92_update_tree() {
+fn tkf92_topo_opti() {
     let dir = Path::new("data/tkf/reestimate/");
     let msa = dir.join("masa.fasta");
     let tree = dir.join("tree.newick");

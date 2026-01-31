@@ -444,7 +444,7 @@ fn tkf92_reestimate_large_tree_for_file_iterative() {
     let initial_msa_blocking = reestimator.cost.model_info.borrow().blocks.clone();
     for (iteration, node) in random_nodes.into_iter().enumerate() {
         // Perform Dynamic Programming reestimation
-        let max_dp = reestimator.reestimate(node);
+        let max_dp = reestimator.reestimate_unchecked(node);
         // Perform brute force calculation
         let cost_for_brute_force = TKF92IndelAddBlocksCostBuilder::new(
             lambda,

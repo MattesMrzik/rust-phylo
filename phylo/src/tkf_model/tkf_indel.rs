@@ -10,7 +10,7 @@ use nalgebra::{DMatrix, DVector};
 use crate::alignment::AncestralAlignment;
 use crate::likelihood::{ModelSearchCost, ParamRange, TreeSearchCost};
 use crate::phylo_info::PhyloInfo;
-use crate::random::DefaultGenerator;
+use crate::random::FakeGenerator;
 use crate::substitution_models::FreqVector;
 use crate::tkf_model::reestimate::EdgeSeqsReestimator;
 use crate::tree::NodeIdx::{self, Internal, Leaf};
@@ -286,6 +286,14 @@ impl<T: TKFModel, AA: AncestralAlignment> TKFIndelCost<T, AA> {
         }
     }
 
+    pub(super) fn updated_previous_is_deletion(&self, event: Event) -> Option<bool> {
+        match event {
+            Event::Deletion => Some(true),
+            Event::Insertion | Event::Homolog => Some(false),
+            Event::Nothing => None,
+        }
+    }
+
     pub(super) fn reset_cache(&self, node_idx: &NodeIdx) {
         let node_id = usize::from(node_idx);
         let lambda = self.model.lambda();
@@ -373,10 +381,11 @@ impl<T: TKFModel, AA: AncestralAlignment> TKFIndelCost<T, AA> {
     /// Since there can't be a deletion at the root (it has no parent),
     /// this function is only for non-root nodes.
     pub(super) fn eta_for_non_root(&self, node_idx: &NodeIdx, event: Event) -> f64 {
+        let model_info = self.model_info.borrow();
         if matches!(event, Event::Insertion)
-            && self.model_info.borrow().previous_event_deletion[usize::from(node_idx)]
+            && model_info.previous_event_deletion[usize::from(node_idx)]
         {
-            self.model_info.borrow().eta[usize::from(node_idx)]
+            model_info.eta[usize::from(node_idx)]
         } else {
             0.0
         }
@@ -450,10 +459,12 @@ impl<T: TKFModel, AA: AncestralAlignment> TreeSearchCost for TKFIndelCost<T, AA>
         self.phylo.tree = tree;
         if update_due_to_nni {
             let v2 = self.tree().nodes[dirty_nodes[0]].idx;
-            // TODO: see issue #142 https://github.com/acg-team/rust-phylo/issues/142
-            let rng = &mut DefaultGenerator::default();
+            // TODO: For now we use the FakeGenerator to have deterministic behavior, but in the future
+            // we should use a proper RNG here. But pass the RNG from outside and not
+            // create a new one each time, see issue #142 https://github.com/acg-team/rust-phylo/issues/142
+            let rng = &mut FakeGenerator::default();
             let mut reestimator = EdgeSeqsReestimator::new(self, rng);
-            let dp_logl = reestimator.reestimate(&v2);
+            let dp_logl = reestimator.reestimate_unchecked(&v2);
             assert_relative_eq!(dp_logl, self.logl(), epsilon = 1e-10);
         }
         self.phylo.tree.clean();
