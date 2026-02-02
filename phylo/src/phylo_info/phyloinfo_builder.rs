@@ -252,7 +252,7 @@ impl<A: Alignment, AA: AncestralAlignment> PhyloInfoBuilder<A, AA> {
             self.sequence_file.display()
         );
         let sequences = if let Some(alphabet) = self.alphabet {
-            info!("Using provided {} alphabet", alphabet);
+            info!("Using provided {alphabet} alphabet");
             Sequences::with_alphabet(io::read_sequences(&self.sequence_file)?, alphabet)
         } else {
             info!("No alphabet provided, detecting alphabet from sequences");

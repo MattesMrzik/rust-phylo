@@ -326,7 +326,7 @@ impl Tree {
         if let Some(node) = node {
             return Ok(node.idx);
         }
-        bail!("No node with id {} found in the tree", id);
+        bail!("No node with id {id} found in the tree");
     }
 
     #[cfg(test)]

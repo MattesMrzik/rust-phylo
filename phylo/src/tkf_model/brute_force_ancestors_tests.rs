@@ -103,7 +103,7 @@ fn edge_seqs_to_mappings(
 
 #[cfg(test)]
 fn print_progress(i: usize, number_of_possibilities: usize) {
-    if (i + 1) % 10000 == 0 {
+    if (i + 1).is_multiple_of(10000) {
         let percent = i as f64 / number_of_possibilities as f64 * 100.0;
         print!("\r\x1b[2KBrute force progress for current node {percent:.4}%");
         io::stdout().flush().unwrap();

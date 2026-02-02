@@ -187,8 +187,7 @@ impl<AA: AncestralAlignment> PhyloInfo<AA> {
             let mut msg = String::from("Dollo constraint violated in columns:\n");
             for (col_idx, num_insertions) in violating_cols {
                 msg.push_str(&format!(
-                    "  Column {}: {} insertions\n",
-                    col_idx, num_insertions
+                    "  Column {col_idx}: {num_insertions} insertions\n"
                 ));
             }
             bail!(msg);

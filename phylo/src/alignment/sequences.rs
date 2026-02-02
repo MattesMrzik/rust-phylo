@@ -337,7 +337,7 @@ impl Sequences {
         for record in self.iter() {
             let id = record.id();
             if !seen.insert(id) {
-                bail!("Duplicate record id ({}) found in the sequences", id);
+                bail!("Duplicate record id ({id}) found in the sequences");
             }
         }
         Ok(())
