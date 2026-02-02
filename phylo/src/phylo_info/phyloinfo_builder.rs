@@ -251,18 +251,12 @@ impl<A: Alignment, AA: AncestralAlignment> PhyloInfoBuilder<A, AA> {
             "Reading sequences from file {}",
             self.sequence_file.display()
         );
-        let sequences = if self.alphabet.is_none() {
+        let sequences = if let Some(alphabet) = self.alphabet {
+            info!("Using provided {} alphabet", alphabet);
+            Sequences::with_alphabet(io::read_sequences(&self.sequence_file)?, alphabet)
+        } else {
             info!("No alphabet provided, detecting alphabet from sequences");
             Sequences::new(io::read_sequences(&self.sequence_file)?)
-        } else {
-            info!(
-                "Using provided {} alphabet",
-                self.alphabet.as_ref().unwrap()
-            );
-            Sequences::with_alphabet(
-                io::read_sequences(&self.sequence_file)?,
-                self.alphabet.unwrap(),
-            )
         };
         info!("{} sequence(s) read successfully", sequences.len());
         Ok(sequences)
