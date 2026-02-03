@@ -65,4 +65,3 @@ fn tkf_reestimation_fails_for_leaf() {
     let err_msg = reestimator.reestimate(&leaf_idx).unwrap_err().to_string();
     assert!(err_msg.contains("leaf"));
 }
-
