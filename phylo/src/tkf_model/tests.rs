@@ -6,6 +6,7 @@ use crate::alphabets::Alphabet;
 use crate::likelihood::{
     ModelSearchCost, PARAM_RANGE_POSITIVE, PARAM_RANGE_UNIT_INTERVAL_EXCLUSIVE,
 };
+use crate::optimisers::rooted_nni;
 use crate::phylo_info::PhyloInfo;
 use crate::substitution_models::{QMatrixMaker, SubstModel, SubstitutionCostBuilder as SCB};
 use crate::substitution_models::{BLOSUM, GTR, HIVB, HKY, JC69, K80, TN93, WAG};
@@ -913,4 +914,50 @@ fn tkf_modify_indel_model_params_costs_match() {
     modify_tkf92_indel_params_costs_match_template::<WAG>();
     modify_tkf92_indel_params_costs_match_template::<BLOSUM>();
     modify_tkf92_indel_params_costs_match_template::<HIVB>();
+}
+
+#[test]
+fn tkf_udpate_tree() {
+    let tree = tree!("(((A1:2.0,B2:2.0)I3:0.3,C4:2.0)R5:1.0);");
+    let msa = MASA::from_aligned_with_ancestral(
+        Sequences::new(vec![
+            record!("A1", b"--GTGGATGC"),
+            record!("B2", b"--G----CGA"),
+            record!("I3", b"--N----NNN"),
+            record!("C4", b"AGC-------"),
+            record!("R5", b"--N-------"),
+        ]),
+        &tree,
+    )
+    .unwrap();
+    let phylo = PhyloInfo { msa, tree };
+    let subst_model = SubstModel::<GTR>::new(&[], &[]);
+    let lambda = 0.1;
+    let mu = 0.2;
+    let r = 0.3;
+    let mut tkf_cost = TKF92CostBuilder::new(lambda, mu, r, subst_model.clone(), phylo.clone())
+        .build()
+        .unwrap();
+    let original_logl = TreeSearchCost::cost(&tkf_cost);
+    assert_ne!(original_logl, f64::NEG_INFINITY);
+
+    let node_idx = &phylo.tree.by_id("I3").idx;
+    let child_idx = &phylo.tree.by_id("A1").idx;
+    let new_tree = rooted_nni(&phylo.tree, node_idx, child_idx).unwrap();
+    let new_tree_newick = new_tree.to_newick();
+    tkf_cost.update_tree(new_tree);
+
+    assert_eq!(new_tree_newick, tkf_cost.tree().to_newick());
+    let new_logl = TreeSearchCost::cost(&tkf_cost);
+
+    let new_phylo = PhyloInfo {
+        msa: tkf_cost.masa().clone(),
+        tree: tkf_cost.tree().clone(),
+    };
+    let clean_cost = TKF92CostBuilder::new(lambda, mu, r, subst_model.clone(), new_phylo)
+        .build()
+        .unwrap();
+    let clean_logl = TreeSearchCost::cost(&clean_cost);
+    assert_ne!(original_logl, new_logl);
+    assert_eq!(new_logl, clean_logl);
 }

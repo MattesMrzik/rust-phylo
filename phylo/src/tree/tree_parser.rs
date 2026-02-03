@@ -28,6 +28,7 @@ impl fmt::Display for ParsingError {
     }
 }
 
+/// Only binary trees (rooted or unrooted) are supported.
 pub fn from_newick(newick: &str) -> Result<Vec<Tree>> {
     info!("Parsing newick trees");
     let mut trees = Vec::new();

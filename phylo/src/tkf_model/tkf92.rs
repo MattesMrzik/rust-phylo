@@ -234,6 +234,9 @@ impl<Q: QMatrix, AA: AncestralAlignment> TKF92CostBuilder<Q, AA> {
 /// vector of the right exclusive block borders.
 pub(crate) fn blocks_of_alignment<AA: AncestralAlignment>(msa: &AA) -> Vec<usize> {
     let mut blocks: HashSet<usize> = HashSet::new();
+    if msa.len() == 0 {
+        return vec![];
+    }
     for map in msa
         .ancestral_maps()
         .values()

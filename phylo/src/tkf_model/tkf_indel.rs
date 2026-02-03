@@ -35,9 +35,7 @@ pub(super) enum Event {
 }
 
 /// Trait for TKF indel models (i.e., [TKF91IndelModel](`crate::tkf_model::TKF91IndelModel`),
-/// [TKF92IndelModel](`crate::tkf_model::TKF92IndelModel`),
-/// [TKF92FixedIndelModel](`crate::tkf_model::TKF92FixedIndelModel`),
-/// [TKF92IndelModelAddBlocks](`crate::tkf_model::TKF92IndelModelAddBlocks`)).
+/// [TKF92IndelModel](`crate::tkf_model::TKF92IndelModel`)).
 #[allow(clippy::upper_case_acronyms)]
 pub trait TKFModel: Clone + Display {
     // TODO: it might be better for model optimisation to have parameter lambda and scale s = mu/lambda,
@@ -207,13 +205,10 @@ impl<T: TKFModel, AA: AncestralAlignment> TKFIndelCost<T, AA> {
         let lambda = self.model.lambda();
         let mu = self.model.mu();
         let root_id = usize::from(self.phylo.tree.root);
-        let mut logl = 0.0;
-        logl += (1.0 - lambda / mu).ln();
+        let mut logl = (1.0 - lambda / mu).ln();
         let model_info = self.model_info.borrow();
-        for node in self.phylo.tree.postorder() {
-            if node == &self.phylo.tree.root {
-                continue;
-            }
+        // for every node except the root
+        for node in self.phylo.tree.preorder().iter().skip(1) {
             logl += log_i1(lambda, model_info.beta[usize::from(node)]);
         }
         for block_id in 0..model_info.blocks.len() {

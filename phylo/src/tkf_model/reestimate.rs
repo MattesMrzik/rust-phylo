@@ -211,7 +211,7 @@ pub struct EdgeSeqsReestimator<'a, T: TKFModel, AA: AncestralAlignment, R: Rng +
     backtracking_table: Vec<[usize; DP_COL_SIZE]>,
     pub(super) cost: &'a mut TKFIndelCost<T, AA>,
     quartet_edges: QuartetEdges,
-    // TODO: alternatively, own the rng inside a refcell,
+    // TODO: alternatively, own the rng inside a refcell?
     rng: &'a mut RandomGenerator<R>,
 }
 
@@ -231,7 +231,7 @@ where
         let num_blocks = cost.model_info.borrow().blocks.len();
         EdgeSeqsReestimator {
             dp_table: vec![[f64::NEG_INFINITY; DP_COL_SIZE]; num_blocks],
-            backtracking_table: vec![[0; DP_COL_SIZE]; num_blocks],
+            backtracking_table: vec![[BACKTRACKING_INVALID; DP_COL_SIZE]; num_blocks],
             cost,
             quartet_edges: QuartetEdges::default(),
             rng,
@@ -244,7 +244,7 @@ where
 
     /// Reestimate ancestral wildcard sequences at `v2_idx` and its parent.
     ///
-    /// This method reestimates under the maximum TKF likelihood criterion the ancestral wildcard sequences
+    /// This method reestimates under the maximum [TKF](`TKFModel`) likelihood criterion the ancestral wildcard sequences
     /// associated with the given internal node `v2_idx` and its parent,
     /// while keeping all other sequences and tree fixed. See also
     /// [`EdgeSeqsReestimator::reestimate_unchecked`].
@@ -262,9 +262,6 @@ where
         }
         if let Leaf(_) = v2_idx {
             bail!("Reestimation can't be performed for leaf node '{v2_id}'.");
-        }
-        if self.cost.phylo.tree.sibling(v2_idx).is_none() {
-            bail!("Reestimation can't be performed for node '{v2_id}' without a sibling.");
         }
         Ok(self.reestimate_unchecked(v2_idx))
     }
@@ -461,6 +458,9 @@ where
     /// compatible with the `current_events` even though some of these might
     /// not be reached since the previous possible assignment might not produce
     /// these `del_or_not` scenarios. See the implementation of [`EdgeSeqsReestimator::fill_dp_table`].
+    ///
+    /// # Arguments
+    /// Takes a mutable reference to self to be able to use the random generator to break ties.
     // TODO: More sophisticated filtering could be done, but might add more complexity and is perhaps not worth it.
     fn max_over_previous(
         &mut self,
@@ -653,6 +653,9 @@ where
     /// Finds the maximum value in the last column of the DP table and its index.
     /// If there are multiple maxima, one is chosen at random.
     /// This is used to start the backtracking.
+    ///
+    /// # Arguments
+    /// Takes a mutable reference to self to be able to use the random generator to break ties.
     fn max_of_last_col(&mut self) -> (f64, usize) {
         let n_blocks = self.cost.model_info.borrow().blocks.len();
         let mut max = f64::NEG_INFINITY;
@@ -662,8 +665,7 @@ where
                 max = value;
                 max_indices.clear();
                 max_indices.push(index);
-            }
-            if value == max {
+            } else if value == max {
                 max_indices.push(index);
             }
         }
@@ -671,8 +673,8 @@ where
         (max, max_index)
     }
 
-    /// Computes the constant part of the log likelihood that is independent of the
-    /// MSA.
+    /// Computes the constant part of the log likelihood that is independent of the alignment and
+    /// only depends on the tree and model parameters.
     fn const_per_alignment(&self) -> f64 {
         let l = self.cost.model.lambda();
         let m = self.cost.model.mu();
@@ -707,6 +709,10 @@ pub(super) fn mapping_from_node_seq(
     block_lens: &[usize],
     seq_len: usize,
 ) -> Mapping {
+    debug_assert!(
+        block_lens.iter().sum::<usize>() == seq_len,
+        "Block lengths do not sum up to the sequence length."
+    );
     let mut mapping = Vec::with_capacity(seq_len);
     let mut count = 0;
     for (i, &block_len) in block_lens.iter().enumerate() {
@@ -815,10 +821,14 @@ pub(super) fn get_map_from_any_node<'a, AA: AncestralAlignment>(
 mod private_tests {
     use std::path::Path;
 
+    use rstest::rstest;
+
+    use crate::alignment::{Alignment, Sequences, MASA};
     use crate::alphabets::Alphabet;
     use crate::phylo_info::PhyloInfoBuilder;
-    use crate::random::DefaultGenerator;
+    use crate::random::{DefaultGenerator, FakeGenerator, FakeRng};
     use crate::tkf_model::{tests::setup_test_phylo, EdgeSeqsReestimator, TKF92IndelCostBuilder};
+    use crate::{record_wo_desc as record, tree};
 
     use super::*;
 
@@ -890,43 +900,247 @@ mod private_tests {
         assert_eq!(possibilities, expected);
     }
 
-    #[test]
-    fn tkf_possible_assignments_of_edge() {
-        let cases = vec![
-            (0, 0, 0, 0, vec![(0, 0)]),
-            (0, 0, 0, 1, vec![(0, 0), (0, 1), (1, 1)]),
-            (0, 0, 1, 0, vec![(0, 0), (0, 1), (1, 1)]),
-            (0, 0, 1, 1, vec![(0, 1), (1, 1)]),
-            (0, 1, 0, 0, vec![(0, 0), (1, 0), (1, 1)]),
-            (0, 1, 0, 1, vec![(1, 1)]),
-            (0, 1, 1, 0, vec![(1, 1)]),
-            (0, 1, 1, 1, vec![(1, 1)]),
-            (1, 0, 0, 0, vec![(0, 0), (1, 0), (1, 1)]),
-            (1, 0, 0, 1, vec![(1, 1)]),
-            (1, 0, 1, 0, vec![(1, 1)]),
-            (1, 0, 1, 1, vec![(1, 1)]),
-            (1, 1, 0, 0, vec![(1, 1), (1, 0)]),
-            (1, 1, 0, 1, vec![(1, 1)]),
-            (1, 1, 1, 0, vec![(1, 1)]),
-            (1, 1, 1, 1, vec![(1, 1)]),
-        ];
+    #[rstest]
+    #[case(0, 0, 0, 0, vec![(0, 0)])]
+    #[case(0, 0, 0, 1, vec![(0, 0), (0, 1), (1, 1)])]
+    #[case(0, 0, 1, 0, vec![(0, 0), (0, 1), (1, 1)])]
+    #[case(0, 0, 1, 1, vec![(0, 1), (1, 1)])]
+    #[case(0, 1, 0, 0, vec![(0, 0), (1, 0), (1, 1)])]
+    #[case(0, 1, 0, 1, vec![(1, 1)])]
+    #[case(0, 1, 1, 0, vec![(1, 1)])]
+    #[case(0, 1, 1, 1, vec![(1, 1)])]
+    #[case(1, 0, 0, 0, vec![(0, 0), (1, 0), (1, 1)])]
+    #[case(1, 0, 0, 1, vec![(1, 1)])]
+    #[case(1, 0, 1, 0, vec![(1, 1)])]
+    #[case(1, 0, 1, 1, vec![(1, 1)])]
+    #[case(1, 1, 0, 0, vec![(1, 1), (1, 0)])]
+    #[case(1, 1, 0, 1, vec![(1, 1)])]
+    #[case(1, 1, 1, 0, vec![(1, 1)])]
+    #[case(1, 1, 1, 1, vec![(1, 1)])]
+    fn tkf_possible_assignments_of_edge(
+        #[case] t1_has_char: u8,
+        #[case] t2_has_char: u8,
+        #[case] t3_has_char: u8,
+        #[case] t4_has_char: u8,
+        #[case] expected: Vec<(u8, u8)>,
+    ) {
+        // convert expected to bools and sort
+        let mut expected = expected
+            .into_iter()
+            .map(|(a, b)| (a != 0, b != 0))
+            .collect::<Vec<(bool, bool)>>();
+        expected.sort();
 
-        for (t1_has_char, t2_has_char, t3_has_char, t4_has_char, expected) in cases {
-            let mut result = possible_assignments_of_edge(
-                t1_has_char != 0,
-                t2_has_char != 0,
-                t3_has_char != 0,
-                t4_has_char != 0,
-            )
-            .to_vec();
-            result.sort();
-            let mut expected = expected
-                .into_iter()
-                .map(|(a, b)| (a != 0, b != 0))
-                .collect::<Vec<(bool, bool)>>();
-            expected.sort();
-            assert_eq!(result, expected);
+        let mut result = possible_assignments_of_edge(
+            t1_has_char != 0,
+            t2_has_char != 0,
+            t3_has_char != 0,
+            t4_has_char != 0,
+        )
+        .to_vec();
+        result.sort();
+
+        assert_eq!(result, expected);
+    }
+
+    #[rstest]
+    #[case(true, true, Event::Homolog)]
+    #[case(true, false, Event::Insertion)]
+    #[case(false, true, Event::Deletion)]
+    #[case(false, false, Event::Nothing)]
+    fn tkf_event_for_edge(
+        #[case] node_has_char: bool,
+        #[case] parent_has_char: bool,
+        #[case] expected: Event,
+    ) {
+        let result = event_for_edge(node_has_char, parent_has_char);
+        assert_eq!(result, expected);
+    }
+
+    #[cfg(test)]
+    fn confirm_quartet_edges_for_setup_test_phylo<T, AA, R>(
+        reestimator: &EdgeSeqsReestimator<T, AA, R>,
+    ) where
+        T: TKFModel,
+        AA: AncestralAlignment,
+        R: Rng + SeedableRng,
+    {
+        assert_eq!(
+            reestimator.quartet_edges.edges()[0],
+            reestimator.phylo().tree.by_id("R5").idx
+        ); // v1
+        assert_eq!(
+            reestimator.quartet_edges.edges()[1],
+            reestimator.phylo().tree.by_id("I3").idx
+        ); // v2
+        assert_eq!(
+            reestimator.quartet_edges.edges()[2],
+            reestimator.phylo().tree.by_id("C4").idx
+        ); // t2
+        assert_eq!(
+            reestimator.quartet_edges.edges()[3],
+            reestimator.phylo().tree.by_id("A1").idx
+        ); // t3
+        assert_eq!(
+            reestimator.quartet_edges.edges()[4],
+            reestimator.phylo().tree.by_id("B2").idx
+        ); // t4
+    }
+
+    #[rstest]
+    // for every block test one of the four possible assignments. In these tests we don't care about Dollo's principle.
+    #[case::first_block(0, (false, false), [Event::Nothing, Event::Nothing, Event::Insertion, Event::Nothing, Event::Nothing])]
+    #[case::second_block(1, (true, false), [Event::Insertion, Event::Deletion, Event::Homolog, Event::Insertion, Event::Nothing])]
+    #[case::thrid_block(2, (true, true), [Event::Insertion, Event::Homolog, Event::Deletion, Event::Homolog, Event::Deletion])]
+    #[case::forth_block(3, (false, true), [Event::Nothing, Event::Insertion, Event::Nothing, Event::Deletion, Event::Homolog])]
+    fn tkf_event_for_assignment(
+        #[case] block_id: usize,
+        #[case] assignment: EdgeAssignment,
+        #[case] expected_events: QuartetEvents,
+    ) {
+        let phylo = setup_test_phylo(Alphabet::dna());
+        let mut cost = TKF92IndelCostBuilder::new(0.4, 0.5, 0.8, phylo)
+            .build()
+            .unwrap();
+        let rng = &mut FakeGenerator::default();
+        let v2_idx = cost.phylo.tree.by_id("I3").idx;
+        let mut reestimator = EdgeSeqsReestimator::new(&mut cost, rng);
+        reestimator.prepare_for_dp(&v2_idx);
+        confirm_quartet_edges_for_setup_test_phylo(&reestimator);
+        let events = reestimator.event_for_assignment(&assignment, block_id);
+        assert_eq!(events, expected_events);
+    }
+
+    #[test]
+    fn tkf_get_map_from_any_node() {
+        let phylo = setup_test_phylo(Alphabet::dna());
+        let msa = &phylo.msa;
+        let leaf_node = phylo.tree.by_id("A1").idx;
+        let internal_node = phylo.tree.by_id("I3").idx;
+
+        let leaf_map = get_map_from_any_node(msa, &leaf_node);
+        let expected_leaf_map = msa.leaf_map(&leaf_node);
+        assert_eq!(leaf_map, expected_leaf_map);
+
+        let internal_map = get_map_from_any_node(msa, &internal_node);
+        let expected_internal_map = msa.ancestral_map(&internal_node);
+        assert_eq!(internal_map, expected_internal_map);
+    }
+
+    #[test]
+    fn tkf_mapping_from_node_seq() {
+        let mut node_seq = FixedBitSet::with_capacity(5);
+        node_seq.insert(0);
+        node_seq.insert(2);
+        node_seq.insert(4);
+        let block_lens = [2, 3, 1, 4, 1];
+        let seq_len: usize = block_lens.iter().sum();
+        let expected_mapping = [
+            Some(0),
+            Some(1), // first block finished
+            None,
+            None,
+            None,    // second block finished
+            Some(2), // third block finished
+            None,
+            None,
+            None,
+            None,    // fourth block finished
+            Some(3), // fifth block finished
+        ];
+        let mapping = mapping_from_node_seq(&node_seq, &block_lens, seq_len);
+        assert_eq!(mapping, expected_mapping);
+    }
+
+    #[test]
+    fn tkf_backtrack() {
+        let phylo = setup_test_phylo(Alphabet::dna());
+        // the parameters here do not matter for the backtracking test
+        let mut cost = TKF92IndelCostBuilder::new(0.4, 0.5, 0.8, phylo)
+            .build()
+            .unwrap();
+        // FakeRng such that we can test tie-breaking (max value in last column) in backtracking
+        let rng = &mut FakeGenerator::from_rng(FakeRng::from_f64_values(vec![0.1, 0.2]));
+
+        let mut reestimator = EdgeSeqsReestimator::new(&mut cost, rng);
+        // backtracking_table dimensions num_blocks = 4, DP_COL_SIZE = 128
+        reestimator.backtracking_table[1][32] = 13;
+        // a path that splits in the middle
+        reestimator.backtracking_table[2][110] = 32;
+        reestimator.backtracking_table[2][20] = 32;
+        reestimator.backtracking_table[3][85] = 110;
+        reestimator.backtracking_table[3][42] = 20;
+        // to select the argmax at the end of backtracking
+        let dp_last_col_logl = -5.0;
+        reestimator.dp_table[3][85] = dp_last_col_logl;
+        reestimator.dp_table[3][42] = dp_last_col_logl;
+
+        // the 85 is selected here
+        let backtrack_res = reestimator.backtrack();
+        let indices = [13, 32, 110, 85];
+        let mut expected_v1_bitset = FixedBitSet::with_capacity(4);
+        let mut expected_v2_bitset = FixedBitSet::with_capacity(4);
+        for (i, &idx) in indices.iter().enumerate() {
+            let (first, second) = index_to_bools(idx).0;
+            if first {
+                expected_v1_bitset.insert(i);
+            }
+            if second {
+                expected_v2_bitset.insert(i);
+            }
         }
+        assert_eq!(backtrack_res.v1_bitset, expected_v1_bitset);
+        assert_eq!(backtrack_res.v2_bitset, expected_v2_bitset);
+        assert_eq!(
+            backtrack_res.logl,
+            reestimator.const_per_alignment() + dp_last_col_logl
+        );
+
+        // the 42 is selected here
+        let backtrack_res = reestimator.backtrack();
+        let indices = [13, 32, 20, 42];
+        let mut expected_v1_bitset = FixedBitSet::with_capacity(4);
+        let mut expected_v2_bitset = FixedBitSet::with_capacity(4);
+        for (i, &idx) in indices.iter().enumerate() {
+            let (first, second) = index_to_bools(idx).0;
+            if first {
+                expected_v1_bitset.insert(i);
+            }
+            if second {
+                expected_v2_bitset.insert(i);
+            }
+        }
+        assert_eq!(backtrack_res.v1_bitset, expected_v1_bitset);
+        assert_eq!(backtrack_res.v2_bitset, expected_v2_bitset);
+        assert_eq!(
+            backtrack_res.logl,
+            reestimator.const_per_alignment() + dp_last_col_logl
+        );
+    }
+
+    #[test]
+    fn tkf_const_per_alignment() {
+        let tree = tree!("(((A1:2.0,B2:2.0)I3:0.3,C4:2.0)R5:1.0);");
+        let msa = MASA::from_aligned_with_ancestral(
+            Sequences::new(vec![
+                record!("A1", b""),
+                record!("B2", b""),
+                record!("I3", b""),
+                record!("C4", b""),
+                record!("R5", b""),
+            ]),
+            &tree,
+        )
+        .unwrap();
+        let phylo = PhyloInfo { msa, tree };
+        let mut cost = TKF92IndelCostBuilder::new(0.4, 0.5, 0.8, phylo)
+            .build()
+            .unwrap();
+        let logl = cost.logl(); // must be called to initialize the model_info, which is
+                                // needed for const_per_alignment().
+        let rng = &mut DefaultGenerator::default();
+        let reestimator = EdgeSeqsReestimator::new(&mut cost, rng);
+        assert_eq!(reestimator.const_per_alignment(), logl);
     }
 
     #[test]

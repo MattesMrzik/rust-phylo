@@ -85,7 +85,7 @@ fn calc_nni_cost_with_blen_opt<C: TreeSearchCost + Clone + Display>(
     Ok(MoveCostInfo::new(move_cost, new_tree))
 }
 
-fn rooted_nni(tree: &Tree, node_idx: &NodeIdx, child_idx: &NodeIdx) -> Result<Tree> {
+pub(crate) fn rooted_nni(tree: &Tree, node_idx: &NodeIdx, child_idx: &NodeIdx) -> Result<Tree> {
     if node_idx == &tree.root {
         bail!("For the rooted NNI the node mustn't be the root of the tree");
     }
