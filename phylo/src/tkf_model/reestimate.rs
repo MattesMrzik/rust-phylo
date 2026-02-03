@@ -6,7 +6,7 @@ use rand::{Rng, SeedableRng};
 use crate::alignment::{AncestralAlignment, Mapping};
 use crate::phylo_info::PhyloInfo;
 use crate::random::RandomGenerator;
-use crate::tkf_model::{log_i1, Event, TKFIndelCost, TKFModel};
+use crate::tkf_model::{log_i1, Event, TKFIndelCost, TKFIndelModelInfo, TKFModel};
 use crate::tree::NodeIdx::{self, Internal, Leaf};
 use crate::Result;
 
@@ -413,7 +413,8 @@ where
         let n_blocks = self.cost.model_info.borrow().blocks.len();
         for block_id in 0..n_blocks {
             let mut found_at_least_one = false;
-            for assignment in self.possible_assignments(block_id) {
+            let site = self.cost.model_info.borrow().blocks[block_id] - 1;
+            for assignment in self.possible_assignments(site) {
                 let events = self.event_for_assignment(assignment, block_id);
                 let event_prob = self.integrated_root_event_prob(&events, block_id);
                 let is_first_block = block_id == 0;
@@ -474,7 +475,10 @@ where
 
         // TODO: instead of recalculating the possible assignments it could be reused from the previous block
         // See issue #151 https://github.com/acg-team/rust-phylo/issues/151
-        for prev_assignment in self.possible_assignments(block_id - 1) {
+        let previous_block = block_id - 1;
+        let model_info = self.cost.model_info.borrow();
+        let site = model_info.blocks[previous_block] - 1;
+        for prev_assignment in self.possible_assignments(site) {
             // TODO: here it is not checked whether the `prev_del_or_not` matches the `prev_assignment`
             // which will lead to -inf which is then skipped.
             // See issue #151 https://github.com/acg-team/rust-phylo/issues/151
@@ -486,7 +490,8 @@ where
                 if prev_gamma == f64::NEG_INFINITY {
                     continue;
                 }
-                let current = prev_gamma + self.quartet_eta(current_events, &prev_del_or_not);
+                let current =
+                    prev_gamma + self.quartet_eta(current_events, &prev_del_or_not, &model_info);
                 if current > max {
                     max = current;
                     argmaxes.clear();
@@ -506,11 +511,16 @@ where
         }
     }
 
-    fn quartet_eta(&self, events: &QuartetEvents, prev_events: &[bool]) -> f64 {
+    fn quartet_eta(
+        &self,
+        events: &QuartetEvents,
+        prev_events: &[bool],
+        model_info: &TKFIndelModelInfo,
+    ) -> f64 {
         for i in 0..N_EDGES_IN_QUARTET {
             if events[i] == Event::Insertion && prev_events[i] {
                 let edge = &self.quartet_edges.edges()[i];
-                return self.cost.model_info.borrow().eta[usize::from(edge)];
+                return model_info.eta[usize::from(edge)];
             }
         }
         0.0
@@ -596,8 +606,7 @@ where
     /// Based on whether there are chars at the "leaves" of the quartet finds
     /// all possible [assignment for v1, assignment for v2] combinations that
     /// follow Dollo's principle.
-    fn possible_assignments(&self, block_id: usize) -> EdgeAssignmentPossibilities {
-        let site = self.cost.model_info.borrow().blocks[block_id] - 1;
+    fn possible_assignments(&self, site: usize) -> EdgeAssignmentPossibilities {
         let t1_has_char = self.quartet_edges.t1_has_char(site);
         let t2_has_char = self.quartet_edges.t2_has_char(site);
         let t3_has_char = self.quartet_edges.t3_has_char(site);
