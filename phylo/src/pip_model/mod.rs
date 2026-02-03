@@ -93,6 +93,7 @@ impl<Q: QMatrix + QMatrixMaker> PIPModel<Q> {
 }
 
 // TODO: where is this ever used?
+// See issue #119 https://github.com/acg-team/rust-phylo/issues/119
 impl<Q: QMatrix> EvoModel for PIPModel<Q> {
     fn p(&self, time: f64) -> SubstMatrix {
         (self.q().clone() * time).exp()

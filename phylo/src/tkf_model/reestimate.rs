@@ -194,7 +194,7 @@ use crate::likelihood::TreeSearchCost;
 /// let mut reestimator = EdgeSeqsReestimator::new(&mut tkf92_indel_cost, &mut rng);
 /// for node in internal_nodes {
 ///     if let Internal(_) = node {
-///         let new_cost = reestimator.reestimate(&node);
+///         let new_cost = reestimator.reestimate(&node)?;
 ///         println!("Re-estimated sequences at node {node}, cost after re-estimation: {new_cost}",);
 ///     }
 ///     break; // stopping early for doc test, remove in real usage
@@ -211,7 +211,6 @@ pub struct EdgeSeqsReestimator<'a, T: TKFModel, AA: AncestralAlignment, R: Rng +
     backtracking_table: Vec<[usize; DP_COL_SIZE]>,
     pub(super) cost: &'a mut TKFIndelCost<T, AA>,
     quartet_edges: QuartetEdges,
-    // TODO: alternatively, own the rng inside a refcell?
     rng: &'a mut RandomGenerator<R>,
 }
 
@@ -327,17 +326,17 @@ where
             self.cost.reset_cache(edge);
         }
         for block_id in 0..num_blocks {
-            self.remove_old_quartet_event_prob_from_root(block_id);
+            self.remove_old_quartet_event_factor_from_root(block_id);
             self.remove_old_quartet_eta_from_root(block_id);
         }
     }
 
-    fn remove_old_quartet_event_prob_from_root(&self, block_id: usize) {
+    fn remove_old_quartet_event_factor_from_root(&self, block_id: usize) {
         let root_id = usize::from(self.cost.phylo.tree.root);
         let mut model_info = self.cost.model_info.borrow_mut();
         for node in self.quartet_edges.edges() {
-            let x = model_info.node_event_prob[(usize::from(*node), block_id)];
-            model_info.subtree_event_prob[(root_id, block_id)] /= x;
+            let x = model_info.node_event_factor[(usize::from(*node), block_id)];
+            model_info.subtree_event_factor[(root_id, block_id)] /= x;
         }
     }
 
@@ -387,7 +386,7 @@ where
         for block_id in 0..num_blocks {
             for edge in self.quartet_edges.edges() {
                 let event = self.cost.determine_event(edge, block_id);
-                let node_event_prob = self.cost.event_prob(edge, event);
+                let node_event_factor = self.cost.event_factor(edge, event);
                 let node_eta = self.cost.eta_for_non_root(edge, event);
                 // self.cost.update_previous_event(edge, event);
                 let mut model_info = self.cost.model_info.borrow_mut();
@@ -396,9 +395,9 @@ where
                         .previous_event_deletion
                         .set(usize::from(*edge), val);
                 }
-                model_info.node_event_prob[(usize::from(edge), block_id)] = node_event_prob;
+                model_info.node_event_factor[(usize::from(edge), block_id)] = node_event_factor;
                 model_info.node_eta[(usize::from(edge), block_id)] = node_eta;
-                model_info.subtree_event_prob[(root_id, block_id)] *= node_event_prob;
+                model_info.subtree_event_factor[(root_id, block_id)] *= node_event_factor;
                 model_info.subtree_eta[(root_id, block_id)] += node_eta;
             }
         }
@@ -445,6 +444,7 @@ where
             // TODO: perhaps instead return any valid assignment that is compatible with Dollo's
             // constraint, and return -infinity in the reassignment method. If we have -infinity here,
             // then any valid assignment is -infinity.
+            // See issue #153 https://github.com/acg-team/rust-phylo/issues/153
             assert!(
                 found_at_least_one,
                 "No valid assignments found for block_id = {block_id}, due to -inf logl"
@@ -462,6 +462,7 @@ where
     /// # Arguments
     /// Takes a mutable reference to self to be able to use the random generator to break ties.
     // TODO: More sophisticated filtering could be done, but might add more complexity and is perhaps not worth it.
+    // See issue #151 https://github.com/acg-team/rust-phylo/issues/151
     fn max_over_previous(
         &mut self,
         current_del_or_not: &QuartetDelOrNot,
@@ -472,9 +473,11 @@ where
         let mut argmaxes = Vec::new();
 
         // TODO: instead of recalculating the possible assignments it could be reused from the previous block
+        // See issue #151 https://github.com/acg-team/rust-phylo/issues/151
         for prev_assignment in self.possible_assignments(block_id - 1) {
             // TODO: here it is not checked whether the `prev_del_or_not` matches the `prev_assignment`
             // which will lead to -inf which is then skipped.
+            // See issue #151 https://github.com/acg-team/rust-phylo/issues/151
             for prev_del_or_not in
                 self.prev_compatible_del_or_not(current_del_or_not, current_events)
             {
@@ -516,6 +519,7 @@ where
     /// Based on the `current_events` and `del_or_not` finds all compatible previous `del_or_not`.
     // TODO: these are not ensured to be compatible with the previous assignments. Would it be
     // worth to filter them here?
+    // See issue #151 https://github.com/acg-team/rust-phylo/issues/151
     fn prev_compatible_del_or_not(
         &self,
         current_del_or_not: &QuartetDelOrNot,
@@ -564,29 +568,29 @@ where
         let root_id = usize::from(self.cost.phylo.tree.root);
         let model_info = self.cost.model_info.borrow();
         let block_len = model_info.block_lengths[block_id];
-        let mut x = model_info.subtree_event_prob[(root_id, block_id)];
-        x *= self.quartet_event_prob(events);
+        let mut x = model_info.subtree_event_factor[(root_id, block_id)];
+        x *= self.quartet_event_factor(events);
         self.cost.model.block_prob(x, block_len)
     }
 
-    /// Computes the product of event prob values for the nodes in the quartet for the provided events
+    /// Computes the product of event factor values for the nodes in the quartet for the provided events
     /// which correspond to an assignment of characters at `v1` and `v2` that is currently considered
     /// in the dynamic programming.
-    fn quartet_event_prob(&self, events: &QuartetEvents) -> f64 {
-        let mut quartet_event_prob = 1.0;
+    fn quartet_event_factor(&self, events: &QuartetEvents) -> f64 {
+        let mut quartet_event_factor = 1.0;
         let model_info = self.cost.model_info.borrow();
         // Here it is assumed that the cache is already updated for all nodes in the quartet,
         // see `EdgeSeqsReestimator::prepare_for_dp`.
         for (i, node) in self.quartet_edges.edges().iter().enumerate() {
             let node_id = usize::from(*node);
-            quartet_event_prob *= match events[i] {
+            quartet_event_factor *= match events[i] {
                 Event::Insertion => model_info.insertion[node_id],
                 Event::Deletion => model_info.n0[node_id],
                 Event::Homolog => model_info.h1[node_id],
                 Event::Nothing => 1.0,
             };
         }
-        quartet_event_prob
+        quartet_event_factor
     }
 
     /// Based on whether there are chars at the "leaves" of the quartet finds

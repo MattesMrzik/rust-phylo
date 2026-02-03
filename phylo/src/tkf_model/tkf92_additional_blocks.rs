@@ -72,20 +72,20 @@ impl TKFModel for TKF92IndelModelAddBlocks {
         }
     }
 
-    fn insertion_prob_at_root(&self) -> f64 {
+    fn insertion_factor_at_root(&self) -> f64 {
         self.lambda() / self.mu() * self.one_minus_r_over_r
     }
 
-    fn insertion_prob_at_non_root(&self, beta: f64) -> f64 {
+    fn insertion_factor_at_non_root(&self, beta: f64) -> f64 {
         self.lambda() * beta * self.one_minus_r_over_r
     }
 
-    fn block_prob(&self, tree_event_prob: f64, block_len: usize) -> f64 {
-        if tree_event_prob == 1.0 {
+    fn block_prob(&self, tree_event_factor: f64, block_len: usize) -> f64 {
+        if tree_event_factor == 1.0 {
             0.0
         } else {
-            tree_event_prob.ln()
-                + (block_len as f64 - 1.0) * (1.0 + tree_event_prob).ln()
+            tree_event_factor.ln()
+                + (block_len as f64 - 1.0) * (1.0 + tree_event_factor).ln()
                 + (block_len as f64) * self.log_r
         }
     }

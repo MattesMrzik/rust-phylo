@@ -345,6 +345,7 @@ pub struct MASA {
     leaf_maps: SeqMaps,
     ancestral_maps: SeqMaps,
     // TODO: this needs to be implemented
+    //       see issue #150 https://github.com/acg-team/rust-phylo/issues/150
     internal_alignments: InternalAlignments,
     idx_to_id: Vec<String>,
 }
@@ -444,6 +445,7 @@ impl Alignment for MASA {
         let msa = MSA::from_aligned(sequences, tree)?;
         // TODO: Do the internal_alignments, built in the line above, conform with adding ancestral seqs?
         //       see also from_aligned_with_ancestral
+        //       See issue #150 https://github.com/acg-team/rust-phylo/issues/150
         // If the user wants to use a different ASR method to build the MASA, they can call
         // MSA::from_aligned and then call their desired ASR method on the MSA.
         let asr = ParsimonyPresenceAbsence {};
@@ -454,6 +456,7 @@ impl Alignment for MASA {
         let msa = MSA::from_aligned_unchecked(sequences, tree);
         // TODO: do the internal alignments, built in the above line, conform with adding ancestral seqs?
         //       see also from_aligned_with_ancestral
+        //       See issue #150 https://github.com/acg-team/rust-phylo/issues/150
         // If the user wants to use a different ASR method to build the MASA, they can call
         // MSA::from_aligned and then call their desired ASR method on the MSA.
         let asr = ParsimonyPresenceAbsence {};
@@ -554,6 +557,7 @@ impl AncestralAlignment for MASA {
 
         // TODO: internal_alignments still missing. How do they work if there are seqs at internal nodes?
         //       see also MASA::from_aligned
+        //       See issue #150 https://github.com/acg-team/rust-phylo/issues/150
         MASA {
             leaf_seqs,
             ancestral_seqs,

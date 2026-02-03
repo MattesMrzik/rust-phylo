@@ -23,7 +23,6 @@ use crate::Result;
 /// [`TopologyOptimiser::new`] are compatible.
 pub trait Compatible<MO: MoveOptimiser> {}
 
-// TODO: or do we want to place those in respective files?
 impl<Q: QMatrix, A: Alignment> Compatible<SprOptimiser> for PIPCost<Q, A> {}
 impl<Q: QMatrix, A: Alignment> Compatible<NniOptimiser> for PIPCost<Q, A> {}
 impl<Q: QMatrix, A: Alignment> Compatible<SprOptimiser> for SubstitutionCost<Q, A> {}
