@@ -259,28 +259,19 @@ impl<T: TKFModel, AA: AncestralAlignment> TKFIndelCost<T, AA> {
             let node_event_factor = self.event_factor(node_idx, event);
             let node_eta = self.eta_for_non_root(node_idx, event);
             self.set_node_values(node_idx, block_id, node_event_factor, node_eta);
-            self.update_previous_event(node_idx, event);
+            if let Some(val) = self.updated_previous_is_deletion(event) {
+                self.model_info
+                    .borrow_mut()
+                    .previous_event_deletion
+                    .set(usize::from(node_idx), val);
+            }
         }
-
         let mut model_info = self.model_info.borrow_mut();
         if let Some(parent_idx) = self.phylo.tree.parent(node_idx) {
             model_info.valid.set(usize::from(parent_idx), false);
         }
         model_info.valid.set(node_id, true);
         model_info.valid_for_reestimation.set(node_id, true);
-    }
-
-    pub(super) fn update_previous_event(&self, node_idx: &NodeIdx, event: Event) {
-        let node_id = usize::from(node_idx);
-        let mut model_info = self.model_info.borrow_mut();
-        match event {
-            Event::Deletion => model_info.previous_event_deletion.set(node_id, true),
-            Event::Insertion | Event::Homolog => {
-                model_info.previous_event_deletion.set(node_id, false)
-            }
-            // Since nothing happened, the previous event status remains the same.
-            Event::Nothing => {}
-        }
     }
 
     pub(super) fn updated_previous_is_deletion(&self, event: Event) -> Option<bool> {

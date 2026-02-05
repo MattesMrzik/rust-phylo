@@ -249,18 +249,18 @@ where
     /// [`EdgeSeqsReestimator::reestimate_unchecked`].
     ///
     /// # Errors
-    /// Reestimation is only defined for non-root internal nodes that have
-    /// a sibling. Accordingly, this method will return an error if this is not the case.
+    /// Reestimation is only defined for non-root internal nodes.
+    /// Accordingly, this method will return an error if this is not the case.
     ///
     /// # Returns
     /// On success, returns the resulting log likelihood of the MASA given the tree after reestimation.
     pub fn reestimate(&mut self, v2_idx: &NodeIdx) -> Result<f64> {
         let v2_id = self.cost.phylo.tree.node(v2_idx).id.clone();
         if v2_idx == &self.cost.phylo.tree.root {
-            bail!("Reestimation can't be performed for the root '{v2_id}'.");
+            bail!("reestimation can't be performed for the root '{v2_id}'");
         }
         if let Leaf(_) = v2_idx {
-            bail!("Reestimation can't be performed for leaf node '{v2_id}'.");
+            bail!("reestimation can't be performed for leaf node '{v2_id}'");
         }
         Ok(self.reestimate_unchecked(v2_idx))
     }
@@ -310,9 +310,6 @@ where
 
     /// Resets the DP and backtracking tables. Initialises the [`QuartetEdges`]. Removes the old
     /// quartet contributions from the root aggregated values.
-    ///
-    /// # Panics
-    /// Panics if `v2_idx` is the root or has no sibling.
     fn prepare_for_dp(&mut self, v2_idx: &NodeIdx) {
         let num_blocks = self.cost.model_info.borrow().blocks.len();
         for row in &mut self.dp_table {
@@ -388,7 +385,6 @@ where
                 let event = self.cost.determine_event(edge, block_id);
                 let node_event_factor = self.cost.event_factor(edge, event);
                 let node_eta = self.cost.eta_for_non_root(edge, event);
-                // self.cost.update_previous_event(edge, event);
                 let mut model_info = self.cost.model_info.borrow_mut();
                 if let Some(val) = self.cost.updated_previous_is_deletion(event) {
                     model_info

@@ -36,6 +36,14 @@ fn tkf_reestimate_with_out_choice() {
     let v2_idx = cost.phylo.tree.by_id("I4").idx;
     let mut reestimator = EdgeSeqsReestimator::new(&mut cost, rng);
     assert_relative_eq!(reestimator.reestimate(&v2_idx).unwrap(), logl);
+        // some tmp valid are set to false, all valid_for_reestimation should be true
+    assert!(!reestimator.cost.model_info.borrow().valid.is_full());
+    assert!(reestimator
+        .cost
+        .model_info
+        .borrow()
+        .valid_for_reestimation
+        .is_full());
 }
 
 #[test]

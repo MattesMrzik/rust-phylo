@@ -481,14 +481,5 @@ fn tkf92_reestimate_large_tree_for_file_iterative() {
         assert_ne!(max_dp, f64::NEG_INFINITY);
         assert!(logl_from_clean_cost >= prev_logl);
         prev_logl = logl_from_clean_cost;
-
-        // some tmp valid are set to false, all valid_for_reestimation should be true
-        assert!(!reestimator.cost.model_info.borrow().valid.is_full());
-        assert!(reestimator
-            .cost
-            .model_info
-            .borrow()
-            .valid_for_reestimation
-            .is_full());
     }
 }
