@@ -1,6 +1,5 @@
 use std::fmt::Display;
 
-use anyhow::bail;
 use approx::relative_eq;
 use itertools::Itertools;
 use log::{debug, info};
@@ -9,7 +8,7 @@ use crate::likelihood::TreeSearchCost;
 use crate::optimisers::move_optimiser::{MoveCostInfo, MoveOptimiser};
 use crate::optimisers::optimise_branch;
 use crate::tree::{NodeIdx, Tree};
-use crate::Result;
+use crate::{bail, Result};
 
 #[derive(Clone)]
 pub struct SprOptimiser {}
@@ -90,9 +89,7 @@ impl SprOptimiser {
             .collect_vec();
 
         info!("Node {prune_location:?}: trying to regraft");
-        let best_regraft =
-            calc_best_regraft_cost(base_cost, *prune_location, regraft_locations, cost)?;
-        Ok(best_regraft)
+        calc_best_regraft_cost(base_cost, *prune_location, regraft_locations, cost)
     }
 }
 
@@ -112,7 +109,8 @@ fn calc_best_regraft_cost<C: TreeSearchCost + Clone + Display + Send>(
         .map(move |(regraft, cost_fn)| {
             calc_spr_cost_with_blen_opt(prune_location, regraft, base_cost, cost_fn.clone())
         })
-        .try_reduce_with(|left, right| Ok(if left.cost > right.cost {left} else {right})).expect("at least one regraft location")
+        .try_reduce_with(|left, right| Ok(if left.cost > right.cost {left} else {right}))
+        .unwrap_or_else(|| Ok(MoveCostInfo::new(base_cost, cost.tree().clone())))
 }
 } else if #[cfg(feature="par-regraft-chunk")] {
 /// NOTE: seems to be faster than full on parallel for few taxa
@@ -147,7 +145,8 @@ fn calc_best_regraft_cost<C: TreeSearchCost + Clone + Display + Send>(
             }
             Ok(max.expect("at least one regraft location"))
         })
-        .try_reduce_with(|left, right| Ok(if left.cost > right.cost {left} else {right})).expect("at least one regraft location")
+        .try_reduce_with(|left, right| Ok(if left.cost > right.cost {left} else {right}))
+        .unwrap_or_else(|| Ok(MoveCostInfo::new(base_cost, cost.tree().clone())))
 }
 } else if #[cfg(feature="par-regraft-manual")] {
 fn calc_best_regraft_cost<C: TreeSearchCost + Clone + Display + Send>(
@@ -156,6 +155,9 @@ fn calc_best_regraft_cost<C: TreeSearchCost + Clone + Display + Send>(
     regraft_locations: Vec<NodeIdx>,
     cost: &C,
 ) -> Result<MoveCostInfo> {
+    if regraft_locations.is_empty() {
+        return Ok(MoveCostInfo::new(base_cost, cost.tree().clone()));
+    }
     #[derive(Clone)]
     struct RecursiveForkJoinRegrafter<C: TreeSearchCost + Clone + Display + Send> {
         cost_fn: C,
@@ -199,7 +201,7 @@ fn calc_best_regraft_cost<C: TreeSearchCost + Clone + Display + Send>(
             Err(error) => return Err(error),
         }
     }
-    Ok(max.expect("at least one regraft location"))
+    Ok(max.unwrap_or_else(|| MoveCostInfo::new(base_cost, cost.tree().clone())))
 }
 }}
 
@@ -233,30 +235,38 @@ fn calc_spr_cost_with_blen_opt<C: TreeSearchCost + Clone + Display>(
 }
 
 fn rooted_spr(tree: &Tree, prune_idx: &NodeIdx, regraft_idx: &NodeIdx) -> Result<Tree> {
+    // Pruned node must have a parent, it is the one being reattached
+    if prune_idx == &tree.root {
+        bail!(TreeMove, "cannot prune the root node");
+    }
     // Prune and regraft nodes must be different
     if prune_idx == regraft_idx {
-        bail!("Prune and regraft nodes must be different");
+        bail!(TreeMove, "prune and regraft nodes must be different");
     }
+    // Regraft node cannot be a subtree of the prune node as that will break the tree
+    // into disconnected pieces
     if tree.is_subtree(regraft_idx, prune_idx) {
-        bail!("Prune node cannot be a subtree of the regraft node");
+        bail!(
+            TreeMove,
+            "regraft node cannot be a subtree of the prune node"
+        );
     }
 
     let prune = tree.node(prune_idx);
-    // Pruned node must have a parent, it is the one being reattached
-    if prune.parent.is_none() {
-        bail!("Cannot prune the root node");
-    }
     // Cannot prune direct child of the root node, otherwise branch lengths are undefined
     if tree.node(&prune.parent.unwrap()).parent.is_none() {
-        bail!("Cannot prune direct child of the root node");
+        bail!(TreeMove, "cannot prune direct child of the root node");
     }
     let regraft = tree.node(regraft_idx);
     // Regrafted node must have a parent, the prune parent is attached to that branch
     if regraft.parent.is_none() {
-        bail!("Cannot regraft to root node");
+        bail!(TreeMove, "cannot regraft to the root node");
     }
     if regraft.parent == prune.parent {
-        bail!("Prune and regraft nodes must have different parents");
+        bail!(
+            TreeMove,
+            "prune and regraft nodes must have different parents"
+        );
     }
 
     Ok(rooted_spr_unchecked(tree, prune_idx, regraft_idx))
@@ -349,22 +359,28 @@ fn rooted_spr_unchecked(tree: &Tree, prune_idx: &NodeIdx, regraft_idx: &NodeIdx)
 #[cfg_attr(coverage, coverage(off))]
 mod private_spr_tests {
     use approx::assert_relative_eq;
+    use assert_matches::assert_matches;
 
     use crate::optimisers::spr_optimiser::{rooted_spr, rooted_spr_unchecked};
     use crate::tree;
+    use crate::Error;
 
     #[test]
     fn spr_siblings() {
         let tree = tree!("(((A:1.0,B:1.0)E:5.1,(C:3.0,D:4.0)F:6.2)G:7.3);");
-        assert!(rooted_spr(&tree, &tree.idx("A"), &tree.idx("B")).is_err());
+        let res = rooted_spr(&tree, &tree.idx("A"), &tree.idx("B"));
+        assert_matches!(res, Err(Error::TreeMove(msg)) if msg.contains("prune and regraft nodes must have different parents"));
     }
 
     #[test]
     fn spr_prune_root_or_children() {
         let tree = tree!("(((A:1.0,B:1.0)E:5.1,(C:3.0,D:4.0)F:6.2)G:7.3);");
-        assert!(rooted_spr(&tree, &tree.idx("G"), &tree.idx("B")).is_err());
-        assert!(rooted_spr(&tree, &tree.idx("E"), &tree.idx("B")).is_err());
-        assert!(rooted_spr(&tree, &tree.idx("F"), &tree.idx("B")).is_err());
+        assert_matches!(rooted_spr(&tree, &tree.idx("G"), &tree.idx("B")),
+            Err(Error::TreeMove(msg)) if msg.contains("cannot prune the root node"));
+        assert_matches!(rooted_spr(&tree, &tree.idx("E"), &tree.idx("F")),
+            Err(Error::TreeMove(msg)) if msg.contains("cannot prune direct child of the root node"));
+        assert_matches!(rooted_spr(&tree, &tree.idx("F"), &tree.idx("E")),
+            Err(Error::TreeMove(msg)) if msg.contains("cannot prune direct child of the root node"));
     }
 
     #[test]
@@ -384,7 +400,16 @@ mod private_spr_tests {
     #[test]
     fn spr_regraft_root() {
         let tree = tree!("(((A:1.0,B:1.0)E:5.1,(C:3.0,D:4.0)F:6.2)G:7.3);");
-        assert!(rooted_spr(&tree, &tree.idx("A"), &tree.idx("G")).is_err());
+        let root = tree.root;
+        assert_matches!(rooted_spr(&tree, &tree.idx("A"), &root),
+            Err(Error::TreeMove(msg)) if msg.contains("cannot regraft to the root node"));
+    }
+
+    #[test]
+    fn spr_regraft_same() {
+        let tree = tree!("(((A:1.0,B:1.0)E:5.1,(C:3.0,D:4.0)F:6.2)G:7.3);");
+        assert_matches!(rooted_spr(&tree, &tree.idx("C"), &tree.idx("C")),
+               Err(Error::TreeMove(msg)) if msg.contains("prune and regraft nodes must be different"));
     }
 
     #[test]
@@ -397,7 +422,8 @@ mod private_spr_tests {
     #[test]
     fn spr_regraft_subtree() {
         let tree = tree!("((((A:1.0,B:1.0)E:5.1,(C:3.0,D:4.0)F:6.2)G:7.3,H:1.0)K:1.0);");
-        assert!(rooted_spr(&tree, &tree.idx("E"), &tree.idx("B")).is_err());
+        assert_matches!(rooted_spr(&tree, &tree.idx("E"), &tree.idx("B")),
+            Err(Error::TreeMove(msg)) if msg.contains("regraft node cannot be a subtree of the prune node"));
     }
 
     #[test]

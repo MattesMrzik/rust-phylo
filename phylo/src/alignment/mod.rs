@@ -1,6 +1,5 @@
 use std::fmt::{Debug, Display};
 
-use anyhow::bail;
 use hashbrown::HashMap;
 
 use crate::alphabets::Alphabet;
@@ -10,7 +9,7 @@ use crate::phylo_info::{
     set_missing_tree_node_ids, validate_ids_with_ancestors, validate_taxa_ids,
 };
 use crate::tree::{NodeIdx, NodeIdx::Internal as Int, NodeIdx::Leaf, Tree};
-use crate::{align, aligned_seq, record, Result};
+use crate::{align, aligned_seq, bail, record, Result};
 
 pub mod sequences;
 pub use sequences::*;
@@ -75,7 +74,7 @@ pub trait Alignment: Display + Clone + Debug {
     fn leaf_map(&self, node: &NodeIdx) -> &Mapping;
     fn leaf_maps(&self) -> &SeqMaps;
     fn internal_alignments(&self) -> &InternalAlignments;
-    /// Checks if inputs are compatible, removes columns with only gaps and calls [`Self::from_aligned_unchecked`].  
+    /// Checks if inputs are compatible, removes columns with only gaps and calls [`Self::from_aligned_unchecked`].
     ///
     /// # Errors
     ///
@@ -84,7 +83,7 @@ pub trait Alignment: Display + Clone + Debug {
     /// - bails if sequence IDs do not match the taxa IDs in the tree ([`validate_taxa_ids`])
     fn from_aligned(mut sequences: Sequences, tree: &Tree) -> Result<Self> {
         if !sequences.aligned {
-            bail!("Sequences are not aligned")
+            bail!(Alignment, "sequences must be aligned")
         }
         sequences.ids_are_unique()?;
         validate_taxa_ids(tree, &sequences)?;
@@ -110,8 +109,8 @@ pub trait AncestralAlignment: Alignment {
     fn ancestral_seqs(&self) -> &Sequences;
     fn ancestral_map(&self, node_idx: &NodeIdx) -> &Mapping;
     fn ancestral_maps(&self) -> &SeqMaps;
-    fn update_ancestral_map(&mut self, node_idx: &NodeIdx, map: Mapping);
-    /// Checks if inputs are compatible and calls [`Self::from_aligned_with_ancestral_unchecked`].  
+    fn update_ancestral_map(&mut self, node_idx: &NodeIdx, map: Mapping) -> Result<()>;
+    /// Checks if inputs are compatible and calls [`Self::from_aligned_with_ancestral_unchecked`].
     /// Checks:
     /// - if sequences are aligned
     /// - if sequence IDs are unique ([`Sequences::ids_are_unique`])
@@ -123,7 +122,7 @@ pub trait AncestralAlignment: Alignment {
     /// may lead to unexpected panics or wrong results.
     fn from_aligned_with_ancestral(mut all_seqs: Sequences, tree: &Tree) -> Result<Self> {
         if !all_seqs.aligned {
-            bail!("Sequences are not aligned")
+            bail!(Alignment, "sequences must be aligned")
         }
         all_seqs.ids_are_unique()?;
         validate_ids_with_ancestors(tree, &all_seqs)?;
@@ -189,11 +188,12 @@ impl Alignment for MSA {
     ///
     /// # Example
     /// ```
-    /// # use bio::io::fasta::Record;
     /// use phylo::alignment::{Alignment, MSA, Sequences};
     /// use phylo::alphabets::Alphabet;
     /// use phylo::{record, tree};
-    /// # fn main() -> std::result::Result<(), anyhow::Error> {
+    /// # use phylo::Result;
+    ///
+    /// # fn main() -> Result<()> {
     /// let tree = tree!("(((A0:1.0,B1:1.0):1.0,C2:1.0):1.0);");
     /// let seqs = Sequences::with_alphabet(vec![
     ///     record!("A0", Some("A0 sequence"), b"AAAA"),
@@ -216,11 +216,11 @@ impl Alignment for MSA {
     ///
     /// # Example
     /// ```
-    /// # use bio::io::fasta::Record;
-    /// use phylo::alignment::{Alignment, MSA};
-    /// use phylo::alignment::Sequences;
+    /// use phylo::alignment::{Alignment, MSA, Sequences};
     /// use phylo::{record, tree};
-    /// # fn main() -> std::result::Result<(), anyhow::Error> {
+    /// # use phylo::Result;
+    ///
+    /// # fn main() -> Result<()> {
     /// let tree = tree!("(((A0:1.0,B1:1.0):1.0,C2:1.0):1.0);");
     /// let seqs = Sequences::new(vec![
     ///     record!("A0", Some("A0 sequence"), b"AAAA"),
@@ -244,11 +244,11 @@ impl Alignment for MSA {
     ///
     /// # Example
     /// ```
-    /// # use bio::io::fasta::Record;
-    /// use phylo::alignment::{MSA, Alignment};
-    /// use phylo::alignment::Sequences;
+    /// use phylo::alignment::{Alignment, MSA, Sequences};
     /// use phylo::{record, tree};
-    /// # fn main() -> std::result::Result<(), anyhow::Error> {
+    /// # use phylo::Result;
+    ///
+    /// # fn main() -> Result<()> {
     /// let tree = tree!("(((A0:1.0,B1:1.0):1.0,C2:1.0):1.0);");
     /// let seqs = Sequences::new(vec![
     ///     record!("A0", Some("A0 sequence"), b"AAAA"),
@@ -279,12 +279,12 @@ impl Alignment for MSA {
     ///
     /// # Example
     /// ```
-    /// # use bio::io::fasta::Record;
-    /// use phylo::alignment::{MSA, Alignment};
-    /// use phylo::alignment::Sequences;
+    /// use phylo::alignment::{Alignment, MSA, Sequences};
     /// use phylo::phylo_info::PhyloInfo;
     /// use phylo::{record, tree};
-    /// # fn main() -> std::result::Result<(), anyhow::Error> {
+    /// # use phylo::Result;
+    ///
+    /// # fn main() -> Result<()> {
     /// let tree = tree!("(((A0:1.0,B1:1.0):1.0,C2:1.0):1.0);");
     /// let seqs = Sequences::new(vec![
     ///     record!("A0", Some("A0 sequence"), b"AAAA"),
@@ -400,12 +400,12 @@ impl Alignment for MASA {
 
     /// # Example
     /// ```
-    /// # use bio::io::fasta::Record;
-    /// use phylo::alignment::{MASA, Alignment, AncestralAlignment};
-    /// use phylo::alignment::Sequences;
+    /// use phylo::alignment::{Alignment, AncestralAlignment, MASA, Sequences};
     /// use phylo::phylo_info::PhyloInfo;
     /// use phylo::{record, tree};
-    /// # fn main() -> std::result::Result<(), anyhow::Error> {
+    /// # use phylo::Result;
+    ///
+    /// # fn main() -> Result<()> {
     /// let tree = tree!("(((A0:1.0,B1:1.0)I1:1.0,C2:1.0)I2:1.0);");
     /// let seqs = Sequences::new(vec![
     ///     record!("A0", Some("A0 sequence"), b"AAAA"),
@@ -420,14 +420,14 @@ impl Alignment for MASA {
     /// assert_eq!(aligned_seqs, seqs);
     /// // checking ancestral sequences
     /// let root_seq = phylo_info.msa.ancestral_seqs().record_by_id("I2").seq();
-    /// let root_seq = std::str::from_utf8(root_seq).unwrap().to_string();
+    /// let root_seq = String::from_utf8_lossy(root_seq);
     /// assert_eq!(root_seq, "XX");
     /// let root_map = phylo_info.msa.ancestral_map(&phylo_info.tree.root);
     /// assert_eq!(root_map, &vec![Some(0), Some(1), None, None]);
     /// // Ancestral sequences are inferred by (hard coded) ParsimonyPresenceAbsence.
     /// // Alternatively, you may call MSA::from_aligned and then call ASR on that.
     /// let i1_seq = phylo_info.msa.ancestral_seqs().record_by_id("I1").seq();
-    /// let i1_seq = std::str::from_utf8(i1_seq).unwrap().to_string();
+    /// let i1_seq = String::from_utf8_lossy(i1_seq);
     /// assert_eq!(i1_seq, "XXX");
     /// let i1_map = phylo_info.msa.ancestral_map(&phylo_info.tree.by_id("I1").idx);
     /// assert_eq!(i1_map, &vec![Some(0), Some(1), None, Some(2)]);
@@ -471,22 +471,32 @@ impl AncestralAlignment for MASA {
 
     // This is needed because with the TKF models we need to re-estimate the ancestral maps after
     // a tree move is applied.
-    fn update_ancestral_map(&mut self, node_idx: &NodeIdx, map: Mapping) {
+    fn update_ancestral_map(&mut self, node_idx: &NodeIdx, map: Mapping) -> Result<()> {
         if let Some(anc_map) = self.ancestral_maps.get_mut(node_idx) {
             *anc_map = map;
+            Ok(())
         } else {
-            panic!("NodeIdx {node_idx} is not an internal node");
+            match node_idx {
+                Int(_) => bail!(
+                    AncestralAlignment,
+                    "{node_idx} is not a valid internal node in the tree"
+                ),
+                Leaf(_) => bail!(
+                    AncestralAlignment,
+                    "ancestral map cannot be set for a leaf node like {node_idx}"
+                ),
+            }
         }
     }
 
     /// # Example
     /// ```
-    /// # use bio::io::fasta::Record;
-    /// use phylo::alignment::{MASA, Alignment, AncestralAlignment};
-    /// use phylo::alignment::Sequences;
+    /// use phylo::alignment::{Alignment, AncestralAlignment, MASA, Sequences};
     /// use phylo::phylo_info::PhyloInfo;
     /// use phylo::{record, tree};
-    /// # fn main() -> std::result::Result<(), anyhow::Error> {
+    /// # use phylo::Result;
+    ///
+    /// # fn main() -> Result<()> {
     /// let tree = tree!("(((A0:1.0,B1:1.0)I1:1.0,C2:1.0)I2:1.0);");
     /// let seqs = Sequences::new(vec![
     ///     record!("A0", Some("A0 sequence"), b"AG-T"),

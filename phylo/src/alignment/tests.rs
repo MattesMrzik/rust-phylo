@@ -1,3 +1,4 @@
+use assert_matches::assert_matches;
 use rand::rng;
 use rand::seq::IteratorRandom;
 
@@ -12,7 +13,7 @@ use crate::tree::{
     NodeIdx::{Internal as I, Leaf as L},
     Tree,
 };
-use crate::{align, record, tree};
+use crate::{align, record, tree, Error};
 
 #[cfg(test)]
 fn test_alignment(ids: &[&str]) -> Sequences {
@@ -159,11 +160,11 @@ fn test_try_record_by_id() {
     assert_eq!(rec.seq(), b"AAAAAA");
 
     let err = sequences.try_record_by_id("ZZ");
-    assert!(err.is_err());
-    assert!(err
-        .unwrap_err()
-        .to_string()
-        .contains("Sequence with id ZZ not found"));
+
+    assert_matches!(
+        err,
+        Err(Error::Sequence(msg)) if msg.contains("sequence with id ZZ not found")
+    );
 }
 
 #[test]
@@ -195,7 +196,10 @@ fn fail_from_unaligned_sequences() {
     ]);
     let tree = test_tree();
     let msa = MSA::from_aligned(seqs, &tree);
-    assert!(msa.is_err());
+    assert_matches!(
+        msa,
+        Err(Error::Alignment(msg)) if msg.contains("sequences must be aligned")
+    );
 }
 
 #[test]
@@ -363,17 +367,15 @@ fn display_ancestral_alignment() {
 
 #[test]
 fn from_aligned_with_ancestral_fails() {
-    // arrange
     let tree = tree!("((C:0.1,D:0.2)I01:0.3,(A:0.4,B:0.5)I02:0.6)Root;");
     let seqs = Sequences::new(read_sequences("./data/sequences_DNA2_unaligned.fasta").unwrap());
 
-    // act
-    let error_msg = MASA::from_aligned_with_ancestral(seqs, &tree)
-        .unwrap_err()
-        .to_string();
+    let err = MASA::from_aligned_with_ancestral(seqs, &tree);
 
-    // assert
-    assert!(error_msg.contains("not aligned"));
+    assert_matches!(
+        err,
+        Err(Error::Alignment(msg)) if msg.contains("must be aligned")
+    );
 }
 
 #[test]
@@ -473,4 +475,42 @@ fn sequence_iterator_access() {
     let second = iter.next();
     assert!(second.is_some());
     assert_eq!(second.unwrap().id(), "seq2");
+}
+
+#[test]
+fn update_ancestral_map_nonexistent_internal() {
+    let tree = tree!("((C:0.1,D:0.2)I01:0.3,(A:0.4,B:0.5)I02:0.6)Root;");
+    let sequences =
+        Sequences::new(read_sequences("./data/sequences_DNA1_with_ancestors.fasta").unwrap());
+    let mut msa = MASA::from_aligned_with_ancestral(sequences, &tree).unwrap();
+    let err = msa.update_ancestral_map(&I(10), align!(b"ACGT"));
+    assert_matches!(
+        err,
+        Err(Error::AncestralAlignment(msg)) if msg.contains("node 10 is not a valid internal node in the tree")
+    );
+}
+
+#[test]
+fn update_ancestral_map_leaf() {
+    let tree = tree!("((C:0.1,D:0.2)I01:0.3,(A:0.4,B:0.5)I02:0.6)Root;");
+    let sequences =
+        Sequences::new(read_sequences("./data/sequences_DNA1_with_ancestors.fasta").unwrap());
+    let mut msa = MASA::from_aligned_with_ancestral(sequences, &tree).unwrap();
+    let err = msa.update_ancestral_map(&L(2), align!(b"ACGT"));
+    assert_matches!(
+        err,
+        Err(Error::AncestralAlignment(msg)) if msg.contains("ancestral map cannot be set for a leaf node")
+    );
+}
+
+#[test]
+fn update_ancestral_map_valid() {
+    let tree = tree!("((C:0.1,D:0.2)I01:0.3,(A:0.4,B:0.5)I02:0.6)Root;");
+    let sequences =
+        Sequences::new(read_sequences("./data/sequences_DNA1_with_ancestors.fasta").unwrap());
+    let mut msa = MASA::from_aligned_with_ancestral(sequences, &tree).unwrap();
+    assert_eq!(msa.ancestral_maps.get(&I(1)).unwrap(), &align!(b"A-CCA"));
+    let result = msa.update_ancestral_map(&I(1), align!(b"A---A"));
+    assert_matches!(result, Ok(_));
+    assert_eq!(msa.ancestral_maps.get(&I(1)).unwrap(), &align!(b"A---A"));
 }
