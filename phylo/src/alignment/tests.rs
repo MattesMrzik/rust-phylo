@@ -478,7 +478,7 @@ fn sequence_iterator_access() {
 }
 
 #[test]
-fn update_ancestral_maps() {
+fn update_ancestral_map_valid() {
     let tree = tree!("(((A1:2.0,B2:2.0)I3:0.3,C4:2.0)R5:1.0);");
     let mut msa = MASA::from_aligned_with_ancestral(
         Sequences::new(vec![
@@ -492,35 +492,31 @@ fn update_ancestral_maps() {
     )
     .unwrap();
 
-    // the actual chars are not important in the creation of the new_map, just the presence/absence of gaps
-    let new_map = align!(b"A-AA-AAA-A");
     let node_id = "I3";
     let node_idx = &tree.idx(node_id);
-    msa.update_ancestral_map(node_idx, new_map.clone());
+    assert_eq!(msa.ancestral_map(node_idx), &align!(b"--N-NN----"));
+    // the actual chars are not important in the creation of the new_map, just the presence/absence of gaps
+    let new_map = align!(b"A-AA-AAA-A");
+    msa.update_ancestral_map(node_idx, new_map.clone())
+        .expect("should update ancestral map successfully");
     assert_eq!(msa.ancestral_map(node_idx), &new_map);
     assert_eq!(msa.ancestral_seqs().record_by_id(node_id).seq(), b"XTXCXXX");
 
     let new_map = align!(b"---A-A---A");
-    msa.update_ancestral_map(node_idx, new_map.clone());
+    msa.update_ancestral_map(node_idx, new_map.clone())
+        .expect("should update ancestral map successfully");
     assert_eq!(msa.ancestral_map(node_idx), &new_map);
     assert_eq!(msa.ancestral_seqs().record_by_id(node_id).seq(), b"XCX");
 
     let new_map = align!(b"-----A--A-");
-    msa.update_ancestral_map(node_idx, new_map.clone());
+    msa.update_ancestral_map(node_idx, new_map.clone())
+        .expect("should update ancestral map successfully");
     assert_eq!(msa.ancestral_map(node_idx), &new_map);
     assert_eq!(msa.ancestral_seqs().record_by_id(node_id).seq(), b"CX");
 }
 
 #[test]
-#[should_panic]
 fn update_ancestral_maps_fails_wrong_length() {
-    // TODO change this to use a phylo error
-    //
-    //
-    //
-    //
-    //
-    //
     let tree = tree!("(((A1:2.0,B2:2.0)I3:0.3,C4:2.0)R5:1.0);");
     let mut msa = MASA::from_aligned_with_ancestral(
         Sequences::new(vec![
@@ -536,15 +532,20 @@ fn update_ancestral_maps_fails_wrong_length() {
     let new_map = align!(b"A-AAAA-A");
     let node_id = "I3";
     let node_idx = &tree.idx(node_id);
-    msa.update_ancestral_map(node_idx, new_map);
+    let err = msa.update_ancestral_map(node_idx, new_map);
+    assert_matches!(
+        err,
+        Err(Error::AncestralAlignment(msg)) if msg.contains("does not match MSA length")
+    );
 }
 
+#[test]
 fn update_ancestral_map_nonexistent_internal() {
     let tree = tree!("((C:0.1,D:0.2)I01:0.3,(A:0.4,B:0.5)I02:0.6)Root;");
     let sequences =
         Sequences::new(read_sequences("./data/sequences_DNA1_with_ancestors.fasta").unwrap());
     let mut msa = MASA::from_aligned_with_ancestral(sequences, &tree).unwrap();
-    let err = msa.update_ancestral_map(&I(10), align!(b"ACGT"));
+    let err = msa.update_ancestral_map(&I(10), align!(b"-ACGT"));
     assert_matches!(
         err,
         Err(Error::AncestralAlignment(msg)) if msg.contains("node 10 is not a valid internal node in the tree")
@@ -557,21 +558,9 @@ fn update_ancestral_map_leaf() {
     let sequences =
         Sequences::new(read_sequences("./data/sequences_DNA1_with_ancestors.fasta").unwrap());
     let mut msa = MASA::from_aligned_with_ancestral(sequences, &tree).unwrap();
-    let err = msa.update_ancestral_map(&L(2), align!(b"ACGT"));
+    let err = msa.update_ancestral_map(&L(2), align!(b"-ACGT"));
     assert_matches!(
         err,
         Err(Error::AncestralAlignment(msg)) if msg.contains("ancestral map cannot be set for a leaf node")
     );
-}
-
-#[test]
-fn update_ancestral_map_valid() {
-    let tree = tree!("((C:0.1,D:0.2)I01:0.3,(A:0.4,B:0.5)I02:0.6)Root;");
-    let sequences =
-        Sequences::new(read_sequences("./data/sequences_DNA1_with_ancestors.fasta").unwrap());
-    let mut msa = MASA::from_aligned_with_ancestral(sequences, &tree).unwrap();
-    assert_eq!(msa.ancestral_maps.get(&I(1)).unwrap(), &align!(b"A-CCA"));
-    let result = msa.update_ancestral_map(&I(1), align!(b"A---A"));
-    assert_matches!(result, Ok(_));
-    assert_eq!(msa.ancestral_maps.get(&I(1)).unwrap(), &align!(b"A---A"));
 }

@@ -1,4 +1,3 @@
-use anyhow::bail;
 use bio::io::fasta::Record;
 use hashbrown::HashMap;
 
@@ -10,7 +9,7 @@ use crate::tree::{
     NodeIdx::{self, Internal, Leaf},
     Tree,
 };
-use crate::{aligned_seq, Result};
+use crate::{aligned_seq, bail, Result};
 
 mod phyloinfo_builder;
 pub use phyloinfo_builder::*;
@@ -192,7 +191,7 @@ impl<AA: AncestralAlignment> PhyloInfo<AA> {
                     "  Column {col_idx}: {num_insertions} insertions\n"
                 ));
             }
-            bail!(msg);
+            bail!(AncestralAlignment, msg);
         }
         Ok(())
     }

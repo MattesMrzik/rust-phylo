@@ -1,6 +1,5 @@
 use std::array::from_fn;
 
-use anyhow::bail;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use lazy_static::lazy_static;
@@ -12,7 +11,7 @@ use crate::phylo_info::PhyloInfo;
 use crate::random::RandomGenerator;
 use crate::tkf_model::{log_i1, Event, TKFIndelCost, TKFIndelModelInfo, TKFModel};
 use crate::tree::NodeIdx::{self, Internal, Leaf};
-use crate::Result;
+use crate::{bail, Result};
 
 /// Size of the dynamic programming column: 2 (assignments) * 2 (deletion or not) ^ 5 (edges) = 128, see [`QuartetEdges`].
 const DP_COL_SIZE: usize = 128;
@@ -274,10 +273,16 @@ where
     pub fn reestimate(&mut self, v2_idx: &NodeIdx) -> Result<f64> {
         let v2_id = self.cost.phylo.tree.node(v2_idx).id.clone();
         if v2_idx == &self.cost.phylo.tree.root {
-            bail!("reestimation can't be performed for the root '{v2_id}'");
+            bail!(
+                EdgeSeqsReestimator,
+                "reestimation can't be performed for the root '{v2_id}'"
+            );
         }
         if let Leaf(_) = v2_idx {
-            bail!("reestimation can't be performed for leaf node '{v2_id}'");
+            bail!(
+                EdgeSeqsReestimator,
+                "reestimation can't be performed for leaf node '{v2_id}'"
+            );
         }
         Ok(self.reestimate_unchecked(v2_idx))
     }
@@ -381,8 +386,11 @@ where
         let msa = &mut self.cost.phylo.msa;
         assert!(v1_mapping.len() == msa.len());
         assert!(v2_mapping.len() == msa.len());
-        msa.update_ancestral_map(self.quartet_edges.v1(), v1_mapping);
-        msa.update_ancestral_map(self.quartet_edges.v2(), v2_mapping);
+        // The expect() are never get triggered, unless something is seriously wrong with the algo.
+        msa.update_ancestral_map(self.quartet_edges.v1(), v1_mapping)
+            .expect("Failed to update ancestral map for v1");
+        msa.update_ancestral_map(self.quartet_edges.v2(), v2_mapping)
+            .expect("Failed to update ancestral map for v2");
     }
 
     /// Updates the tmp values of the model info such that there are valid for further

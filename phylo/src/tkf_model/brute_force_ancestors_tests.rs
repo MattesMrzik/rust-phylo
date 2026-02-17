@@ -151,8 +151,15 @@ fn cost_for_edge_seqs<T: TKFModel>(
     let seq_len = cost.phylo.msa.len();
 
     let (new_v1_mapping, new_v2_mapping) = edge_seqs_to_mappings(edge_seqs, &block_lens, seq_len);
-    cost.phylo.msa.update_ancestral_map(v1_idx, new_v1_mapping);
-    cost.phylo.msa.update_ancestral_map(v2_idx, new_v2_mapping);
+    // The expect() are never get triggered, unless something is seriously wrong with the algo.
+    cost.phylo
+        .msa
+        .update_ancestral_map(v1_idx, new_v1_mapping)
+        .expect("Could not update ancestral map for v1");
+    cost.phylo
+        .msa
+        .update_ancestral_map(v2_idx, new_v2_mapping)
+        .expect("Could not update ancestral map for v2");
 
     make_nodes_dirty(cost, v2_idx);
 
