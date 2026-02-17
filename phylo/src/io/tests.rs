@@ -1,11 +1,12 @@
 use std::fs::File;
 use std::io::Read;
 
+use assert_matches::assert_matches;
 use rstest::*;
 use tempfile::tempdir;
 
 use crate::io::{read_sequences, write_newick_to_file, write_sequences_to_file};
-use crate::{record_wo_desc as record, tree};
+use crate::{record_wo_desc as record, tree, Error};
 
 #[test]
 fn reading_correct_fasta() {
@@ -31,21 +32,23 @@ fn reading_correct_fasta() {
 )]
 #[case::weird_chars(
     "./data/sequences_garbage_weird_symbols.fasta",
-    "Invalid genetic sequence"
+    "invalid genetic sequence"
 )]
 fn reading_incorrect_fasta(#[case] input: &str, #[case] exp_error: &str) {
     let res = read_sequences(input);
-    assert!(res.is_err());
-    assert!(res.unwrap_err().to_string().contains(exp_error));
+    assert_matches!(res, Err(Error::Io(msg)) if msg.contains(exp_error));
 }
 
 #[test]
 fn reading_nonexistent_fasta() {
-    assert!(read_sequences("./data/sequences_nonexistent.fasta").is_err());
+    assert_matches!(
+        read_sequences("./data/sequences_nonexistent.fasta"),
+        Err(Error::Other(_))
+    );
 }
 
 #[test]
-fn test_write_sequences_to_file() {
+fn write_sequences() {
     let sequences = vec![record!("seq1", b"ATGC"), record!("seq2", b"CGTA")];
     let temp_dir = tempdir().unwrap();
     let output_path = temp_dir.path().join("output.fasta");
@@ -60,27 +63,29 @@ fn test_write_sequences_to_file() {
 }
 
 #[test]
-fn test_write_sequences_to_file_bad_path() {
+fn write_sequences_to_bad_path() {
     let sequences = vec![record!("seq1", b"ATGC"), record!("seq2", b"CGTA")];
     let temp_dir = tempdir().unwrap();
     let output_path = temp_dir
         .path()
         .join("nonexistent_folder")
         .join("output.fasta");
-    assert!(write_sequences_to_file(&sequences, &output_path).is_err());
+    let res = write_sequences_to_file(&sequences, &output_path);
+    assert_matches!(res, Err(Error::Io(msg)) if msg.to_ascii_lowercase().contains("no such file or directory"));
 }
 
 #[test]
-fn test_write_sequences_to_existing_file() {
+fn write_sequences_to_existing_file() {
     let sequences = vec![record!("seq1", b"ATGC"), record!("seq2", b"CGTA")];
     let temp_dir = tempdir().unwrap();
     let output_path = temp_dir.path().join("output.fasta");
     File::create(&output_path).unwrap();
-    assert!(write_sequences_to_file(&sequences, &output_path).is_err());
+    let res = write_sequences_to_file(&sequences, &output_path);
+    assert_matches!(res, Err(Error::Io(msg)) if msg.contains("already exists"));
 }
 
 #[test]
-fn test_write_newick_to_file() {
+fn write_newick() {
     let newick = "(((A:1.4,B:2.45):1,(D:1.2,E:2.1):1):0);";
     let tree = tree!(newick);
     let temp_dir = tempdir().unwrap();
@@ -97,7 +102,7 @@ fn test_write_newick_to_file() {
 }
 
 #[test]
-fn test_write_multiple_newick_to_file() {
+fn write_multiple_newick_to_file() {
     let newick0 = "(((((A:1,B:1)F:1,C:2)G:1,D:3)H:1,E:4)I:1);";
     let newick1 = "(((A:1.5,B:2.3)E:5.1,(C:3.9,D:4.8)F:6.2)G:7.3);";
     let newick2 = "((A:1,(B:1,C:1)E:2)F:1);";
@@ -120,7 +125,7 @@ fn test_write_multiple_newick_to_file() {
 }
 
 #[test]
-fn test_write_newickto_file_bad_path() {
+fn write_newick_to_bad_path() {
     let tree = tree!("(((A:1.4,B:2.45):1,(D:1.2,E:2.1):1):0);");
 
     let temp_dir = tempdir().unwrap();
@@ -128,16 +133,18 @@ fn test_write_newickto_file_bad_path() {
         .path()
         .join("nonexistent_folder")
         .join("output.newick");
-    assert!(write_newick_to_file(&[tree], output_path).is_err());
+    let res = write_newick_to_file(&[tree], output_path);
+    assert_matches!(res, Err(Error::Io(msg)) if msg.to_ascii_lowercase().contains("no such file or directory"));
 }
 
 #[test]
-fn test_write_newick_to_existing_file() {
+fn write_newick_to_existing_file() {
     let tree = tree!("(((A:1.4,B:2.45):1,(D:1.2,E:2.1):1):0);");
     let temp_dir = tempdir().unwrap();
     let output_path = temp_dir.path().join("output.newick");
     File::create(&output_path).unwrap();
-    assert!(write_newick_to_file(&[tree], output_path).is_err());
+    let res = write_newick_to_file(&[tree], &output_path);
+    assert_matches!(res, Err(Error::Io(msg)) if msg.contains("already exists"));
 }
 
 #[test]

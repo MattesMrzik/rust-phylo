@@ -1,4 +1,5 @@
 use approx::assert_relative_eq;
+use assert_matches::assert_matches;
 use nalgebra::DVector;
 
 use crate::alignment::{Alignment, AncestralAlignment, Mapping, Sequences, MASA};
@@ -14,7 +15,7 @@ use crate::tkf_model::tkf92::TKF92IndelModel;
 use crate::tkf_model::tkf92_fixed_fragmentation::TKF92FixedIndelModel;
 use crate::tkf_model::tkf_indel::DUMMY_FREQS;
 use crate::tree::NodeIdx::{self, Internal, Leaf};
-use crate::{frequencies, record_wo_desc as record, tree};
+use crate::{frequencies, record_wo_desc as record, tree, Error};
 
 use super::*;
 
@@ -699,14 +700,11 @@ fn tkf91_cost_builder_fails() {
     let phylo = setup_test_phylo(Alphabet::protein());
     let subst_model = SubstModel::<GTR>::new(&[], &[]);
 
-    let tkf91_err_msg = TKF91CostBuilder::new(0.1, 0.2, subst_model, phylo)
-        .build()
-        .unwrap_err()
-        .to_string();
+    let tkf91_err = TKF91CostBuilder::new(0.1, 0.2, subst_model, phylo).build();
 
-    assert_eq!(
-        tkf91_err_msg,
-        "Alphabet mismatch between model and alignment"
+    assert_matches!(
+        tkf91_err, Err(Error::Alphabet(msg)) if msg.contains(
+        "alphabet mismatch between model and alignment")
     );
 }
 
@@ -715,14 +713,11 @@ fn tkf92_cost_builder_fails() {
     let phylo = setup_test_phylo(Alphabet::protein());
     let subst_model = SubstModel::<GTR>::new(&[], &[]);
 
-    let tkf92_err_msg = TKF92CostBuilder::new(0.1, 0.2, 0.3, subst_model, phylo)
-        .build()
-        .unwrap_err()
-        .to_string();
+    let tkf92_err = TKF92CostBuilder::new(0.1, 0.2, 0.3, subst_model, phylo).build();
 
-    assert_eq!(
-        tkf92_err_msg,
-        "Alphabet mismatch between model and alignment"
+    assert_matches!(
+        tkf92_err, Err(Error::Alphabet(msg)) if msg.contains(
+        "alphabet mismatch between model and alignment")
     );
 }
 

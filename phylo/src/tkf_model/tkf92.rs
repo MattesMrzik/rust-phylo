@@ -1,7 +1,6 @@
 use std::cell::RefCell;
 use std::fmt::Display;
 
-use anyhow::bail;
 use hashbrown::HashSet;
 use log::warn;
 use num_enum::{FromPrimitive, IntoPrimitive};
@@ -14,7 +13,7 @@ use crate::tkf_model::{
     validate_lambda_and_mu, TKFCost, TKFIndelCost, TKFIndelModelInfo, TKFModel, DEFAULT_LAMBDA,
     DEFAULT_MU, DEFAULT_R,
 };
-use crate::Result;
+use crate::{bail, Result};
 
 #[derive(Debug, Eq, PartialEq, FromPrimitive, IntoPrimitive)]
 #[repr(usize)]
@@ -204,7 +203,7 @@ impl<Q: QMatrix, AA: AncestralAlignment> TKF92CostBuilder<Q, AA> {
 
     pub fn build(self) -> Result<TKFCost<Q, TKF92IndelModel, AA>> {
         if self.phylo.msa.alphabet() != Q::alphabet() {
-            bail!("Alphabet mismatch between model and alignment");
+            bail!(Alphabet, "alphabet mismatch between model and alignment");
         }
 
         let (lambda, mu) = validate_lambda_and_mu(self.lambda, self.mu);

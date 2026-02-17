@@ -1,3 +1,4 @@
+use anyhow::Context;
 use log::{debug, info};
 use nalgebra::{DMatrix, DVector};
 use rand::distr::weighted::WeightedIndex;
@@ -33,9 +34,10 @@ impl<D: EvolutionaryDistance> TreeBuilder for NJTreeBuilder<D> {
     /// use phylo::evolutionary_distances::LevenshteinDNACorrected;
     /// use phylo::io::read_sequences;
     /// use phylo::random::DefaultGenerator;
-    /// use phylo::tree::NJTreeBuilder;
-    /// use phylo::tree::TreeBuilder;
-    /// # fn main() -> std::result::Result<(), anyhow::Error> {
+    /// use phylo::tree::{NJTreeBuilder, TreeBuilder};
+    /// # use phylo::Result;
+    ///
+    /// # fn main() -> Result<()> {
     /// let sequences = Sequences::new(read_sequences("./data/sequences_DNA1.fasta")?);
     /// let mut rng = DefaultGenerator::default();
     /// let nj_builder = NJTreeBuilder::new(LevenshteinDNACorrected {});
@@ -65,9 +67,10 @@ impl<D: EvolutionaryDistance> NJTreeBuilder<D> {
     /// use phylo::evolutionary_distances::LevenshteinDNACorrected;
     /// use phylo::io::read_sequences;
     /// use phylo::random::DefaultGenerator;
-    /// use phylo::tree::NJTreeBuilder;
-    /// use phylo::tree::TreeBuilder;
-    /// # fn main() -> std::result::Result<(), anyhow::Error> {
+    /// use phylo::tree::{  NJTreeBuilder, TreeBuilder};
+    /// # use phylo::Result;
+    ///
+    /// # fn main() -> Result<()> {
     /// let sequences = Sequences::new(read_sequences("./data/sequences_DNA1.fasta")?);
     /// let mut rng = DefaultGenerator::default();
     /// let tree = NJTreeBuilder::new(LevenshteinDNACorrected {}).build(&sequences, &mut rng)?;
@@ -96,9 +99,10 @@ impl<D: EvolutionaryDistance> NJTreeBuilder<D> {
     /// use phylo::evolutionary_distances::LevenshteinDNACorrected;
     /// use phylo::io::read_sequences;
     /// use phylo::random::DefaultGenerator;
-    /// use phylo::tree::NJTreeBuilder;
-    /// use phylo::tree::TreeBuilder;
-    /// # fn main() -> std::result::Result<(), anyhow::Error> {
+    /// use phylo::tree::{NJTreeBuilder, TreeBuilder};
+    /// # use phylo::Result;
+    ///
+    /// # fn main() -> Result<()> {
     /// let sequences = Sequences::new(read_sequences("./data/sequences_DNA1.fasta")?);
     /// let mut rng = DefaultGenerator::default();
     /// let nj_builder = NJTreeBuilder::new_with_softmax(LevenshteinDNACorrected {}, 0.5);
@@ -199,7 +203,10 @@ impl<D: EvolutionaryDistance> NJTreeBuilder<D> {
                 Strategy::ArgMax => Self::argmin(delta_lengths),
             };
 
-            let index = rng.sample(&WeightedIndex::new(distribution.iter())?);
+            let index = rng.sample(
+                &WeightedIndex::new(distribution.iter())
+                    .context("Failed to generate WeightedIndex from distribution")?,
+            );
 
             let (i, j) = lower_triangle_index(index);
             let idx_new = cur_idx;

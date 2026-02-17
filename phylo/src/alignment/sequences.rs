@@ -2,13 +2,12 @@ use std::fmt::Display;
 use std::ops::{Index, IndexMut};
 use std::slice;
 
-use anyhow::bail;
 use bio::io::fasta::Record;
 use bitvec::vec::BitVec;
 use hashbrown::HashSet;
 
 use crate::alphabets::{Alphabet, GAP};
-use crate::{record, Result};
+use crate::{bail, record, Result};
 
 /// Container for a set of sequences, which may or may not be aligned.
 ///
@@ -219,7 +218,7 @@ impl Sequences {
         let rec = self.s.iter().find(|r| r.id() == id);
         match rec {
             Some(r) => Ok(r),
-            None => bail!("Sequence with id {id} not found"),
+            None => bail!(Sequence, "sequence with id {id} not found"),
         }
     }
 
@@ -337,7 +336,10 @@ impl Sequences {
         for record in self.iter() {
             let id = record.id();
             if !seen.insert(id) {
-                bail!("Duplicate record id ({id}) found in the sequences");
+                bail!(
+                    Sequence,
+                    "duplicate record id ({id}) found in the sequences"
+                )
             }
         }
         Ok(())
@@ -356,9 +358,10 @@ fn detect_alphabet(sequences: &[Record]) -> &'static Alphabet {
 
 #[cfg(test)]
 mod private_tests {
+    use assert_matches::assert_matches;
     use rstest::rstest;
 
-    use crate::{io::read_sequences, record_wo_desc as record};
+    use crate::{io::read_sequences, record_wo_desc as record, Error::Sequence};
 
     use super::*;
 
@@ -400,7 +403,6 @@ mod private_tests {
 
     #[test]
     fn ids_are_not_unique() {
-        // arrange
         let seqs = Sequences::new(vec![
             record!("on", b"X"),
             record!("tw", b"X"),
@@ -408,14 +410,12 @@ mod private_tests {
             record!("fo", b"N"),
         ]);
 
-        // act
         let result = seqs.ids_are_unique();
 
-        // assert
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Duplicate record id (on) found in the sequences"));
+        assert_matches!(
+            result,
+            Err(Sequence(msg)) if msg.contains("duplicate record id (on) found in the sequences")
+        );
     }
 
     #[test]

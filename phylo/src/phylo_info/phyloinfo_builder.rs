@@ -1,7 +1,6 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use anyhow::{bail, Ok};
 use log::{info, warn};
 use rand::{Rng, SeedableRng};
 
@@ -9,15 +8,13 @@ use crate::alignment::{Aligner, Alignment, AncestralAlignment, Sequences, MASA, 
 use crate::alphabets::Alphabet;
 use crate::asr::AncestralSequenceReconstruction;
 use crate::evolutionary_distances::{LevenshteinDNACorrected, LevenshteinProteinCorrected};
-use crate::io::{self, DataError};
+use crate::io::{self};
 use crate::parsimony::ParsimonyAligner;
 use crate::parsimony_presence_absence::ParsimonyPresenceAbsence;
 use crate::phylo_info::PhyloInfo;
 use crate::random::{DefaultGenerator, RandomGenerator};
-use crate::tree::NJTreeBuilder;
-use crate::tree::Tree;
-use crate::tree::TreeBuilder;
-use crate::Result;
+use crate::tree::{NJTreeBuilder, Tree, TreeBuilder};
+use crate::{bail, Result};
 
 pub struct PhyloInfoBuilder<A: Alignment, AA: AncestralAlignment> {
     sequence_file: PathBuf,
@@ -102,10 +99,12 @@ impl<A: Alignment, AA: AncestralAlignment> PhyloInfoBuilder<A, AA> {
     ///
     /// # Example
     /// ```
+    /// use phylo::alignment::Alignment;
     /// use phylo::alphabets::Alphabet;
     /// use phylo::phylo_info::PhyloInfoBuilder;
-    /// use phylo::alignment::{Alignment};
-    /// # fn main() -> std::result::Result<(), anyhow::Error> {
+    /// # use phylo::Result;
+    ///
+    /// # fn main() -> Result<()> {
     /// let info = PhyloInfoBuilder::new("./examples/data/sequences_DNA_small.fasta").alphabet(Some(Alphabet::protein())).build()?;
     /// assert_eq!(info.msa.alphabet(), Alphabet::protein());
     /// # Ok(()) }
@@ -129,9 +128,11 @@ impl<A: Alignment, AA: AncestralAlignment> PhyloInfoBuilder<A, AA> {
     ///
     /// # Example
     /// ```
+    /// use phylo::alignment::Alignment;
     /// use phylo::phylo_info::PhyloInfoBuilder;
-    /// use phylo::alignment::{Alignment};
-    /// # fn main() -> std::result::Result<(), anyhow::Error> {
+    /// # use phylo::Result;
+    ///
+    /// # fn main() -> Result<()> {
     /// let info = PhyloInfoBuilder::with_attrs(
     ///     "./examples/data/sequences_DNA_small.fasta",
     ///     "./examples/data/tree_diff_branch_lengths_2.newick")
@@ -197,10 +198,10 @@ impl<A: Alignment, AA: AncestralAlignment> PhyloInfoBuilder<A, AA> {
                 info!("Aligned sequences including ancestral sequences");
                 AA::from_aligned_with_ancestral(sequences, &tree)
             } else {
-                bail!("Building an ancestral alignment from unaligned sequences (including ancestral_sequencess) is not supported");
+                bail!(AncestralAlignment, "building an ancestral alignment from unaligned sequences (including ancestral sequences) is not supported");
             }
         } else {
-            bail!("The number of sequences ({}) does not match the number of leaves ({}) nor the number of nodes ({}) in the tree", sequences.len(), tree.n, tree.len());
+            bail!(Tree, "the number of sequences ({}) does not match the number of leaves ({}) nor the number of nodes ({}) in the tree", sequences.len(), tree.n, tree.len());
         }?;
 
         Ok(PhyloInfo { tree, msa })
@@ -242,7 +243,10 @@ impl<A: Alignment, AA: AncestralAlignment> PhyloInfoBuilder<A, AA> {
             info!("Using corrected Levenshtein protein distance for distance calculation");
             NJTreeBuilder::new(LevenshteinProteinCorrected {}).build(sequences, rng)
         } else {
-            unreachable!("Unknown alphabet, should have been defined earlier");
+            bail!(
+                Alphabet,
+                "unknown alphabet, should have been defined earlier"
+            );
         }
     }
 
@@ -251,13 +255,18 @@ impl<A: Alignment, AA: AncestralAlignment> PhyloInfoBuilder<A, AA> {
             "Reading sequences from file {}",
             self.sequence_file.display()
         );
-        let sequences = if let Some(alphabet) = self.alphabet {
-            info!("Using provided {alphabet} alphabet");
-            Sequences::with_alphabet(io::read_sequences(&self.sequence_file)?, alphabet)
-        } else {
-            info!("No alphabet provided, detecting alphabet from sequences");
-            Sequences::new(io::read_sequences(&self.sequence_file)?)
+
+        let sequences = match self.alphabet {
+            Some(alphabet) => {
+                info!("Using provided {} alphabet", alphabet);
+                Sequences::with_alphabet(io::read_sequences(&self.sequence_file)?, alphabet)
+            }
+            None => {
+                info!("No alphabet provided, detecting alphabet from sequences");
+                Sequences::new(io::read_sequences(&self.sequence_file)?)
+            }
         };
+
         info!("{} sequence(s) read successfully", sequences.len());
         Ok(sequences)
     }
@@ -266,12 +275,10 @@ impl<A: Alignment, AA: AncestralAlignment> PhyloInfoBuilder<A, AA> {
     /// Prints a warning if there is more than one tree because only the first tree will be processed.
     fn check_tree_number(&self, trees: &[Tree]) -> Result<()> {
         if trees.is_empty() {
-            bail!(DataError {
-                message: String::from("No trees in the tree file, aborting")
-            });
+            bail!(Tree, "no trees provided")
         }
         if trees.len() > 1 {
-            warn!("More than one tree in the tree file, only the first tree will be processed");
+            warn!("More than one tree provided, only the first tree will be processed");
         }
         Ok(())
     }
@@ -304,7 +311,7 @@ pub(crate) fn set_missing_tree_node_ids(tree: &Tree) -> Result<Tree> {
             tree_with_all_ids.nodes[usize::from(node_idx)].id = new_id.clone();
             info!("Set missing id of node {node_idx} to {new_id}");
         } else if !seen_user_set_ids.insert(id.to_string()) {
-            bail!("Duplicate id ({id}) found in the leaves of the tree");
+            bail!(Tree, "duplicate id ({id}) found in the leaves of the tree");
         }
     }
     Ok(tree_with_all_ids)
@@ -319,16 +326,18 @@ pub fn validate_taxa_ids(tree: &Tree, sequences: &Sequences) -> Result<()> {
     let mut missing_tips = sequence_ids.difference(&tip_ids).collect::<Vec<_>>();
     if !missing_tips.is_empty() {
         missing_tips.sort();
-        bail!(DataError {
-            message: format!("Mismatched IDs found, missing tree tip IDs: {missing_tips:?}")
-        });
+        bail!(
+            Tree,
+            "mismatched IDs found, missing node IDs: {missing_tips:?}"
+        )
     }
     let mut missing_seqs = tip_ids.difference(&sequence_ids).collect::<Vec<_>>();
     if !missing_seqs.is_empty() {
         missing_seqs.sort();
-        bail!(DataError {
-            message: format!("Mismatched IDs found, missing sequence IDs: {missing_seqs:?}")
-        });
+        bail!(
+            Sequence,
+            "mismatched IDs found, missing sequence IDs: {missing_seqs:?}"
+        );
     }
     Ok(())
 }
@@ -347,16 +356,18 @@ pub fn validate_ids_with_ancestors(tree: &Tree, sequences: &Sequences) -> Result
     let mut missing_nodes = sequence_ids.difference(&tree_ids).collect::<Vec<_>>();
     if !missing_nodes.is_empty() {
         missing_nodes.sort();
-        bail!(DataError {
-            message: format!("Mismatched IDs found, missing tree IDs: {missing_nodes:?}")
-        });
+        bail!(
+            Tree,
+            "mismatched IDs found, missing node IDs: {missing_nodes:?}"
+        )
     }
     let mut missing_seqs = tree_ids.difference(&sequence_ids).collect::<Vec<_>>();
     if !missing_seqs.is_empty() {
         missing_seqs.sort();
-        bail!(DataError {
-            message: format!("Mismatched IDs found, missing sequence IDs: {missing_seqs:?}")
-        });
+        bail!(
+            Sequence,
+            "mismatched IDs found, missing sequence IDs: {missing_seqs:?}"
+        );
     }
     Ok(())
 }
@@ -366,13 +377,16 @@ pub fn validate_ids_with_ancestors(tree: &Tree, sequences: &Sequences) -> Result
 mod private_tests {
     use std::path::Path;
 
+    use assert_matches::assert_matches;
+
     use crate::alignment::Sequences;
+    use crate::alphabets::UNKNOWN_ALPHABET;
     use crate::phylo_info::{
         phyloinfo_builder::{set_missing_tree_node_ids, PhyloInfoBuilder as PIB},
         validate_ids_with_ancestors,
     };
     use crate::random::FakeGenerator;
-    use crate::{record_wo_desc as record, tree};
+    use crate::{record_wo_desc as record, tree, Error};
 
     #[test]
     fn builder_setters() {
@@ -440,21 +454,18 @@ mod private_tests {
 
     #[test]
     fn set_missing_tree_node_ids_finds_duplicate() {
-        // arrange
         let tree = tree!("((A1:1.0, B1:1.0) I1:1.0,(C2:1.0,(D3:1.0, A1:1.0) I9:1.0):1.0):1.0;");
 
-        // act
-        let error = set_missing_tree_node_ids(&tree).unwrap_err();
+        let error = set_missing_tree_node_ids(&tree);
 
-        // assert
-        assert!(error
-            .to_string()
-            .contains("Duplicate id (A1) found in the leaves of the tree"))
+        assert_matches!(
+            error,
+            Err(Error::Tree(msg)) if msg.contains("duplicate id (A1) found in the leaves of the tree")
+        );
     }
 
     #[test]
     fn not_valid_ids_with_ancestors() {
-        // arrange
         let tree = tree!("((A1:1.0, B1:1.0) I1:1.0,(C2:1.0,(D3:1.0, E4:1.0) I9:1.0)I10:1.0):1.0;");
         let seqs = Sequences::new(vec![
             record!("A1", b"X"),
@@ -467,11 +478,12 @@ mod private_tests {
             record!("", b"X"),
         ]);
 
-        // act
-        let error = validate_ids_with_ancestors(&tree, &seqs).unwrap_err();
+        let error = validate_ids_with_ancestors(&tree, &seqs);
 
-        // assert
-        assert!(error.to_string().contains("[\"C2\"]"));
+        assert_matches!(
+            error,
+            Err(Error::Sequence(msg)) if msg.contains("[\"C2\"]")
+        );
     }
 
     #[test]
@@ -495,5 +507,16 @@ mod private_tests {
 
         // assert
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn invalid_alphabet_error() {
+        let builder =
+            PIB::new("./examples/data/sequences_DNA_small.fasta").alphabet(Some(&UNKNOWN_ALPHABET));
+        let error = builder.build();
+        assert_matches!(
+            error,
+            Err(Error::Alphabet(msg)) if msg.contains("unknown alphabet")
+        );
     }
 }

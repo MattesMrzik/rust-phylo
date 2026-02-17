@@ -1,14 +1,13 @@
 use std::collections::HashSet;
 use std::fmt::{Debug, Display};
 
-use anyhow::bail;
 use fixedbitset::FixedBitSet;
 use inc_stats::Percentiles;
 
 use crate::alignment::Sequences;
 use crate::parsimony::Rounding;
 use crate::tree::NodeIdx::{Internal as Int, Leaf};
-use crate::Result;
+use crate::{bail, Result};
 
 pub mod nj_builder;
 pub use nj_builder::NJTreeBuilder;
@@ -85,7 +84,7 @@ impl Tree {
     pub(crate) fn new(sequences: &Sequences) -> Result<Self> {
         let n = sequences.len();
         if n == 0 {
-            bail!("No sequences provided, aborting");
+            bail!(Sequence, "no sequences provided, aborting");
         }
         let root = if n == 1 { Leaf(0) } else { Int(2 * n - 2) };
         Ok(Self {
@@ -328,7 +327,7 @@ impl Tree {
         if let Some(node) = node {
             return Ok(node.idx);
         }
-        bail!("No node with id {id} found in the tree");
+        bail!(Tree, "no node with id {id} found in the tree");
     }
 
     #[cfg(test)]
@@ -371,7 +370,8 @@ impl Tree {
         for node_idx in self.postorder() {
             if !seen.insert(self.node_id(node_idx)) {
                 bail!(
-                    "Node ID '{}' is not unique in the tree",
+                    Tree,
+                    "node ID '{}' is not unique in the tree",
                     self.node_id(node_idx)
                 );
             }
