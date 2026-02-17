@@ -101,8 +101,14 @@ impl<Q: QMatrix, T: TKFModel, AA: AncestralAlignment> TreeSearchCost for TKFCost
 }
 
 impl<Q: QMatrix, T: TKFModel, AA: AncestralAlignment> TKFCost<Q, T, AA> {
+    /// Returns a reference to the multiple ancestral sequence alignment.
     pub fn masa(&self) -> &impl AncestralAlignment {
         &self.indel_cost.phylo.msa
+    }
+
+    /// Returns the TKF blocks of the alignment, see [`TKFModel::get_blocks`].
+    pub fn blocks(&self) -> Vec<usize> {
+        self.indel_cost.model.get_blocks(&self.indel_cost.phylo.msa)
     }
 }
 

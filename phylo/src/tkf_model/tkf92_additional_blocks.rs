@@ -111,7 +111,6 @@ impl Display for TKF92IndelModelAddBlocks {
 }
 
 /// Builder for the cost using the [`TKF92IndelModelAddBlocks`].
-#[cfg(test)]
 pub struct TKF92IndelAddBlocksCostBuilder<AA: AncestralAlignment> {
     lambda: f64,
     mu: f64,
