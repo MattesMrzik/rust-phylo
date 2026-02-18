@@ -336,7 +336,9 @@ impl<T: TKFModel, AA: AncestralAlignment> TKFIndelCost<T, AA> {
                 Internal(_) => self.phylo.msa.ancestral_map(&parent_idx)[site].is_none(),
                 _ => unreachable!("The parent of a node cannot be a leaf."),
             },
-            None => true, // root has no parent, so we can consider it as a gap
+            None => true, // root has no parent, so we treat the position as a gap, then if there is
+                          // a character at the root the event will be determined as an insertion,
+                          // which is correct under the TKF model
         };
 
         let current_is_gap = match node_idx {

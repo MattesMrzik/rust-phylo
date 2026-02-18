@@ -1,4 +1,5 @@
 use approx::assert_relative_eq;
+use assert_matches::assert_matches;
 
 use crate::alignment::{AncestralAlignment, Sequences, MASA};
 use crate::alphabets::Alphabet;
@@ -6,7 +7,7 @@ use crate::phylo_info::PhyloInfo;
 use crate::random::FakeGenerator;
 use crate::tkf_model::tests::setup_test_phylo;
 use crate::tkf_model::{EdgeSeqsReestimator, TKF92IndelCostBuilder};
-use crate::{record_wo_desc as record, tree};
+use crate::{record_wo_desc as record, tree, Error};
 
 #[test]
 fn tkf_reestimate_with_out_choice() {
@@ -56,8 +57,8 @@ fn tkf_reestimation_fails_for_root() {
     let mut reestimator = EdgeSeqsReestimator::new(&mut cost, rng);
     let root_idx = reestimator.cost.phylo.tree.root;
 
-    let err_msg = reestimator.reestimate(&root_idx).unwrap_err().to_string();
-    assert!(err_msg.contains("root"));
+    let err = reestimator.reestimate(&root_idx);
+    assert_matches!(err, Err(Error::EdgeSeqsReestimator(msg)) if msg.contains("root"));
 }
 
 #[test]
@@ -70,6 +71,6 @@ fn tkf_reestimation_fails_for_leaf() {
     let mut reestimator = EdgeSeqsReestimator::new(&mut cost, rng);
     let leaf_idx = reestimator.cost.phylo.tree.by_id("A1").idx;
 
-    let err_msg = reestimator.reestimate(&leaf_idx).unwrap_err().to_string();
-    assert!(err_msg.contains("leaf"));
+    let err= reestimator.reestimate(&leaf_idx);
+    assert_matches!(err, Err(Error::EdgeSeqsReestimator(msg)) if msg.contains("leaf"));
 }

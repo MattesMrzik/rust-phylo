@@ -158,7 +158,6 @@ impl<AA: AncestralAlignment> PhyloInfo<AA> {
     ///
     /// Returns `Ok(())` if all columns satisfy this constraint, or an error
     /// identifying the first violating column otherwise.
-    // TODO: dont use bail! macro, see issue #129 https://github.com/acg-team/rust-phylo/pull/129
     pub fn check_dollos_constraint(&self) -> Result<()> {
         let mut violating_cols = Vec::new();
         for col_idx in 0..self.msa.len() {

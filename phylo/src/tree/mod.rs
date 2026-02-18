@@ -58,7 +58,7 @@ impl From<NodeIdx> for usize {
     }
 }
 
-/// A binary phylogenetic tree, rooted or unrooted.
+/// A rooted binary phylogenetic tree.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Tree {
     pub root: NodeIdx,

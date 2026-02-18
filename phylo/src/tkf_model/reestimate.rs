@@ -41,9 +41,9 @@ const DOLLO_ASSIGNMENTS: [&[EdgeAssignment]; 16] = [
 ];
 /// The number of bits used to encode a single `del_or_not` possibility in the [`DEL_OR_NOT_TABLE`].
 const ENCODING_SIZE: usize = 2;
-const CAN_BE_VARIED_ENCODING: usize = 0b011;
-const DELETION_ENCODING: usize = 0b1;
-const NO_DELETION_ENCODING: usize = 0b0;
+const VARIABLE_CODE: usize = 0b11;
+const DELETION_CODE: usize = 0b01;
+const NO_DELETION_CODE: usize = 0b00;
 const DEL_OR_NOT_TABLE_SIZE: usize = 1 << (ENCODING_SIZE * N_EDGES_IN_QUARTET);
 lazy_static! {
 /// A constant table that contains precomputed values for 'del_or_not' combinations that can be
@@ -559,19 +559,16 @@ where
     ) -> usize {
         let mut idx = 0;
         for i in 0..N_EDGES_IN_QUARTET {
+            idx <<= ENCODING_SIZE;
             match current_events[i] {
                 Event::Nothing => {
-                    idx <<= ENCODING_SIZE;
                     idx |= if q_del_or_not[i] {
-                        DELETION_ENCODING
+                        DELETION_CODE
                     } else {
-                        NO_DELETION_ENCODING
+                        NO_DELETION_CODE
                     };
                 }
-                _ => {
-                    idx <<= ENCODING_SIZE;
-                    idx |= CAN_BE_VARIED_ENCODING;
-                }
+                _ => idx |= VARIABLE_CODE,
             }
         }
         idx
@@ -580,18 +577,17 @@ where
     fn possible_del_or_not_table_idx(&self, events: &QuartetEvents, is_first_block: bool) -> usize {
         let mut idx = 0;
         for (i, edge) in self.quartet_edges.edges().iter().enumerate() {
+            idx <<= ENCODING_SIZE;
             let can_be_varied = matches!(events[i], Event::Nothing) // we can't vary if there is an event
                 && !is_first_block // we can't vary at the first block, since there is no event that can be passed through
                 && edge != &self.cost.phylo.tree.root; // we can't vary since deletions cannot happen above the root
             if can_be_varied {
-                idx <<= ENCODING_SIZE;
-                idx |= CAN_BE_VARIED_ENCODING;
+                idx |= VARIABLE_CODE;
             } else {
-                idx <<= ENCODING_SIZE;
                 idx |= if matches!(events[i], Event::Deletion) {
-                    DELETION_ENCODING
+                    DELETION_CODE
                 } else {
-                    NO_DELETION_ENCODING
+                    NO_DELETION_CODE
                 };
             }
         }
@@ -759,17 +755,11 @@ fn possible_del_or_not_table() -> [QuartetDelOrNotPossibilities; DEL_OR_NOT_TABL
 fn events_to_idx(events: &QuartetEvents) -> usize {
     let mut idx = 0;
     for event in events {
-        let can_be_varied = matches!(event, Event::Nothing); // we can't vary if there is an event
-        if can_be_varied {
-            idx <<= ENCODING_SIZE;
-            idx |= CAN_BE_VARIED_ENCODING;
-        } else {
-            idx <<= ENCODING_SIZE;
-            idx |= if matches!(event, Event::Deletion) {
-                DELETION_ENCODING
-            } else {
-                NO_DELETION_ENCODING
-            };
+        idx <<= ENCODING_SIZE;
+        match event {
+            Event::Nothing => idx |= VARIABLE_CODE,
+            Event::Deletion => idx |= DELETION_CODE,
+            _ => idx |= NO_DELETION_CODE,
         }
     }
     idx
