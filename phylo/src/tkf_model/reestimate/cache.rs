@@ -343,7 +343,7 @@ mod private_tests {
     /// Returns all possible combinations of `deletion or not` for each edge in the quartet
     /// given the (current) events taken on those edges.
     #[cfg(test)]
-    fn possible_del_or_not_for_event(
+    fn possible_del_or_not_for_event_correct(
         reestimator: &EdgeSeqsReestimator<
             impl TKFModel,
             impl AncestralAlignment,
@@ -372,7 +372,7 @@ mod private_tests {
 
     /// Based on the `current_events` and `del_or_not` finds all compatible previous `del_or_not`.
     #[cfg(test)]
-    fn prev_compatible_del_or_not(
+    fn prev_compatible_del_or_not_correct(
         current_del_or_not: &QuartetDelOrNot,
         current_events: &QuartetEvents,
     ) -> QuartetDelOrNotPossibilities {
@@ -462,7 +462,8 @@ mod private_tests {
                     &reestimator.quartet_edges,
                     &reestimator.cost.phylo.tree.root,
                 );
-                let correct = &possible_del_or_not_for_event(&reestimator, &events, is_first_block);
+                let correct =
+                    &possible_del_or_not_for_event_correct(&reestimator, &events, is_first_block);
                 assert_eq!(correct, result_from_table);
                 assert_eq!(correct, result_from_fn);
             }
@@ -500,7 +501,8 @@ mod private_tests {
                 let result_from_table = &DEL_OR_NOT_TABLE[idx];
                 let result_from_fn =
                     possible_del_or_not(&events, is_first_block, &reestimator.quartet_edges, &root);
-                let correct = &possible_del_or_not_for_event(&reestimator, &events, is_first_block);
+                let correct =
+                    &possible_del_or_not_for_event_correct(&reestimator, &events, is_first_block);
                 assert_eq!(correct, result_from_table);
                 assert_eq!(correct, result_from_fn);
             }
@@ -521,8 +523,8 @@ mod private_tests {
                 let idx = prev_compatible_del_or_not_table_idx(&events, &del_or_not);
                 seen_idxs.insert(idx);
                 let result_from_table = &DEL_OR_NOT_TABLE[idx];
-                let result_from_fn = &prev_compatible_del_or_not(&del_or_not, &events);
-                let correct = &prev_compatible_del_or_not(&del_or_not, &events);
+                let result_from_fn = prev_compatible_del_or_not(&events, &del_or_not);
+                let correct = &prev_compatible_del_or_not_correct(&del_or_not, &events);
                 assert_eq!(correct, result_from_table);
                 assert_eq!(correct, result_from_fn);
             }
