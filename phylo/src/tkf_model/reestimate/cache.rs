@@ -58,7 +58,7 @@ lazy_static! {
 /// A constant table that contains precomputed values for 'del_or_not' combinations that can be
 /// queried with [`EdgeSeqsReestimator::prev_compatible_del_or_not_table_idx`] and
 /// [`EdgeSeqsReestimator::possible_del_or_not_table_idx`].
-    pub static ref DEL_OR_NOT_TABLE: [QuartetDelOrNotPossibilities; DEL_OR_NOT_TABLE_SIZE] =
+    pub(super) static ref DEL_OR_NOT_TABLE: [QuartetDelOrNotPossibilities; DEL_OR_NOT_TABLE_SIZE] =
         possible_del_or_not_table();
 }
 
