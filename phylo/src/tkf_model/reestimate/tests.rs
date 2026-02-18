@@ -71,6 +71,6 @@ fn tkf_reestimation_fails_for_leaf() {
     let mut reestimator = EdgeSeqsReestimator::new(&mut cost, rng);
     let leaf_idx = reestimator.cost.phylo.tree.by_id("A1").idx;
 
-    let err= reestimator.reestimate(&leaf_idx);
+    let err = reestimator.reestimate(&leaf_idx);
     assert_matches!(err, Err(Error::EdgeSeqsReestimator(msg)) if msg.contains("leaf"));
 }
