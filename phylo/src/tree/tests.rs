@@ -293,7 +293,7 @@ fn newick_parse_parentheses_around_all() {
 #[test]
 fn newick_parse_whitespace() {
     let trees = from_newick(
-        "     (     (((  (A:1   , B  :   1.0)  \n \n F:1,C:2.0   )G:1,D:3)H:+1.0  ,  E:4)   I:1)\n;\n   ",
+        "     (     (((  (   A  :1   , B   :   1.0)  \n \n F:1,C:2.0   )G:1,D:3)H:+1.0  ,  E:4)   I:1)\n;\n   ",
     );
     assert!(trees.is_ok());
     let tree0 = &trees.unwrap()[0];
