@@ -178,10 +178,6 @@ mod tests;
 
 #[cfg(test)]
 #[cfg_attr(coverage, coverage(off))]
-mod reestimate_tests;
-
-#[cfg(test)]
-#[cfg_attr(coverage, coverage(off))]
 mod brute_force_ancestors_tests;
 
 #[cfg(test)]

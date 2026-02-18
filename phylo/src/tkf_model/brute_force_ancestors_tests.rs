@@ -14,7 +14,7 @@ use crate::likelihood::ModelSearchCost;
 use crate::phylo_info::PhyloInfoBuilder;
 use crate::random::{DefaultGenerator, FakeGenerator};
 use crate::tkf_model::{
-    mapping_from_node_seq, possible_assignments_of_edge, tests::get_mapping_for_any_node,
+    cache::possible_assignments_of_edge, mapping_from_node_seq, tests::get_mapping_for_any_node,
     EdgeSeqsReestimator, TKF92IndelAddBlocksCostBuilder, TKF92IndelCostBuilder, TKFIndelCost,
     TKFModel,
 };

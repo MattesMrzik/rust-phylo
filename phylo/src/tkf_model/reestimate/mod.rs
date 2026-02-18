@@ -1,57 +1,23 @@
-use std::array::from_fn;
-
 use fixedbitset::FixedBitSet;
-use itertools::Itertools;
-use lazy_static::lazy_static;
 use log::info;
 use rand::{Rng, SeedableRng};
 
 use crate::alignment::{AncestralAlignment, Mapping};
+use crate::likelihood::TreeSearchCost;
 use crate::phylo_info::PhyloInfo;
 use crate::random::RandomGenerator;
 use crate::tkf_model::{log_i1, Event, TKFIndelCost, TKFIndelModelInfo, TKFModel};
 use crate::tree::NodeIdx::{self, Internal, Leaf};
 use crate::{bail, Result};
 
+pub mod cache;
+use cache::*;
+
 /// Size of the dynamic programming column: 2 (assignments) * 2 (deletion or not) ^ 5 (edges) = 128, see [`QuartetEdges`].
 const DP_COL_SIZE: usize = 128;
 const BACKTRACKING_INVALID: usize = DP_COL_SIZE + 1;
 /// #{v1, v2, t2, t3, t4}, see [`QuartetEdges`].
 const N_EDGES_IN_QUARTET: usize = 5;
-/// Given the presence/absence of chars at `t1`, `t2`, `t3`, and `t4`, provides
-/// all possible assignments of chars at `v1` and `v2` that are compatible with
-/// Dollo's principle. See [`QuartetEdges`].
-const DOLLO_ASSIGNMENTS: [&[EdgeAssignment]; 16] = [
-    /* 0000 */ &[(false, false)],
-    /* 0001 */ &[(true, true), (false, true), (false, false)],
-    /* 0010 */ &[(true, true), (false, true), (false, false)],
-    /* 0011 */ &[(true, true), (false, true)],
-    /* 0100 */ &[(true, true), (true, false), (false, false)],
-    /* 0101 */ &[(true, true)],
-    /* 0110 */ &[(true, true)],
-    /* 0111 */ &[(true, true)],
-    /* 1000 */ &[(true, true), (true, false), (false, false)],
-    /* 1001 */ &[(true, true)],
-    /* 1010 */ &[(true, true)],
-    /* 1011 */ &[(true, true)],
-    /* 1100 */ &[(true, true), (true, false)],
-    /* 1101 */ &[(true, true)],
-    /* 1110 */ &[(true, true)],
-    /* 1111 */ &[(true, true)],
-];
-/// The number of bits used to encode a single `del_or_not` possibility in the [`DEL_OR_NOT_TABLE`].
-const ENCODING_SIZE: usize = 2;
-const VARIABLE_CODE: usize = 0b11;
-const DELETION_CODE: usize = 0b01;
-const NO_DELETION_CODE: usize = 0b00;
-const DEL_OR_NOT_TABLE_SIZE: usize = 1 << (ENCODING_SIZE * N_EDGES_IN_QUARTET);
-lazy_static! {
-/// A constant table that contains precomputed values for 'del_or_not' combinations that can be
-/// queried with [`EdgeSeqsReestimator::prev_compatible_del_or_not_table_idx`] and
-/// [`EdgeSeqsReestimator::possible_del_or_not_table_idx`].
-    pub static ref DEL_OR_NOT_TABLE: [QuartetDelOrNotPossibilities; DEL_OR_NOT_TABLE_SIZE] =
-        possible_del_or_not_table();
-}
 
 /// Assignment of chars present/absent at `v1` and `v2` (see [`QuartetEdges`])
 /// and at current [block](`super::TKFModel::get_blocks`).
@@ -439,9 +405,13 @@ where
                 let events = self.event_for_assignment(assignment, block_id);
                 let event_prob = self.integrated_root_event_prob(&events, block_id);
                 let is_first_block = block_id == 0;
-                let combintations_table_idx =
-                    self.possible_del_or_not_table_idx(&events, is_first_block);
-                for q_del_or_not in &DEL_OR_NOT_TABLE[combintations_table_idx] {
+
+                for q_del_or_not in possible_del_or_not(
+                    &events,
+                    is_first_block,
+                    &self.quartet_edges,
+                    &self.cost.tree().root,
+                ) {
                     let dp_index = bools_to_index(assignment, q_del_or_not);
                     if block_id == 0 {
                         self.dp_table[block_id][dp_index] = event_prob;
@@ -505,9 +475,7 @@ where
             // TODO: here it is not checked whether the `prev_del_or_not` matches the `prev_assignment`
             // which will lead to -inf which is then skipped.
             // See issue #151 https://github.com/acg-team/rust-phylo/issues/151
-            let prev_del_or_not_idx =
-                self.prev_compatible_del_or_not_table_idx(current_events, current_del_or_not);
-            for prev_del_or_not in &DEL_OR_NOT_TABLE[prev_del_or_not_idx] {
+            for prev_del_or_not in prev_compatible_del_or_not(current_events, current_del_or_not) {
                 let prev_dp_index = bools_to_index(prev_assignment, prev_del_or_not);
                 let prev_gamma = self.dp_table[block_id - 1][prev_dp_index];
                 if prev_gamma == f64::NEG_INFINITY {
@@ -547,51 +515,6 @@ where
             }
         }
         0.0
-    }
-
-    // TODO: these are not ensured to be compatible with the previous assignments. Would it be
-    // worth to filter them here?
-    // See issue #151 https://github.com/acg-team/rust-phylo/issues/151
-    fn prev_compatible_del_or_not_table_idx(
-        &self,
-        current_events: &QuartetEvents,
-        q_del_or_not: &QuartetDelOrNot,
-    ) -> usize {
-        let mut idx = 0;
-        for i in 0..N_EDGES_IN_QUARTET {
-            idx <<= ENCODING_SIZE;
-            match current_events[i] {
-                Event::Nothing => {
-                    idx |= if q_del_or_not[i] {
-                        DELETION_CODE
-                    } else {
-                        NO_DELETION_CODE
-                    };
-                }
-                _ => idx |= VARIABLE_CODE,
-            }
-        }
-        idx
-    }
-
-    fn possible_del_or_not_table_idx(&self, events: &QuartetEvents, is_first_block: bool) -> usize {
-        let mut idx = 0;
-        for (i, edge) in self.quartet_edges.edges().iter().enumerate() {
-            idx <<= ENCODING_SIZE;
-            let can_be_varied = matches!(events[i], Event::Nothing) // we can't vary if there is an event
-                && !is_first_block // we can't vary at the first block, since there is no event that can be passed through
-                && edge != &self.cost.phylo.tree.root; // we can't vary since deletions cannot happen above the root
-            if can_be_varied {
-                idx |= VARIABLE_CODE;
-            } else {
-                idx |= if matches!(events[i], Event::Deletion) {
-                    DELETION_CODE
-                } else {
-                    NO_DELETION_CODE
-                };
-            }
-        }
-        idx
     }
 
     /// Computes the integrated event probability for the quartet given the events
@@ -722,117 +645,6 @@ where
     }
 }
 
-fn possible_del_or_not_table() -> [QuartetDelOrNotPossibilities; DEL_OR_NOT_TABLE_SIZE] {
-    let mut table = from_fn(|_| Vec::new());
-    let choices_per_edge: Vec<Event> = vec![
-        Event::Insertion,
-        Event::Deletion,
-        Event::Homolog,
-        Event::Nothing,
-    ];
-    let quartet_choices = vec![&choices_per_edge; N_EDGES_IN_QUARTET];
-    for combination in quartet_choices.into_iter().multi_cartesian_product() {
-        let &[e1, e2, e3, e4, e5] = combination.as_slice() else {
-            unreachable!();
-        };
-        let events: [Event; 5] = [*e1, *e2, *e3, *e4, *e5];
-        let idx = events_to_idx(&events);
-        let possibilities = possible_del_or_not_for_event(&events);
-        if !table[idx].is_empty() {
-            // The mapping 'calc_possible_del_or_not_table_idx' from all the possibilities to idx is not unique,
-            // since the flag 'deletion or not' does not differentiate between
-            // Insertion and Homolog events for example.
-            // In that case the mapping 'possible_del_or_not_for_event' should also be the
-            // same.
-            assert!(table[idx] == possibilities);
-        }
-        table[idx] = possibilities;
-    }
-    table
-}
-
-/// Only called by `possible_del_or_not_table` during generation of [`DEL_OR_NOT_TABLE`].
-fn events_to_idx(events: &QuartetEvents) -> usize {
-    let mut idx = 0;
-    for event in events {
-        idx <<= ENCODING_SIZE;
-        match event {
-            Event::Nothing => idx |= VARIABLE_CODE,
-            Event::Deletion => idx |= DELETION_CODE,
-            _ => idx |= NO_DELETION_CODE,
-        }
-    }
-    idx
-}
-
-/// Only called by `possible_del_or_not_table` during generation of [`DEL_OR_NOT_TABLE`].
-fn possible_del_or_not_for_event(events: &QuartetEvents) -> QuartetDelOrNotPossibilities {
-    let mut base = [false; N_EDGES_IN_QUARTET];
-    let mut position_to_vary = Vec::with_capacity(N_EDGES_IN_QUARTET);
-
-    // collect for each edge whether we have a choice (whether last event was deletion or not) or not
-    for i in 0..N_EDGES_IN_QUARTET {
-        let can_be_varied = matches!(events[i], Event::Nothing);
-        if can_be_varied {
-            position_to_vary.push(i);
-        } else {
-            // determine the fixed del or not
-            base[i] = matches!(events[i], Event::Deletion);
-        }
-    }
-    del_or_not_combinations(&position_to_vary, &base)
-}
-
-/// Generates all possible combinations of deletion-or-not for the provided choices,
-/// while keeping the no_choices fixed.
-///
-/// Only called by `possible_del_or_not_for_event` during generation of [`DEL_OR_NOT_TABLE`].
-///
-/// # Example
-/// ```rust
-/// let base = [true, false, false, true, false];
-/// let positions_to_vary = vec![1, 3];
-/// ```
-/// Keeps all the boolean values in `no_choices` fixed except for indices 1 and 3,
-/// which are varied over all possible combinations, i.e., the result will be:
-/// ```rust
-/// let result = [[true, false, false, false, false],
-///               [true, false, false, true, false],
-///               [true, true, false, false, false],
-///               [true, true, false, true, false]];
-/// ```
-fn del_or_not_combinations(
-    positions_to_vary: &[usize],
-    base: &QuartetDelOrNot,
-) -> QuartetDelOrNotPossibilities {
-    let num_combinations = 1 << positions_to_vary.len();
-    let mut all_possibilities = Vec::with_capacity(num_combinations);
-    for possibility_idx in 0..num_combinations {
-        let mut possibility = *base;
-        for (j, &edge_index) in positions_to_vary.iter().enumerate() {
-            let bit = (possibility_idx >> j) & 1;
-            possibility[edge_index] = bit != 0;
-        }
-        all_possibilities.push(possibility);
-    }
-    all_possibilities
-}
-
-#[inline]
-pub(super) fn possible_assignments_of_edge(
-    t1_has_char: bool,
-    t2_has_char: bool,
-    t3_has_char: bool,
-    t4_has_char: bool,
-) -> EdgeAssignmentPossibilities {
-    let idx = (t1_has_char as usize) << 3
-        | (t2_has_char as usize) << 2
-        | (t3_has_char as usize) << 1
-        | (t4_has_char as usize);
-
-    DOLLO_ASSIGNMENTS[idx]
-}
-
 #[inline]
 pub(super) fn mapping_from_node_seq(
     node_seq: &NodeSeq,
@@ -903,7 +715,7 @@ fn event_for_edge(node_has_char: bool, parent_has_char: bool) -> Event {
     }
 }
 
-pub(super) fn get_map_from_any_node<'a, AA: AncestralAlignment>(
+fn get_map_from_any_node<'a, AA: AncestralAlignment>(
     msa: &'a AA,
     node: &'a NodeIdx,
 ) -> &'a Mapping {
@@ -918,8 +730,6 @@ pub(super) fn get_map_from_any_node<'a, AA: AncestralAlignment>(
 mod private_tests {
     use std::path::Path;
 
-    use hashbrown::HashSet;
-    use itertools::Itertools;
     use rstest::rstest;
 
     use crate::alignment::{Alignment, Sequences, MASA};
@@ -941,105 +751,19 @@ mod private_tests {
     }
 
     #[test]
-    fn tkf_reestimate_possibilities_for_choices_no_choice() {
-        let no_choices = [true, false, false, true, false];
-        let choices = vec![];
-        let possibilities = del_or_not_combinations(&choices, &no_choices);
-        let expected = vec![[true, false, false, true, false]];
-        assert_eq!(possibilities, expected);
-    }
+    fn tkf_get_map_from_any_node() {
+        let phylo = setup_test_phylo(Alphabet::dna());
+        let msa = &phylo.msa;
+        let leaf_node = phylo.tree.by_id("A1").idx;
+        let internal_node = phylo.tree.by_id("I3").idx;
 
-    #[test]
-    fn tkf_reestimate_possibilities_for_choices_one() {
-        let no_choices = [true, false, false, true, false];
-        let choices = vec![0];
-        let mut possibilities = del_or_not_combinations(&choices, &no_choices);
-        let mut expected = vec![
-            [true, false, false, true, false],
-            [false, false, false, true, false],
-        ];
-        possibilities.sort();
-        expected.sort();
-        assert_eq!(possibilities, expected);
-    }
+        let leaf_map = get_map_from_any_node(msa, &leaf_node);
+        let expected_leaf_map = msa.leaf_map(&leaf_node);
+        assert_eq!(leaf_map, expected_leaf_map);
 
-    #[test]
-    fn tkf_reestimate_possibilities_for_choices() {
-        let no_choices = [true, false, false, true, false];
-        let choices = vec![1, 3];
-        let mut possibilities = del_or_not_combinations(&choices, &no_choices);
-        let mut expected = vec![
-            [true, false, false, false, false],
-            [true, false, false, true, false],
-            [true, true, false, false, false],
-            [true, true, false, true, false],
-        ];
-        possibilities.sort();
-        expected.sort();
-        assert_eq!(possibilities, expected);
-    }
-
-    #[test]
-    fn tkf_reestimate_possibilities_for_choices_all() {
-        let no_choices = [true, false, false, true, false];
-        let choices = vec![0, 1, 2, 3, 4];
-        let possibilities = del_or_not_combinations(&choices, &no_choices);
-        let expected = (0..32)
-            .map(|i| {
-                [
-                    (i & 0b00001) != 0,
-                    (i & 0b00010) != 0,
-                    (i & 0b00100) != 0,
-                    (i & 0b01000) != 0,
-                    (i & 0b10000) != 0,
-                ]
-            })
-            .collect::<Vec<[bool; 5]>>();
-
-        assert_eq!(possibilities, expected);
-    }
-
-    #[rstest]
-    #[case(0, 0, 0, 0, vec![(0, 0)])]
-    #[case(0, 0, 0, 1, vec![(0, 0), (0, 1), (1, 1)])]
-    #[case(0, 0, 1, 0, vec![(0, 0), (0, 1), (1, 1)])]
-    #[case(0, 0, 1, 1, vec![(0, 1), (1, 1)])]
-    #[case(0, 1, 0, 0, vec![(0, 0), (1, 0), (1, 1)])]
-    #[case(0, 1, 0, 1, vec![(1, 1)])]
-    #[case(0, 1, 1, 0, vec![(1, 1)])]
-    #[case(0, 1, 1, 1, vec![(1, 1)])]
-    #[case(1, 0, 0, 0, vec![(0, 0), (1, 0), (1, 1)])]
-    #[case(1, 0, 0, 1, vec![(1, 1)])]
-    #[case(1, 0, 1, 0, vec![(1, 1)])]
-    #[case(1, 0, 1, 1, vec![(1, 1)])]
-    #[case(1, 1, 0, 0, vec![(1, 1), (1, 0)])]
-    #[case(1, 1, 0, 1, vec![(1, 1)])]
-    #[case(1, 1, 1, 0, vec![(1, 1)])]
-    #[case(1, 1, 1, 1, vec![(1, 1)])]
-    fn tkf_possible_assignments_of_edge(
-        #[case] t1_has_char: u8,
-        #[case] t2_has_char: u8,
-        #[case] t3_has_char: u8,
-        #[case] t4_has_char: u8,
-        #[case] expected: Vec<(u8, u8)>,
-    ) {
-        // convert expected to bools and sort
-        let mut expected = expected
-            .into_iter()
-            .map(|(a, b)| (a != 0, b != 0))
-            .collect::<Vec<(bool, bool)>>();
-        expected.sort();
-
-        let mut result = possible_assignments_of_edge(
-            t1_has_char != 0,
-            t2_has_char != 0,
-            t3_has_char != 0,
-            t4_has_char != 0,
-        )
-        .to_vec();
-        result.sort();
-
-        assert_eq!(result, expected);
+        let internal_map = get_map_from_any_node(msa, &internal_node);
+        let expected_internal_map = msa.ancestral_map(&internal_node);
+        assert_eq!(internal_map, expected_internal_map);
     }
 
     #[rstest]
@@ -1108,47 +832,6 @@ mod private_tests {
         confirm_quartet_edges_for_setup_test_phylo(&reestimator);
         let events = reestimator.event_for_assignment(&assignment, block_id);
         assert_eq!(events, expected_events);
-    }
-
-    #[test]
-    fn tkf_get_map_from_any_node() {
-        let phylo = setup_test_phylo(Alphabet::dna());
-        let msa = &phylo.msa;
-        let leaf_node = phylo.tree.by_id("A1").idx;
-        let internal_node = phylo.tree.by_id("I3").idx;
-
-        let leaf_map = get_map_from_any_node(msa, &leaf_node);
-        let expected_leaf_map = msa.leaf_map(&leaf_node);
-        assert_eq!(leaf_map, expected_leaf_map);
-
-        let internal_map = get_map_from_any_node(msa, &internal_node);
-        let expected_internal_map = msa.ancestral_map(&internal_node);
-        assert_eq!(internal_map, expected_internal_map);
-    }
-
-    #[test]
-    fn tkf_mapping_from_node_seq() {
-        let mut node_seq = FixedBitSet::with_capacity(5);
-        node_seq.insert(0);
-        node_seq.insert(2);
-        node_seq.insert(4);
-        let block_lens = [2, 3, 1, 4, 1];
-        let seq_len: usize = block_lens.iter().sum();
-        let expected_mapping = [
-            Some(0),
-            Some(1), // first block finished
-            None,
-            None,
-            None,    // second block finished
-            Some(2), // third block finished
-            None,
-            None,
-            None,
-            None,    // fourth block finished
-            Some(3), // fifth block finished
-        ];
-        let mapping = mapping_from_node_seq(&node_seq, &block_lens, seq_len);
-        assert_eq!(mapping, expected_mapping);
     }
 
     #[test]
@@ -1323,176 +1006,8 @@ mod private_tests {
             "after adding back quartet"
         );
     }
-
-    /// Returns all possible combinations of `deletion or not` for each edge in the quartet
-    /// given the (current) events taken on those edges.
-    #[cfg(test)]
-    fn possible_del_or_not_for_event(
-        reestimator: &EdgeSeqsReestimator<
-            impl TKFModel,
-            impl AncestralAlignment,
-            impl Rng + SeedableRng,
-        >,
-        events: &QuartetEvents,
-        is_first_block: bool,
-    ) -> QuartetDelOrNotPossibilities {
-        let mut base = [false; N_EDGES_IN_QUARTET];
-        let mut position_to_vary = Vec::with_capacity(N_EDGES_IN_QUARTET);
-
-        // collect for each edge whether we have a choice (whether last event was deletion or not) or not
-        for (i, edge) in reestimator.quartet_edges.edges().iter().enumerate() {
-            let can_be_varied = matches!(events[i], Event::Nothing) // we can't vary if there is an event
-                && !is_first_block // we can't vary at the first block, since there is no event that can be passed through
-                && edge != &reestimator.cost.phylo.tree.root; // we can't vary since deletions cannot happen above the root
-            if can_be_varied {
-                position_to_vary.push(i);
-            } else {
-                // determine the fixed del or not
-                base[i] = matches!(events[i], Event::Deletion);
-            }
-        }
-        del_or_not_combinations(&position_to_vary, &base)
-    }
-
-    /// Based on the `current_events` and `del_or_not` finds all compatible previous `del_or_not`.
-    #[cfg(test)]
-    fn prev_compatible_del_or_not(
-        current_del_or_not: &QuartetDelOrNot,
-        current_events: &QuartetEvents,
-    ) -> QuartetDelOrNotPossibilities {
-        let mut base = [false; N_EDGES_IN_QUARTET];
-        let mut positions_to_vary = Vec::with_capacity(N_EDGES_IN_QUARTET);
-        for i in 0..N_EDGES_IN_QUARTET {
-            match current_events[i] {
-                // we have a gap col, so we have no event here but pass through the previous one
-                Event::Nothing => base[i] = current_del_or_not[i],
-                // we have an event here, so we can choose any previous `del_or_not`
-                _ => positions_to_vary.push(i),
-            };
-        }
-        del_or_not_combinations(&positions_to_vary, &base)
-    }
-
-    #[test]
-    fn tkf_del_or_not_table_fill_status() {
-        let num_non_empty = DEL_OR_NOT_TABLE.iter().filter(|v| !v.is_empty()).count();
-        // for each of the edges we have 3 possibilities: either it's a deletion, or not, or we can vary
-        let true_size = 3_usize.pow(N_EDGES_IN_QUARTET as u32);
-        assert_eq!(num_non_empty, true_size);
-    }
-
-    #[test]
-    fn tkf_possible_del_or_not_table_idx() {
-        let phylo = setup_test_phylo(Alphabet::dna());
-        let mut cost = TKF92IndelCostBuilder::new(0.4, 0.5, 0.8, phylo)
-            .build()
-            .unwrap();
-        let rng = &mut FakeGenerator::default();
-        // reestimator is initiated with default quartet (ie none if the edges are root)
-        let mut reestimator = EdgeSeqsReestimator::new(&mut cost, rng);
-        let choices_per_edge: Vec<Event> = vec![
-            Event::Insertion,
-            Event::Deletion,
-            Event::Homolog,
-            Event::Nothing,
-        ];
-        let all_edges_choices = vec![&choices_per_edge; N_EDGES_IN_QUARTET];
-        let mut seen_idxs = HashSet::new();
-        for is_first_block in [true, false] {
-            for combination in all_edges_choices
-                .clone()
-                .into_iter()
-                .multi_cartesian_product()
-            {
-                // type conversion
-                let &[e1, e2, e3, e4, e5] = combination.as_slice() else {
-                    unreachable!(); // since N_EDGES_IN_QUARTET is 5
-                };
-                let events: QuartetEvents = [*e1, *e2, *e3, *e4, *e5];
-
-                let idx = reestimator.possible_del_or_not_table_idx(&events, is_first_block);
-                seen_idxs.insert(idx);
-                let result = &DEL_OR_NOT_TABLE[idx];
-
-                let correct = &possible_del_or_not_for_event(&reestimator, &events, is_first_block);
-                assert_eq!(correct, result);
-            }
-        }
-        // for each of the edges we have 3 possibilities: either it's a deletion, or not, or we can vary
-        let true_size = 3_usize.pow(N_EDGES_IN_QUARTET as u32);
-        assert_eq!(seen_idxs.len(), true_size);
-
-        // Preparing for DP initialises the quartet edges such that one of the edges/nodes is the
-        // root, thereby affecting the possible idx values
-        let node_idx = reestimator.cost.phylo.tree.by_id("I3").idx;
-        reestimator.prepare_for_dp(&node_idx);
-        let mut seen_idxs = HashSet::new();
-        for is_first_block in [true, false] {
-            for combination in all_edges_choices
-                .clone()
-                .into_iter()
-                .multi_cartesian_product()
-            {
-                let &[e1, e2, e3, e4, e5] = combination.as_slice() else {
-                    unreachable!(); // since N_EDGES_IN_QUARTET is 5
-                };
-                let events: QuartetEvents = [*e1, *e2, *e3, *e4, *e5];
-                let idx = reestimator.possible_del_or_not_table_idx(&events, is_first_block);
-                seen_idxs.insert(idx);
-                let result = &DEL_OR_NOT_TABLE[idx];
-                let correct = &possible_del_or_not_for_event(&reestimator, &events, is_first_block);
-                assert_eq!(correct, result);
-            }
-        }
-        // for each of the edges we have 3 possibilities, except for the root, for which the
-        // del_or_not cant be varied, since chars at the root can't be deleted, (although the code
-        // for the idx calculation still differentiates between deletion and no deletion even
-        // though at the root there can't be a deletion)
-        let true_size_for_root = 3_usize.pow((N_EDGES_IN_QUARTET - 1) as u32) * 2;
-        assert_eq!(seen_idxs.len(), true_size_for_root);
-    }
-
-    #[test]
-    fn tkf_prev_compatible_del_or_not_table_idx() {
-        let phylo = setup_test_phylo(Alphabet::dna());
-        let mut cost = TKF92IndelCostBuilder::new(0.4, 0.5, 0.8, phylo)
-            .build()
-            .unwrap();
-        let rng = &mut FakeGenerator::default();
-        // reestimator is initiated with default quartet (ie none if the edges are root)
-        let reestimator = EdgeSeqsReestimator::new(&mut cost, rng);
-
-        let choices_per_edge: Vec<Event> = vec![
-            Event::Insertion,
-            Event::Deletion,
-            Event::Homolog,
-            Event::Nothing,
-        ];
-        let all_edges_choices = vec![&choices_per_edge; N_EDGES_IN_QUARTET];
-        let del_or_not = [false, true];
-        let del_or_nor_per_edge = [del_or_not; N_EDGES_IN_QUARTET];
-
-        let mut written_idx = HashSet::new();
-        for event_combination in all_edges_choices.into_iter().multi_cartesian_product() {
-            for del_or_not_combination in del_or_nor_per_edge.into_iter().multi_cartesian_product()
-            {
-                let &[e1, e2, e3, e4, e5] = event_combination.as_slice() else {
-                    unreachable!();
-                };
-                let events: [Event; 5] = [*e1, *e2, *e3, *e4, *e5];
-                let &[q1, q2, q3, q4, q5] = del_or_not_combination.as_slice() else {
-                    unreachable!();
-                };
-                let del_or_not = [q1, q2, q3, q4, q5];
-                let idx = reestimator.prev_compatible_del_or_not_table_idx(&events, &del_or_not);
-                written_idx.insert(idx);
-                let result = &DEL_OR_NOT_TABLE[idx];
-                let correct = &prev_compatible_del_or_not(&del_or_not, &events);
-                assert_eq!(correct, result);
-            }
-        }
-        // for each of the edges we have 3 possibilities: either it's a deletion, or not, or we can vary
-        let true_size = 3_usize.pow(N_EDGES_IN_QUARTET as u32);
-        assert_eq!(written_idx.len(), true_size);
-    }
 }
+
+#[cfg(test)]
+#[cfg_attr(coverage, coverage(off))]
+mod tests;
