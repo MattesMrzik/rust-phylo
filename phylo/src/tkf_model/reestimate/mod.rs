@@ -135,8 +135,6 @@ struct BackTrackingResult {
     logl: f64,
 }
 
-#[cfg(doc)]
-use crate::likelihood::TreeSearchCost;
 /// Reestimator for indel points in the ancestral alignment at an internal neighbouring node pair.
 /// Calling [`EdgeSeqsReestimator::reestimate`] will re-estimate the ancestral sequences
 /// of the node that is passed as argument and its parent node under the [`TKFModel`]
@@ -158,8 +156,9 @@ use crate::likelihood::TreeSearchCost;
 /// // Re-estimation for ASR refinement.
 /// // The alignment below includes ancestral sequences for which the indel points
 /// // will be refined.
+/// let tree = "data/tkf/reestimate/tree.newick";
 /// let msa = "data/tkf/reestimate/masa.fasta";
-/// let phylo = PhyloInfoBuilder::new(msa).build_with_ancestors()?;
+/// let phylo = PhyloInfoBuilder::with_attrs(msa, tree).build_with_ancestors()?;
 /// let internal_nodes = phylo
 ///     .tree
 ///     .postorder()
