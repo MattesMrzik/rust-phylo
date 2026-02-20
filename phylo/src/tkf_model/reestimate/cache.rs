@@ -4,16 +4,16 @@ use itertools::Itertools;
 use lazy_static::lazy_static;
 
 use crate::tkf_model::reestimate::{
-    EdgeAssignment, QuartetDelOrNot, QuartetDelOrNotPossibilities, QuartetEdges, QuartetEvents,
-    N_EDGES_IN_QUARTET,
+    EdgeAssignment, EdgeAssignmentPossibilities, QuartetDelOrNot, QuartetDelOrNotPossibilities,
+    QuartetEdges, QuartetEvents, N_EDGES_IN_QUARTET,
 };
-use crate::tkf_model::{EdgeAssignmentPossibilities, Event};
+use crate::tkf_model::Event;
 use crate::tree::NodeIdx;
 
 /// Given the presence/absence of chars at `t1`, `t2`, `t3`, and `t4`, provides
 /// all possible assignments of chars at `v1` and `v2` that are compatible with
 /// Dollo's principle. See [`QuartetEdges`].
-pub(super) const DOLLO_ASSIGNMENTS: [&[EdgeAssignment]; 16] = [
+const DOLLO_ASSIGNMENTS: [&[EdgeAssignment]; 16] = [
     /* 0000 */ &[(false, false)],
     /* 0001 */ &[(true, true), (false, true), (false, false)],
     /* 0010 */ &[(true, true), (false, true), (false, false)],
@@ -33,7 +33,7 @@ pub(super) const DOLLO_ASSIGNMENTS: [&[EdgeAssignment]; 16] = [
 ];
 
 #[inline]
-pub(in crate::tkf_model) fn possible_assignments_of_edge(
+pub(super) fn possible_assignments_of_edge(
     t1_has_char: bool,
     t2_has_char: bool,
     t3_has_char: bool,
@@ -48,17 +48,17 @@ pub(in crate::tkf_model) fn possible_assignments_of_edge(
 }
 
 /// The number of bits used to encode a single `del_or_not` possibility in the [`DEL_OR_NOT_TABLE`].
-pub(super) const ENCODING_SIZE: usize = 2;
-pub(super) const VARIABLE_CODE: usize = 0b11;
-pub(super) const DELETION_CODE: usize = 0b01;
-pub(super) const NO_DELETION_CODE: usize = 0b00;
+const ENCODING_SIZE: usize = 2;
+const VARIABLE_CODE: usize = 0b11;
+const DELETION_CODE: usize = 0b01;
+const NO_DELETION_CODE: usize = 0b00;
 const DEL_OR_NOT_TABLE_SIZE: usize = 1 << (ENCODING_SIZE * N_EDGES_IN_QUARTET);
 
 lazy_static! {
 /// A constant table that contains precomputed values for 'del_or_not' combinations that can be
 /// queried with [`EdgeSeqsReestimator::prev_compatible_del_or_not_table_idx`] and
 /// [`EdgeSeqsReestimator::possible_del_or_not_table_idx`].
-    pub(super) static ref DEL_OR_NOT_TABLE: [QuartetDelOrNotPossibilities; DEL_OR_NOT_TABLE_SIZE] =
+    static ref DEL_OR_NOT_TABLE: [QuartetDelOrNotPossibilities; DEL_OR_NOT_TABLE_SIZE] =
         possible_del_or_not_table();
 }
 
@@ -104,7 +104,7 @@ pub(super) fn possible_del_or_not(
     &DEL_OR_NOT_TABLE[idx]
 }
 
-pub(super) fn possible_del_or_not_table_idx(
+fn possible_del_or_not_table_idx(
     events: &QuartetEvents,
     is_first_block: bool,
     quartet_edges: &QuartetEdges,

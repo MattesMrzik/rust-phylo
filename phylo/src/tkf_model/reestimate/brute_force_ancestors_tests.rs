@@ -13,8 +13,10 @@ use crate::alignment::{Alignment, AncestralAlignment, MASA};
 use crate::likelihood::ModelSearchCost;
 use crate::phylo_info::PhyloInfoBuilder;
 use crate::random::{DefaultGenerator, FakeGenerator};
+use crate::tkf_model::reestimate::cache::possible_assignments_of_edge;
+use crate::tkf_model::reestimate::mapping_from_node_seq;
+use crate::tkf_model::tests::get_mapping_for_any_node;
 use crate::tkf_model::{
-    cache::possible_assignments_of_edge, mapping_from_node_seq, tests::get_mapping_for_any_node,
     EdgeSeqsReestimator, TKF92IndelAddBlocksCostBuilder, TKF92IndelCostBuilder, TKFIndelCost,
     TKFModel,
 };
@@ -355,7 +357,7 @@ fn load_precalculated_brute_force_maxes(file_path: &Path, iteration_info: &mut V
 }
 
 #[cfg(test)]
-pub fn append_result(path: &str, iteration: usize, node: String, logl: f64) -> std::io::Result<()> {
+fn append_result(path: &str, iteration: usize, node: String, logl: f64) -> std::io::Result<()> {
     let file = OpenOptions::new().create(true).append(true).open(path)?;
     let mut writer = BufWriter::new(file);
     writeln!(writer, "{iteration},{node},{logl}")?;

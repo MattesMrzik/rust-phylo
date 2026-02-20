@@ -25,7 +25,7 @@ fn tkf_dummy_freqs() {
 }
 
 #[cfg(test)]
-pub(crate) fn get_mapping_for_any_node<'a, AA: AncestralAlignment>(
+pub(super) fn get_mapping_for_any_node<'a, AA: AncestralAlignment>(
     msa: &'a AA,
     node: &'a NodeIdx,
 ) -> &'a Mapping {

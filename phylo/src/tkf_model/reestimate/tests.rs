@@ -6,9 +6,9 @@ use crate::alignment::{AncestralAlignment, Sequences, MASA};
 use crate::alphabets::Alphabet;
 use crate::phylo_info::PhyloInfo;
 use crate::random::FakeGenerator;
-use crate::tkf_model::{
-    mapping_from_node_seq, tests::setup_test_phylo, EdgeSeqsReestimator, TKF92IndelCostBuilder,
-};
+use crate::tkf_model::reestimate::mapping_from_node_seq;
+use crate::tkf_model::tests::setup_test_phylo;
+use crate::tkf_model::{EdgeSeqsReestimator, TKF92IndelCostBuilder};
 use crate::{record_wo_desc as record, tree, Error};
 
 #[test]

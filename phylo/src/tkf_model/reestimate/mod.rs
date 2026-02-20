@@ -6,12 +6,14 @@ use crate::alignment::{AncestralAlignment, Mapping};
 use crate::likelihood::TreeSearchCost;
 use crate::phylo_info::PhyloInfo;
 use crate::random::RandomGenerator;
+use crate::tkf_model::reestimate::cache::{
+    possible_assignments_of_edge, possible_del_or_not, prev_compatible_del_or_not,
+};
 use crate::tkf_model::{log_i1, Event, TKFIndelCost, TKFIndelModelInfo, TKFModel};
 use crate::tree::NodeIdx::{self, Internal, Leaf};
 use crate::{bail, Result};
 
-pub mod cache;
-use cache::*;
+mod cache;
 
 /// Size of the dynamic programming column: 2 (assignments) * 2 (deletion or not) ^ 5 (edges) = 128, see [`QuartetEdges`].
 const DP_COL_SIZE: usize = 128;
@@ -23,7 +25,7 @@ const N_EDGES_IN_QUARTET: usize = 5;
 /// and at current [block](`super::TKFModel::get_blocks`).
 type EdgeAssignment = (bool, bool);
 // type EdgeAssignmentPossibilities = Vec<EdgeAssignment>;
-pub(super) type EdgeAssignmentPossibilities = &'static [EdgeAssignment];
+type EdgeAssignmentPossibilities = &'static [EdgeAssignment];
 /// Represents whether chars are present or absent for every [block](`super::TKFModel::get_blocks`)
 /// for a given [node](`crate::tree::Node`).
 type NodeSeq = FixedBitSet;
@@ -190,7 +192,7 @@ struct BackTrackingResult {
 pub struct EdgeSeqsReestimator<'a, T: TKFModel, AA: AncestralAlignment, R: Rng + SeedableRng> {
     dp_table: Vec<[f64; DP_COL_SIZE]>,
     backtracking_table: Vec<[usize; DP_COL_SIZE]>,
-    pub(super) cost: &'a mut TKFIndelCost<T, AA>,
+    cost: &'a mut TKFIndelCost<T, AA>,
     quartet_edges: QuartetEdges,
     rng: &'a mut RandomGenerator<R>,
 }
@@ -645,11 +647,7 @@ where
 }
 
 #[inline]
-pub(super) fn mapping_from_node_seq(
-    node_seq: &NodeSeq,
-    block_lens: &[usize],
-    seq_len: usize,
-) -> Mapping {
+fn mapping_from_node_seq(node_seq: &NodeSeq, block_lens: &[usize], seq_len: usize) -> Mapping {
     debug_assert!(
         block_lens.iter().sum::<usize>() == seq_len,
         "Block lengths do not sum up to the sequence length."

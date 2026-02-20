@@ -9,7 +9,7 @@ pub mod tkf91;
 pub use tkf91::*;
 pub mod tkf92;
 pub use tkf92::*;
-pub(in crate::tkf_model) mod reestimate;
+pub mod reestimate;
 pub use reestimate::*;
 pub mod tkf_indel;
 pub use tkf_indel::*;
@@ -175,8 +175,6 @@ impl<Q: QMatrix, T: TKFModel, AA: AncestralAlignment> TKFCost<Q, T, AA> {
 #[cfg(test)]
 #[cfg_attr(coverage, coverage(off))]
 mod tests;
-
-
 
 #[cfg(test)]
 #[cfg_attr(coverage, coverage(off))]
