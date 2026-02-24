@@ -58,6 +58,7 @@ impl From<NodeIdx> for usize {
     }
 }
 
+/// A rooted binary phylogenetic tree.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Tree {
     pub root: NodeIdx,
@@ -203,6 +204,7 @@ impl Tree {
     /// Returns the number of nodes in the tree.
     // TODO: use an alternative name to avoid confusion with length = sum of branch lengths
     // possibly: size, n_nodes, num_nodes,
+    // See issue #82 https://github.com/acg-team/rust-phylo/issues/82
     pub fn len(&self) -> usize {
         self.nodes.len()
     }
@@ -325,7 +327,7 @@ impl Tree {
         if let Some(node) = node {
             return Ok(node.idx);
         }
-        bail!(Tree, "no node with id {} found in the tree", id);
+        bail!(Tree, "no node with id {id} found in the tree");
     }
 
     #[cfg(test)]

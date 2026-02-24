@@ -28,6 +28,14 @@ pub struct TKF91IndelModel {
     params: Vec<f64>,
 }
 
+impl Default for TKF91IndelModel {
+    fn default() -> Self {
+        Self {
+            params: vec![DEFAULT_LAMBDA, DEFAULT_MU],
+        }
+    }
+}
+
 impl TKFModel for TKF91IndelModel {
     fn lambda(&self) -> f64 {
         self.params[usize::from(TKF91Parameters::Lambda)]
@@ -54,24 +62,24 @@ impl TKFModel for TKF91IndelModel {
         }
     }
 
-    fn insertion_prob_at_root(&self) -> f64 {
+    fn insertion_factor_at_root(&self) -> f64 {
         self.lambda() / self.mu()
     }
 
-    fn insertion_prob_at_non_root(&self, beta: f64) -> f64 {
+    fn insertion_factor_at_non_root(&self, beta: f64) -> f64 {
         self.lambda() * beta
     }
 
-    fn block_prob(&self, tree_event_prob: f64, block_len: usize) -> f64 {
-        if tree_event_prob == 1.0 {
+    fn block_prob(&self, tree_event_factor: f64, block_len: usize) -> f64 {
+        if tree_event_factor == 1.0 {
             0.0
         } else {
-            (block_len as f64) * tree_event_prob.ln()
+            (block_len as f64) * tree_event_factor.ln()
         }
     }
 
     /// Since TKF91 is a single-residue indel model, each position is its own block.
-    fn get_blocks<AA: AncestralAlignment>(msa: &AA) -> Vec<usize> {
+    fn get_blocks<AA: AncestralAlignment>(&self, msa: &AA) -> Vec<usize> {
         (1..msa.len() + 1).collect()
     }
 }
@@ -113,7 +121,7 @@ pub(super) fn validate_lambda_and_mu(lambda: f64, mu: f64) -> (f64, f64) {
     (valid_lambda, valid_mu)
 }
 
-/// Builder for TKF91 indel cost, i.e., without substitution model.
+/// Builder for the cost using the [`TKF91IndelModel`], i.e., without a substitution model.
 pub struct TKF91IndelCostBuilder<AA: AncestralAlignment> {
     lambda: f64,
     mu: f64,
@@ -130,7 +138,7 @@ impl<AA: AncestralAlignment> TKF91IndelCostBuilder<AA> {
         let model = TKF91IndelModel {
             params: vec![lambda, mu],
         };
-        let info = TKFIndelModelInfo::new::<_, TKF91IndelModel>(&self.phylo);
+        let info = TKFIndelModelInfo::new(&model, &self.phylo);
         Ok(TKFIndelCost {
             model,
             phylo: self.phylo,
@@ -139,7 +147,7 @@ impl<AA: AncestralAlignment> TKF91IndelCostBuilder<AA> {
     }
 }
 
-/// Builder for TKF91 cost, i.e., with a substitution model.
+/// Builder for the TKF91 cost, i.e., with a substitution model.
 pub struct TKF91CostBuilder<Q: QMatrix, AA: AncestralAlignment> {
     lambda: f64,
     mu: f64,
@@ -166,7 +174,7 @@ impl<Q: QMatrix, AA: AncestralAlignment> TKF91CostBuilder<Q, AA> {
         let model = TKF91IndelModel {
             params: vec![lambda, mu],
         };
-        let info = TKFIndelModelInfo::new::<_, TKF91IndelModel>(&self.phylo);
+        let info = TKFIndelModelInfo::new(&model, &self.phylo);
         let tkf_cost = TKFIndelCost {
             model,
             phylo: self.phylo.clone(),

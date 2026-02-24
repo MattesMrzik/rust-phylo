@@ -10,7 +10,8 @@ use crate::likelihood::{ParamRange, PARAM_RANGE_UNIT_INTERVAL_EXCLUSIVE};
 use crate::phylo_info::PhyloInfo;
 use crate::substitution_models::{QMatrix, SubstModel, SubstitutionCostBuilder as SCB};
 use crate::tkf_model::{
-    validate_lambda_and_mu, TKFCost, TKFIndelCost, TKFIndelModelInfo, TKFModel, DEFAULT_R,
+    validate_lambda_and_mu, TKFCost, TKFIndelCost, TKFIndelModelInfo, TKFModel, DEFAULT_LAMBDA,
+    DEFAULT_MU, DEFAULT_R,
 };
 use crate::{bail, Result};
 
@@ -34,8 +35,19 @@ pub struct TKF92IndelModel {
 }
 
 impl TKF92IndelModel {
-    pub(crate) fn r(&self) -> f64 {
+    pub fn r(&self) -> f64 {
         self.params[usize::from(TKF92Parameters::R)]
+    }
+}
+
+impl Default for TKF92IndelModel {
+    fn default() -> Self {
+        let r = DEFAULT_R;
+        Self {
+            params: vec![DEFAULT_LAMBDA, DEFAULT_MU, r],
+            log_r: r.ln(),
+            one_minus_r_over_r: (1.0 - r) / r,
+        }
     }
 }
 
@@ -76,48 +88,26 @@ impl TKFModel for TKF92IndelModel {
         }
     }
 
-    fn insertion_prob_at_root(&self) -> f64 {
+    fn insertion_factor_at_root(&self) -> f64 {
         self.lambda() / self.mu() * self.one_minus_r_over_r
     }
 
-    fn insertion_prob_at_non_root(&self, beta: f64) -> f64 {
+    fn insertion_factor_at_non_root(&self, beta: f64) -> f64 {
         self.lambda() * beta * self.one_minus_r_over_r
     }
 
-    fn block_prob(&self, tree_event_prob: f64, block_len: usize) -> f64 {
-        if tree_event_prob == 1.0 {
+    fn block_prob(&self, tree_event_factor: f64, block_len: usize) -> f64 {
+        if tree_event_factor == 1.0 {
             0.0
         } else {
-            tree_event_prob.ln()
-                + (block_len as f64 - 1.0) * (1.0 + tree_event_prob).ln()
+            tree_event_factor.ln()
+                + (block_len as f64 - 1.0) * (1.0 + tree_event_factor).ln()
                 + (block_len as f64) * self.log_r
         }
     }
 
-    /// Determines the block borders from the alignment. A block border is defined as a
-    /// position where any sequence changes from gap to non-gap or vice versa. Returns a sorted
-    /// vector of the right exclusive block borders.
-    fn get_blocks<AA: AncestralAlignment>(msa: &AA) -> Vec<usize> {
-        let mut blocks: HashSet<usize> = HashSet::new();
-        for map in msa
-            .ancestral_maps()
-            .values()
-            .chain(msa.leaf_maps().values())
-        {
-            let mut previous_is_char = map[0].is_some();
-            for (i, c) in map.iter().skip(1).enumerate() {
-                let current_is_char = c.is_some();
-                // whenever there is a change from gap to not gap or vice versa, we have a block border
-                if previous_is_char ^ current_is_char {
-                    blocks.insert(i + 1);
-                }
-                previous_is_char = current_is_char;
-            }
-            blocks.insert(map.len());
-        }
-        let mut blocks: Vec<usize> = blocks.iter().copied().collect();
-        blocks.sort();
-        blocks
+    fn get_blocks<AA: AncestralAlignment>(&self, msa: &AA) -> Vec<usize> {
+        blocks_of_alignment(msa)
     }
 }
 
@@ -133,10 +123,10 @@ impl Display for TKF92IndelModel {
     }
 }
 
-/// Validates the TKF92 parameter r. If it is not valid, it is set to
-/// default value and a warning is logged.
-/// Returns valid r.
-fn validate_r(r: f64) -> f64 {
+/// Validates the TKF92 parameter `r`. If it is not valid, it is set to
+/// its default value and a warning is logged.
+/// Returns valid `r`.
+pub(super) fn validate_r(r: f64) -> f64 {
     let mut valid_r = r;
     if r == 0.0 {
         valid_r = DEFAULT_R;
@@ -150,7 +140,7 @@ fn validate_r(r: f64) -> f64 {
     valid_r
 }
 
-/// Builder for TKF92 indel cost, i.e., without substitution model.
+/// Builder for the cost using the [`TKF92IndelModel`], i.e., without a substitution model.
 pub struct TKF92IndelCostBuilder<AA: AncestralAlignment> {
     lambda: f64,
     mu: f64,
@@ -176,7 +166,7 @@ impl<AA: AncestralAlignment> TKF92IndelCostBuilder<AA> {
             log_r: r.ln(),
             one_minus_r_over_r: (1.0 - r) / r,
         };
-        let info = TKFIndelModelInfo::new::<_, TKF92IndelModel>(&self.phylo);
+        let info = TKFIndelModelInfo::new(&model, &self.phylo);
         Ok(TKFIndelCost {
             model,
             phylo: self.phylo.clone(),
@@ -185,7 +175,7 @@ impl<AA: AncestralAlignment> TKF92IndelCostBuilder<AA> {
     }
 }
 
-/// Builder for TKF92 cost, i.e., with a substitution model.
+/// Builder for the TKF92 cost, i.e., with a substitution model.
 pub struct TKF92CostBuilder<Q: QMatrix, AA: AncestralAlignment> {
     lambda: f64,
     mu: f64,
@@ -223,7 +213,7 @@ impl<Q: QMatrix, AA: AncestralAlignment> TKF92CostBuilder<Q, AA> {
             log_r: r.ln(),
             one_minus_r_over_r: (1.0 - r) / r,
         };
-        let info = TKFIndelModelInfo::new::<_, TKF92IndelModel>(&self.phylo);
+        let info = TKFIndelModelInfo::new(&model, &self.phylo);
         let tkf_cost = TKFIndelCost {
             model,
             phylo: self.phylo.clone(),
@@ -236,7 +226,37 @@ impl<Q: QMatrix, AA: AncestralAlignment> TKF92CostBuilder<Q, AA> {
     }
 }
 
+/// Determines the block borders from the alignment. A block border is defined as a
+/// position where any sequence changes from gap to non-gap or vice versa. Returns a sorted
+/// vector of the right exclusive block borders.
+pub(crate) fn blocks_of_alignment<AA: AncestralAlignment>(msa: &AA) -> Vec<usize> {
+    let mut blocks: HashSet<usize> = HashSet::new();
+    if msa.len() == 0 {
+        return vec![];
+    }
+    for map in msa
+        .ancestral_maps()
+        .values()
+        .chain(msa.leaf_maps().values())
+    {
+        let mut previous_is_char = map[0].is_some();
+        for (i, c) in map.iter().skip(1).enumerate() {
+            let current_is_char = c.is_some();
+            // whenever there is a change from gap to not gap or vice versa, we have a block border
+            if previous_is_char ^ current_is_char {
+                blocks.insert(i + 1);
+            }
+            previous_is_char = current_is_char;
+        }
+        blocks.insert(map.len());
+    }
+    let mut blocks: Vec<usize> = blocks.iter().copied().collect();
+    blocks.sort();
+    blocks
+}
+
 #[cfg(test)]
+#[cfg_attr(coverage, coverage(off))]
 mod private_tests {
     use super::*;
 
@@ -245,8 +265,8 @@ mod private_tests {
     fn tkf92_param_range_invalid_index() {
         let model = TKF92IndelModel {
             params: vec![0.5, 1.0, 0.3],
-            log_r: 0.0,              // cache filled with dummy since it is not printed
-            one_minus_r_over_r: 0.0, // cache filled with dummy since it is not printed
+            log_r: 0.0,              // cache filled with dummy since it is not needed here
+            one_minus_r_over_r: 0.0, // cache filled with dummy since it is not needed here
         };
         // Use an invalid index
         model.param_range(3);
@@ -266,7 +286,7 @@ mod private_tests {
     }
 
     #[test]
-    fn tkf92_indel_set_param_r() {
+    fn tkf92_indel_set_param() {
         let mut model = TKF92IndelModel {
             params: vec![1.0, 2.0, 0.3],
             log_r: 0.0,              // dummy

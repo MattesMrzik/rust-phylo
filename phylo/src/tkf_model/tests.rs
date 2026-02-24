@@ -7,10 +7,12 @@ use crate::alphabets::Alphabet;
 use crate::likelihood::{
     ModelSearchCost, PARAM_RANGE_POSITIVE, PARAM_RANGE_UNIT_INTERVAL_EXCLUSIVE,
 };
+use crate::optimisers::rooted_nni;
 use crate::phylo_info::PhyloInfo;
 use crate::substitution_models::{QMatrixMaker, SubstModel, SubstitutionCostBuilder as SCB};
 use crate::substitution_models::{BLOSUM, GTR, HIVB, HKY, JC69, K80, TN93, WAG};
 use crate::tkf_model::tkf92::TKF92IndelModel;
+use crate::tkf_model::tkf92_fixed_fragmentation::TKF92FixedIndelModel;
 use crate::tkf_model::tkf_indel::DUMMY_FREQS;
 use crate::tree::NodeIdx::{self, Internal, Leaf};
 use crate::{frequencies, record_wo_desc as record, tree, Error};
@@ -23,7 +25,7 @@ fn tkf_dummy_freqs() {
 }
 
 #[cfg(test)]
-pub(crate) fn get_mapping_for_any_node<'a, AA: AncestralAlignment>(
+pub(super) fn get_mapping_for_any_node<'a, AA: AncestralAlignment>(
     msa: &'a AA,
     node: &'a NodeIdx,
 ) -> &'a Mapping {
@@ -108,7 +110,7 @@ fn tkf92_indel_logl_without_aggregation<AA: AncestralAlignment>(
     model: &TKF92IndelModel,
     phylo: &PhyloInfo<AA>,
 ) -> f64 {
-    let blocks = TKF92IndelModel::get_blocks(&phylo.msa);
+    let blocks = model.get_blocks(&phylo.msa);
     let tree = &phylo.tree;
     let lambda = model.lambda();
     let mu = model.mu();
@@ -246,7 +248,7 @@ fn tkf91_get_blocks() {
     ]);
     let msa = MASA::from_aligned_with_ancestral(seqs, &tree).unwrap();
 
-    let blocks = TKF91IndelModel::get_blocks(&msa);
+    let blocks = TKF91IndelModel::default().get_blocks(&msa);
     let block_lens = get_block_lengths(&blocks);
 
     assert_eq!(blocks, (1..msa.len() + 1).collect::<Vec<usize>>());
@@ -264,11 +266,35 @@ fn tkf92_get_blocks() {
 
     let msa = MASA::from_aligned_with_ancestral(seqs, &tree).unwrap();
 
-    let blocks = TKF92IndelModel::get_blocks(&msa);
+    let blocks = TKF92IndelModel::default().get_blocks(&msa);
     let block_lens = get_block_lengths(&blocks);
 
     assert_eq!(blocks, vec![1, 3, 4, 5]);
     assert_eq!(block_lens, vec![1, 2, 1, 1]);
+}
+
+#[test]
+fn tkf92_fixed_get_blocks() {
+    let tree = tree!("((A0:1.0,B1:1.0)I1:1.0);");
+    let seqs = Sequences::new(vec![
+        record!("A0", b"AAAAAAB-D"),
+        record!("B1", b"---AAARAW"),
+        record!("I1", b"AAAAAAA-A"),
+    ]);
+
+    let msa = MASA::from_aligned_with_ancestral(seqs, &tree).unwrap();
+
+    let fragmentation = vec![1, 2, 7];
+    let model = TKF92FixedIndelModel {
+        params: vec![0.5, 1.5, 0.2],
+        log_r: 0.2_f64.ln(),
+        fragmentation,
+    };
+    let blocks = model.get_blocks(&msa);
+    let block_lens = get_block_lengths(&blocks);
+
+    assert_eq!(blocks, vec![1, 2, 3, 7, 8, 9]);
+    assert_eq!(block_lens, vec![1, 1, 1, 4, 1, 1]);
 }
 
 #[cfg(test)]
@@ -450,6 +476,29 @@ fn tkf91_param_range() {
     }
 }
 
+#[cfg(test)]
+fn tkf92_subst_param_range<Q: QMatrix, T: TKFModel, AA: AncestralAlignment>(
+    cost: &TKFCost<Q, T, AA>,
+) {
+    for subst_param_idx in 3..cost.param_count() {
+        let subst_range = cost.param_range(subst_param_idx);
+        let true_subst_range = PARAM_RANGE_POSITIVE;
+        assert_eq!(subst_range, true_subst_range);
+    }
+}
+
+#[cfg(test)]
+fn tkf92_indel_param_range<T: TKFModel, AA: AncestralAlignment>(cost: &TKFIndelCost<T, AA>) {
+    let lambda_range = cost.param_range(usize::from(TKF92Parameters::Lambda));
+    let true_lambda_range = (f64::EPSILON, 2.0 - f64::EPSILON);
+    assert_eq!(lambda_range, true_lambda_range);
+    let mu_range = cost.param_range(usize::from(TKF92Parameters::Mu));
+    let true_mu_range = (1.0 + f64::EPSILON, f64::MAX);
+    assert_eq!(mu_range, true_mu_range);
+    let r_range = cost.param_range(usize::from(TKF92Parameters::R));
+    let true_r_range = PARAM_RANGE_UNIT_INTERVAL_EXCLUSIVE;
+    assert_eq!(r_range, true_r_range);
+}
 #[test]
 fn tkf92_param_range() {
     let subst_model = SubstModel::<GTR>::new(&[], &[]);
@@ -462,21 +511,31 @@ fn tkf92_param_range() {
     )
     .build()
     .unwrap();
-    let lambda_range = tkf_cost.param_range(usize::from(TKF92Parameters::Lambda));
-    let true_lambda_range = (f64::EPSILON, 2.0 - f64::EPSILON);
-    assert_eq!(lambda_range, true_lambda_range);
-    let mu_range = tkf_cost.param_range(usize::from(TKF92Parameters::Mu));
-    let true_mu_range = (1.0 + f64::EPSILON, f64::MAX);
-    assert_eq!(mu_range, true_mu_range);
-    let r_range = tkf_cost.param_range(usize::from(TKF92Parameters::R));
-    let true_r_range = PARAM_RANGE_UNIT_INTERVAL_EXCLUSIVE;
-    assert_eq!(r_range, true_r_range);
+    tkf92_subst_param_range(&tkf_cost);
+    tkf92_indel_param_range(&tkf_cost.indel_cost);
+}
 
-    for subst_param_idx in 3..tkf_cost.param_count() {
-        let subst_range = tkf_cost.param_range(subst_param_idx);
-        let true_subst_range = PARAM_RANGE_POSITIVE;
-        assert_eq!(subst_range, true_subst_range);
-    }
+#[test]
+fn tkf92_fixed_param_range() {
+    let tkf_cost =
+        TKF92FixedIndelCostBuilder::new(1.0, 2.0, 0.3, vec![], setup_test_phylo(Alphabet::dna()))
+            .build()
+            .unwrap();
+    tkf92_indel_param_range(&tkf_cost);
+}
+
+#[test]
+fn tkf92_add_param_range() {
+    let tkf_cost = TKF92IndelAddBlocksCostBuilder::new(
+        1.0,
+        2.0,
+        0.3,
+        vec![],
+        setup_test_phylo(Alphabet::dna()),
+    )
+    .build()
+    .unwrap();
+    tkf92_indel_param_range(&tkf_cost);
 }
 
 #[test]
@@ -677,8 +736,8 @@ fn tkf91_logl_with_substitution() {
         .unwrap();
 
     // act
-    let logl = tkf_cost.cost();
-    let subst_logl = subst_cost.cost();
+    let logl = ModelSearchCost::cost(&tkf_cost);
+    let subst_logl = ModelSearchCost::cost(&subst_cost);
     let tkf_logl = tkf91_indel_logl_without_aggregation(
         &tkf_cost.indel_cost.model,
         &tkf_cost.indel_cost.phylo,
@@ -704,8 +763,8 @@ fn tkf92_logl_with_substitution() {
         .unwrap();
 
     // act
-    let logl = tkf_cost.cost();
-    let subst_logl = subst_cost.cost();
+    let logl = ModelSearchCost::cost(&tkf_cost);
+    let subst_logl = ModelSearchCost::cost(&subst_cost);
     let tkf_logl = tkf92_indel_logl_without_aggregation(
         &tkf_cost.indel_cost.model,
         &tkf_cost.indel_cost.phylo,
@@ -753,14 +812,14 @@ fn tkf_indel_history_doesnt_change_felsenstein() {
         .unwrap();
 
     // act
-    let tkf_log_1 = tkf_cost1.clone().cost();
-    let tkf_log_2 = tkf_cost2.clone().cost();
-    let tkf_indel_cost_1 = tkf_cost1.indel_cost.cost();
+    let tkf_log_1 = ModelSearchCost::cost(&tkf_cost1.clone());
+    let tkf_log_2 = ModelSearchCost::cost(&tkf_cost2.clone());
+    let tkf_indel_cost_1 = ModelSearchCost::cost(&tkf_cost1.indel_cost);
     let tkf_indel_cost_without_agg_1 = tkf92_indel_logl_without_aggregation(
         &tkf_cost1.indel_cost.model,
         &tkf_cost1.indel_cost.phylo,
     );
-    let tkf_indel_cost_2 = tkf_cost2.indel_cost.cost();
+    let tkf_indel_cost_2 = ModelSearchCost::cost(&tkf_cost2.indel_cost);
     let tkf_indel_cost_without_agg_2 = tkf92_indel_logl_without_aggregation(
         &tkf_cost2.indel_cost.model,
         &tkf_cost2.indel_cost.phylo,
@@ -850,4 +909,50 @@ fn tkf_modify_indel_model_params_costs_match() {
     modify_tkf92_indel_params_costs_match_template::<WAG>();
     modify_tkf92_indel_params_costs_match_template::<BLOSUM>();
     modify_tkf92_indel_params_costs_match_template::<HIVB>();
+}
+
+#[test]
+fn tkf_udpate_tree() {
+    let tree = tree!("(((A1:2.0,B2:2.0)I3:0.3,C4:2.0)R5:1.0);");
+    let msa = MASA::from_aligned_with_ancestral(
+        Sequences::new(vec![
+            record!("A1", b"--GTGGATGC"),
+            record!("B2", b"--G----CGA"),
+            record!("I3", b"--N----NNN"),
+            record!("C4", b"AGC-------"),
+            record!("R5", b"--N-------"),
+        ]),
+        &tree,
+    )
+    .unwrap();
+    let phylo = PhyloInfo { msa, tree };
+    let subst_model = SubstModel::<GTR>::new(&[], &[]);
+    let lambda = 0.1;
+    let mu = 0.2;
+    let r = 0.3;
+    let mut tkf_cost = TKF92CostBuilder::new(lambda, mu, r, subst_model.clone(), phylo.clone())
+        .build()
+        .unwrap();
+    let original_logl = TreeSearchCost::cost(&tkf_cost);
+    assert_ne!(original_logl, f64::NEG_INFINITY);
+
+    let node_idx = &phylo.tree.by_id("I3").idx;
+    let child_idx = &phylo.tree.by_id("A1").idx;
+    let new_tree = rooted_nni(&phylo.tree, node_idx, child_idx).unwrap();
+    let new_tree_newick = new_tree.to_newick();
+    tkf_cost.update_tree(new_tree);
+
+    assert_eq!(new_tree_newick, tkf_cost.tree().to_newick());
+    let new_logl = TreeSearchCost::cost(&tkf_cost);
+
+    let new_phylo = PhyloInfo {
+        msa: tkf_cost.masa().clone(),
+        tree: tkf_cost.tree().clone(),
+    };
+    let clean_cost = TKF92CostBuilder::new(lambda, mu, r, subst_model.clone(), new_phylo)
+        .build()
+        .unwrap();
+    let clean_logl = TreeSearchCost::cost(&clean_cost);
+    assert_ne!(original_logl, new_logl);
+    assert_eq!(new_logl, clean_logl);
 }
