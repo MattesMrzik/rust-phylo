@@ -150,7 +150,8 @@ struct BackTrackingResult {
 ///
 /// # Example
 /// ```rust
-/// # fn main() -> std::result::Result<(), anyhow::Error> {
+/// # use phylo::Result;
+/// # fn main() -> Result<()> {
 /// use phylo::phylo_info::PhyloInfoBuilder;
 /// use phylo::random::DefaultGenerator;
 /// use phylo::tkf_model::{EdgeSeqsReestimator, TKF92IndelCostBuilder};
@@ -180,7 +181,7 @@ struct BackTrackingResult {
 ///         let new_cost = reestimator.reestimate(&node)?;
 ///         println!("Re-estimated sequences at node {node}, cost after re-estimation: {new_cost}",);
 ///     }
-///     break; // stopping early for doc test, remove in real usage
+/// #   break;
 /// }
 /// println!(
 ///     "The re-estimated ancestral MSA is {}",

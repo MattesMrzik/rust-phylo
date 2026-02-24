@@ -12,7 +12,7 @@ use rayon::prelude::*;
 use crate::alignment::{Alignment, AncestralAlignment, MASA};
 use crate::likelihood::ModelSearchCost;
 use crate::phylo_info::PhyloInfoBuilder;
-use crate::random::{DefaultGenerator, FakeGenerator};
+use crate::random::FakeGenerator;
 use crate::tkf_model::reestimate::cache::possible_assignments_of_edge;
 use crate::tkf_model::reestimate::mapping_from_node_seq;
 use crate::tkf_model::tests::get_mapping_for_any_node;
@@ -435,24 +435,22 @@ fn tkf92_reestimate_large_tree_for_file_iterative() {
     let mut rng = FakeGenerator::default();
     let mut reestimator = EdgeSeqsReestimator::new(&mut reestimator_cost, &mut rng);
 
-    // iterating over nodes in random order multiple times
-    let mut rng = DefaultGenerator::new(42);
+    // iterating over nodes multiple times
     let repeat = 5;
-    let mut random_nodes = phylo
+    let nodes = phylo
         .tree
         .postorder()
         .iter()
         .filter(|node| *node != &phylo.tree.root && !phylo.tree.node(node).children.is_empty())
         .collect::<Vec<_>>()
         .repeat(repeat);
-    rng.shuffle(&mut random_nodes);
 
     // Since the inference of the observed blocks may change after reestimation (an so does the
     // cost calculation of a clean cost struct that we use to compare against), we store the
     // initial blocks here and create the clean cost to compare against with these as additional
     // blocks.
     let initial_msa_blocking = reestimator.cost.model_info.borrow().blocks.clone();
-    for (iteration, node) in random_nodes.into_iter().enumerate() {
+    for (iteration, node) in nodes.into_iter().enumerate() {
         // Perform Dynamic Programming reestimation
         let max_dp = reestimator.reestimate_unchecked(node);
         // Perform brute force calculation

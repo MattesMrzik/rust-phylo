@@ -147,10 +147,8 @@ fn possible_del_or_not_table() -> [QuartetDelOrNotPossibilities; DEL_OR_NOT_TABL
         let possibilities = possible_del_or_not_for_event(&events);
         if !table[idx].is_empty() {
             // The mapping 'calc_possible_del_or_not_table_idx' from all the possibilities to idx is not unique,
-            // since the flag 'deletion or not' does not differentiate between
-            // Insertion and Homolog events for example.
-            // In that case the mapping 'possible_del_or_not_for_event' should also be the
-            // same.
+            // since the flag 'deletion or not' does not differentiate between Insertion and Homolog events for example.
+            // In that case the mapping 'possible_del_or_not_for_event' should also be the same.
             assert!(table[idx] == possibilities);
         }
         table[idx] = possibilities;
