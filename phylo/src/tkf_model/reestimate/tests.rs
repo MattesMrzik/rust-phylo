@@ -12,7 +12,7 @@ use crate::tkf_model::{EdgeSeqsReestimator, TKF92IndelCostBuilder};
 use crate::{record_wo_desc as record, tree, Error};
 
 #[test]
-    fn tkf_reestimate_without_choice() {
+fn tkf_reestimate_without_choice() {
     let tree = tree!("(((A1:2.0,(B2:1.0, C3:1.2)I4:2.0)I5:0.3,D6:2.0)R7:1.0);");
     // The alignment is designed such that for every site the re-estimation will have no choice but
     // to keep the current states, since it must conform to Dollo's principle.
