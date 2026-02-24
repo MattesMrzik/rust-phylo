@@ -155,20 +155,13 @@ struct BackTrackingResult {
 /// use phylo::phylo_info::PhyloInfoBuilder;
 /// use phylo::random::DefaultGenerator;
 /// use phylo::tkf_model::{EdgeSeqsReestimator, TKF92IndelCostBuilder};
-/// use phylo::tree::NodeIdx::Internal;
+/// use phylo::tree::NodeIdx::{Internal, Leaf};
 /// // Re-estimation for ASR refinement.
 /// // The alignment below includes ancestral sequences for which the indel points
 /// // will be refined.
 /// let tree = "data/tkf/reestimate/tree.newick";
 /// let msa = "data/tkf/reestimate/masa.fasta";
 /// let phylo = PhyloInfoBuilder::with_attrs(msa, tree).build_with_ancestors()?;
-/// let internal_nodes = phylo
-///     .tree
-///     .postorder()
-///     .iter()
-///     .cloned()
-///     .filter(|n| matches!(n, Internal(_)))
-///     .collect::<Vec<_>>();
 /// let lambda = 0.9;
 /// let mu = 1.0;
 /// let r = 0.5;
@@ -176,12 +169,18 @@ struct BackTrackingResult {
 ///     .build()?;
 /// let mut rng = DefaultGenerator::default();
 /// let mut reestimator = EdgeSeqsReestimator::new(&mut tkf92_indel_cost, &mut rng);
-/// for node in internal_nodes {
-///     if let Internal(_) = node {
-///         let new_cost = reestimator.reestimate(&node)?;
-///         println!("Re-estimated sequences at node {node}, cost after re-estimation: {new_cost}",);
+///
+/// for node in reestimator.phylo().tree.postorder().clone() {
+///     if node == reestimator.phylo().tree.root {
+///         continue;
 ///     }
-/// #   break;
+///     match node {
+///         Internal(_) => {
+///             let new_cost = reestimator.reestimate(&node)?;
+///             println!("Re-estimated sequences at node {node}, cost after re-estimation: {new_cost}",);
+///         }
+///         Leaf(_) => {}
+///     }
 /// }
 /// println!(
 ///     "The re-estimated ancestral MSA is {}",
