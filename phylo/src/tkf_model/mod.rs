@@ -167,7 +167,7 @@ impl<Q: QMatrix, T: TKFModel, AA: AncestralAlignment> TKFCost<Q, T, AA> {
     /// // position of the alignment).
     /// assert_eq!(cost.blocks(), vec![2, 3, 7, 10]);
     /// # Ok(()) }
-    pub fn blocks(&self) -> Vec<usize> {
+    pub fn blocks(&self) -> Vec<Block> {
         self.indel_cost.model.get_blocks(&self.indel_cost.phylo.msa)
     }
 }
@@ -175,13 +175,6 @@ impl<Q: QMatrix, T: TKFModel, AA: AncestralAlignment> TKFCost<Q, T, AA> {
 #[cfg(test)]
 #[cfg_attr(coverage, coverage(off))]
 mod tests;
-
-#[cfg(test)]
-#[cfg_attr(coverage, coverage(off))]
-mod tkf92_additional_blocks;
-
-#[cfg(test)]
-pub use tkf92_additional_blocks::*;
 
 #[cfg(test)]
 #[cfg_attr(coverage, coverage(off))]

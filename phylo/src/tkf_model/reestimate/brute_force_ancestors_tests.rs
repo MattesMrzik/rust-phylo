@@ -16,10 +16,7 @@ use crate::random::FakeGenerator;
 use crate::tkf_model::reestimate::cache::possible_assignments_of_edge;
 use crate::tkf_model::reestimate::mapping_from_node_seq;
 use crate::tkf_model::tests::get_mapping_for_any_node;
-use crate::tkf_model::{
-    EdgeSeqsReestimator, TKF92IndelAddBlocksCostBuilder, TKF92IndelCostBuilder, TKFIndelCost,
-    TKFModel,
-};
+use crate::tkf_model::{EdgeSeqsReestimator, TKF92IndelCostBuilder, TKFIndelCost, TKFModel};
 use crate::tree::NodeIdx;
 
 /// Given all possible edge assignment for each block in the alignment returns a specific edge
@@ -149,7 +146,13 @@ fn cost_for_edge_seqs<T: TKFModel>(
     edge_seqs: &[(bool, bool)],
 ) -> f64 {
     let v1_idx = &cost.phylo.tree.node(v2_idx).parent.unwrap();
-    let block_lens = cost.model_info.borrow().block_lengths.clone();
+    let block_lens = cost
+        .model_info
+        .borrow()
+        .blocks
+        .iter()
+        .map(|block| block.len)
+        .collect::<Vec<_>>();
     let seq_len = cost.phylo.msa.len();
 
     let (new_v1_mapping, new_v2_mapping) = edge_seqs_to_mappings(edge_seqs, &block_lens, seq_len);
@@ -191,7 +194,7 @@ fn get_edge_assignment_possibilities(
     let t4_mapping = get_mapping_for_any_node(&cost.phylo.msa, &tree.children(v2_idx)[1]);
 
     for (block_id, possible_edge_assignment) in possible_edge_assignments.iter_mut().enumerate() {
-        let site = blocks[block_id] - 1;
+        let site = blocks[block_id].site;
         let t1_is_char = if let Some(t1_map) = &t1_mapping {
             t1_map[site].is_some()
         } else {
@@ -430,6 +433,13 @@ fn tkf92_reestimate_large_tree_for_file_iterative() {
     let mut reestimator_cost = TKF92IndelCostBuilder::new(lambda, mu, r, phylo.clone())
         .build()
         .unwrap();
+    let prev_blocks_borders = reestimator_cost
+        .model_info
+        .borrow()
+        .blocks
+        .iter()
+        .map(|block| block.site)
+        .collect::<Vec<_>>();
     // cloning here to leave the cost in a clean state before reestimation
     let mut prev_logl = reestimator_cost.clone().cost();
     let mut rng = FakeGenerator::default();
@@ -437,7 +447,7 @@ fn tkf92_reestimate_large_tree_for_file_iterative() {
 
     // iterating over nodes multiple times
     let repeat = 5;
-    let nodes = phylo
+    let random_nodes = phylo
         .tree
         .postorder()
         .iter()
@@ -445,24 +455,18 @@ fn tkf92_reestimate_large_tree_for_file_iterative() {
         .collect::<Vec<_>>()
         .repeat(repeat);
 
-    // Since the inference of the observed blocks may change after reestimation (an so does the
-    // cost calculation of a clean cost struct that we use to compare against), we store the
-    // initial blocks here and create the clean cost to compare against with these as additional
-    // blocks.
-    let initial_msa_blocking = reestimator.cost.model_info.borrow().blocks.clone();
-    for (iteration, node) in nodes.into_iter().enumerate() {
+    for (iteration, node) in random_nodes.into_iter().enumerate() {
+        println!(
+            "Iteration {iteration}, reestimating node {}",
+            phylo.tree.node(node).id
+        );
         // Perform Dynamic Programming reestimation
         let max_dp = reestimator.reestimate_unchecked(node);
         // Perform brute force calculation
-        let cost_for_brute_force = TKF92IndelAddBlocksCostBuilder::new(
-            lambda,
-            mu,
-            r,
-            initial_msa_blocking.clone(),
-            reestimator.phylo().clone(),
-        )
-        .build()
-        .unwrap();
+        let cost_for_brute_force =
+            TKF92IndelCostBuilder::new(lambda, mu, r, reestimator.phylo().clone())
+                .build()
+                .unwrap();
         let _ = cost_for_brute_force.cost();
         let max_brute_force = calc_or_lookup_brute_force_max(
             iteration,
@@ -472,15 +476,26 @@ fn tkf92_reestimate_large_tree_for_file_iterative() {
             node,
         );
         // Create a clean cost to compare against
-        let clean_cost = TKF92IndelAddBlocksCostBuilder::new(
-            lambda,
-            mu,
-            r,
-            initial_msa_blocking.clone(),
-            reestimator.phylo().clone(),
-        )
-        .build()
-        .unwrap();
+        let clean_cost = TKF92IndelCostBuilder::new(lambda, mu, r, reestimator.phylo().clone())
+            .build()
+            .unwrap();
+
+        let clean_block_borders = clean_cost
+            .model_info
+            .borrow()
+            .blocks
+            .iter()
+            .map(|block| block.site)
+            .collect::<Vec<_>>();
+        if prev_blocks_borders != clean_block_borders {
+            println!(
+                "Warning: Block borders changed after reestimation for node {} at iteration {}.",
+                reestimator.phylo().tree.node(node).id,
+                iteration
+            );
+            println!("Previous block borders: {:?}", prev_blocks_borders);
+            println!("Current block borders: {:?}", clean_block_borders);
+        }
         let logl_from_clean_cost = clean_cost.cost();
 
         assert_relative_eq!(max_dp, logl_from_clean_cost, epsilon = 1e-10);

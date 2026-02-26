@@ -57,6 +57,7 @@ impl PairwiseAlignment {
         debug_assert_eq!(self.map_x.len(), self.map_y.len());
         self.map_x.len()
     }
+
 }
 
 /// Represents an alignment of sequences that are associated with the leaves of a phylogenetic tree.
@@ -612,7 +613,7 @@ impl MASA {
         let new_record = record!(id, old_record.desc(), &new_seq);
         self.ancestral_seqs
             .update_record(id, new_record)
-            .expect("updating ancestral record failed. Please report this at https://github.com/acg-team/rust-phylo/issues");
+            .expect("updating ancestral record failed. Please report this at {REPORT_ISSUES_URL}");
     }
 }
 

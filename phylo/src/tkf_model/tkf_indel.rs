@@ -34,6 +34,26 @@ pub(super) enum Event {
     Nothing,
 }
 
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub(super) enum NumBlockAppearances {
+    Variable(usize),
+    Fixed,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct Block {
+    /// The right exclusive interval border of the block.
+    /// For example, if the block is [3, 5), the block border is 5.
+    pub(super) border: usize,
+    // The representative site of the block, which is used to determine the event for the block.
+    pub(super) site: usize,
+    // The length of the block, i.e., border - previous block border.
+    pub(super) len: usize,
+    // Either the number of times this block appears in the alignment, or whether it should be
+    // treated as a fixed block independently of the number of appearances.
+    pub(super) num_appearances: NumBlockAppearances,
+}
+
 /// Trait for TKF indel models (i.e., [TKF91IndelModel](`crate::tkf_model::TKF91IndelModel`),
 /// [TKF92IndelModel](`crate::tkf_model::TKF92IndelModel`)).
 #[allow(clippy::upper_case_acronyms)]
@@ -61,7 +81,7 @@ pub trait TKFModel: Clone + Display {
     /// For every block (i.e., an alignment slice) as determined by this method and factors
     /// corresponding to the evolutionary events in this block [`TKFModel::block_prob`] computes
     /// the log probability of the block under the model.
-    fn get_blocks<AA: AncestralAlignment>(&self, msa: &AA) -> Vec<usize>;
+    fn get_blocks<AA: AncestralAlignment>(&self, msa: &AA) -> Vec<Block>;
 }
 
 // TODO: link our paper once it is published. For now see original TKF92 paper: https://doi.org/10.1007/bf00163848
@@ -109,10 +129,10 @@ pub(super) struct TKFIndelModelInfo {
 
     /// The right exclusive interval borders of the blocks.
     /// See [`TKFModel::get_blocks`].
-    pub(super) blocks: Vec<usize>,
+    pub(super) blocks: Vec<Block>,
     /// The lengths of the blocks.
     /// See [`get_block_lengths`].
-    pub(super) block_lengths: Vec<usize>,
+    // pub(super) block_lengths: Vec<usize>,
 
     /// previous_event_deletion[node] = true if the last event was a deletion for a that <node>.
     /// See [`TKFIndelCost::determine_event`] and [`TKFIndelCost::update_previous_event`].
@@ -133,7 +153,6 @@ impl TKFIndelModelInfo {
         phylo: &PhyloInfo<AA>,
     ) -> TKFIndelModelInfo {
         let blocks = model.get_blocks(&phylo.msa);
-        let block_lengths = get_block_lengths(&blocks);
         let n_blocks = blocks.len();
         let n_nodes = phylo.tree.len();
         TKFIndelModelInfo {
@@ -147,7 +166,6 @@ impl TKFIndelModelInfo {
             insertion: vec![0.0; n_nodes],
             eta: vec![0.0; n_nodes],
             blocks,
-            block_lengths,
             previous_event_deletion: FixedBitSet::with_capacity(n_nodes),
             valid: FixedBitSet::with_capacity(n_nodes),
             valid_for_reestimation: FixedBitSet::with_capacity(n_nodes),
@@ -213,11 +231,10 @@ impl<T: TKFModel, AA: AncestralAlignment> TKFIndelCost<T, AA> {
         for node in self.phylo.tree.preorder().iter().skip(1) {
             logl += log_i1(lambda, model_info.beta[usize::from(node)]);
         }
-        for block_id in 0..model_info.blocks.len() {
-            let block_len = model_info.block_lengths[block_id];
+        for (block_id, block) in model_info.blocks.iter().enumerate() {
             logl += model_info.subtree_eta[(root_id, block_id)];
             let tree_event_factor = model_info.subtree_event_factor[(root_id, block_id)];
-            logl += self.model.block_prob(tree_event_factor, block_len);
+            logl += self.model.block_prob(tree_event_factor, block.len);
         }
         logl
     }
@@ -329,7 +346,7 @@ impl<T: TKFModel, AA: AncestralAlignment> TKFIndelCost<T, AA> {
     pub(super) fn determine_event(&self, node_idx: &NodeIdx, block_id: usize) -> Event {
         // the presence or absence of characters is the same for all sites in a block
         // so we can just check the last site of the block
-        let site = self.model_info.borrow().blocks[block_id] - 1;
+        let site = self.model_info.borrow().blocks[block_id].site;
 
         let parent_is_gap = match self.phylo.tree.node(node_idx).parent {
             Some(parent_idx) => match parent_idx {
@@ -520,20 +537,6 @@ pub(super) fn eta(lambda: f64, mu: f64, beta: f64, n0: f64, time: f64) -> f64 {
     eta -= (lambda * beta).ln();
     eta -= n0.ln();
     eta
-}
-
-/// Given the right exclusive block borders, returns the lengths of the blocks.
-/// For example, given [3, 5, 8], the block lengths are [3, 2, 3].
-pub(super) fn get_block_lengths(blocks: &[usize]) -> Vec<usize> {
-    let mut block_lens = vec![0; blocks.len()];
-    for (i, block) in blocks.iter().enumerate() {
-        block_lens[i] = if i == 0 {
-            *block
-        } else {
-            block - blocks[i - 1]
-        };
-    }
-    block_lens
 }
 
 #[cfg(test)]

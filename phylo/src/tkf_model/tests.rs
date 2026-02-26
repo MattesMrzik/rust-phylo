@@ -122,15 +122,10 @@ fn tkf92_indel_logl_without_aggregation<AA: AncestralAlignment>(
     let mut last_event_deletion = vec![false; tree.len()];
     for (i, fragment) in blocks.iter().enumerate() {
         let mut event_prob = 1.0;
-        let fragment_len = if i == 0 {
-            *fragment
-        } else {
-            fragment - blocks[i - 1]
-        };
-        if get_mapping_for_any_node(&phylo.msa, &phylo.tree.root)[fragment - 1].is_some() {
+        if get_mapping_for_any_node(&phylo.msa, &phylo.tree.root)[fragment.site].is_some() {
             // the eq seq at the root has a fragment
             event_prob *= lambda / mu * (1.0 - r) / r;
-            prob += fragment_len as f64 * r.ln();
+            prob += fragment.len as f64 * r.ln();
         }
         for node_idx in tree.postorder() {
             // skipping the root of the tree because it has no parent and therefore also no
@@ -143,9 +138,9 @@ fn tkf92_indel_logl_without_aggregation<AA: AncestralAlignment>(
             let time = tree.node(node_idx).blen;
             let parent_id = &tree.node(node_idx).parent.unwrap();
             let parent_is_gap =
-                get_mapping_for_any_node(&phylo.msa, parent_id)[fragment - 1].is_none();
+                get_mapping_for_any_node(&phylo.msa, parent_id)[fragment.site].is_none();
             let current_is_gap =
-                get_mapping_for_any_node(&phylo.msa, node_idx)[fragment - 1].is_none();
+                get_mapping_for_any_node(&phylo.msa, node_idx)[fragment.site].is_none();
 
             let beta = beta(lambda, mu, time);
             if i == 0 {
@@ -169,12 +164,12 @@ fn tkf92_indel_logl_without_aggregation<AA: AncestralAlignment>(
                     prob -= n0(mu, beta).ln();
                 }
                 event_prob *= lambda * beta * (1.0 - r) / r;
-                prob += fragment_len as f64 * r.ln();
+                prob += fragment.len as f64 * r.ln();
                 last_event_deletion[node_id_value] = false;
             }
         }
         prob += event_prob.ln();
-        prob += (fragment_len - 1) as f64 * (1.0 + event_prob).ln();
+        prob += (fragment.len - 1) as f64 * (1.0 + event_prob).ln();
     }
     prob
 }
@@ -249,10 +244,15 @@ fn tkf91_get_blocks() {
     let msa = MASA::from_aligned_with_ancestral(seqs, &tree).unwrap();
 
     let blocks = TKF91IndelModel::default().get_blocks(&msa);
-    let block_lens = get_block_lengths(&blocks);
 
-    assert_eq!(blocks, (1..msa.len() + 1).collect::<Vec<usize>>());
-    assert_eq!(block_lens, vec![1; 6]);
+    let block_borders = blocks.iter().map(|b| b.border).collect::<Vec<usize>>();
+    assert_eq!(block_borders, (1..msa.len() + 1).collect::<Vec<usize>>());
+    let block_sites = blocks.iter().map(|b| b.site).collect::<Vec<usize>>();
+    assert_eq!(block_sites, (0..msa.len()).collect::<Vec<usize>>());
+    for block in blocks {
+        assert_eq!(block.len, 1);
+        assert_eq!(block.num_appearances, NumBlockAppearances::Fixed);
+    }
 }
 
 #[test]
@@ -263,14 +263,29 @@ fn tkf92_get_blocks() {
         record!("B1", b"-ARAW"),
         record!("I1", b"AAA-A"),
     ]);
-
     let msa = MASA::from_aligned_with_ancestral(seqs, &tree).unwrap();
 
     let blocks = TKF92IndelModel::default().get_blocks(&msa);
-    let block_lens = get_block_lengths(&blocks);
 
-    assert_eq!(blocks, vec![1, 3, 4, 5]);
+    let block_borders = blocks.iter().map(|b| b.border).collect::<Vec<usize>>();
+    assert_eq!(block_borders, vec![1, 3, 4, 5]);
+    let block_sites = blocks.iter().map(|b| b.site).collect::<Vec<usize>>();
+    assert_eq!(block_sites, vec![0, 2, 3, 4]);
+    let block_lens = blocks.iter().map(|b| b.len).collect::<Vec<usize>>();
     assert_eq!(block_lens, vec![1, 2, 1, 1]);
+    let block_num_appearances = blocks
+        .iter()
+        .map(|b| b.num_appearances)
+        .collect::<Vec<NumBlockAppearances>>();
+    assert_eq!(
+        block_num_appearances,
+        vec![
+            NumBlockAppearances::Variable(1), // block from the msa, only B1 introduces this border
+            NumBlockAppearances::Variable(2), // block from the msa, both A0 and I1 introduce this border
+            NumBlockAppearances::Variable(2), // block from the msa, both A0 and I1 introduce this border
+            NumBlockAppearances::Variable(3), // block from the msa, all three sequences introduce this border
+        ]
+    );
 }
 
 #[test]
@@ -291,10 +306,28 @@ fn tkf92_fixed_get_blocks() {
         fragmentation,
     };
     let blocks = model.get_blocks(&msa);
-    let block_lens = get_block_lengths(&blocks);
 
-    assert_eq!(blocks, vec![1, 2, 3, 7, 8, 9]);
+    let block_borders = blocks.iter().map(|b| b.border).collect::<Vec<usize>>();
+    assert_eq!(block_borders, vec![1, 2, 3, 7, 8, 9]);
+    let block_sites = blocks.iter().map(|b| b.site).collect::<Vec<usize>>();
+    assert_eq!(block_sites, vec![0, 1, 2, 6, 7, 8]);
+    let block_lens = blocks.iter().map(|b| b.len).collect::<Vec<usize>>();
     assert_eq!(block_lens, vec![1, 1, 1, 4, 1, 1]);
+    let block_num_appearances = blocks
+        .iter()
+        .map(|b| b.num_appearances)
+        .collect::<Vec<NumBlockAppearances>>();
+    assert_eq!(
+        block_num_appearances,
+        vec![
+            NumBlockAppearances::Fixed, // block from the additional fragmentation site at 1
+            NumBlockAppearances::Fixed, // block from the additional fragmentation site at 2
+            NumBlockAppearances::Variable(1), // block from the msa, only B1 introduces this border
+            NumBlockAppearances::Variable(2), // block from the msa, both A0 and I1 introduce this border, it does not matter that it's also listed in the additional fragmentation
+            NumBlockAppearances::Variable(2), // block from the msa, both A0 and I1 introduce this border
+            NumBlockAppearances::Variable(3), // block from the msa, all three sequences introduce this border
+        ]
+    );
 }
 
 #[cfg(test)]
@@ -521,20 +554,6 @@ fn tkf92_fixed_param_range() {
         TKF92FixedIndelCostBuilder::new(1.0, 2.0, 0.3, vec![], setup_test_phylo(Alphabet::dna()))
             .build()
             .unwrap();
-    tkf92_indel_param_range(&tkf_cost);
-}
-
-#[test]
-fn tkf92_add_param_range() {
-    let tkf_cost = TKF92IndelAddBlocksCostBuilder::new(
-        1.0,
-        2.0,
-        0.3,
-        vec![],
-        setup_test_phylo(Alphabet::dna()),
-    )
-    .build()
-    .unwrap();
     tkf92_indel_param_range(&tkf_cost);
 }
 

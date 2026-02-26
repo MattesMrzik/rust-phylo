@@ -1,12 +1,14 @@
 use std::cell::RefCell;
 use std::fmt::Display;
 
+use hashbrown::HashSet;
 use log::warn;
 use num_enum::FromPrimitive;
-use rstest::rstest;
+// use rstest::rstest;
 
 use crate::likelihood::{ParamRange, PARAM_RANGE_UNIT_INTERVAL_EXCLUSIVE};
 use crate::phylo_info::PhyloInfo;
+use crate::tkf_model::Block;
 use crate::tkf_model::{
     blocks_of_alignment, validate_lambda_and_mu, validate_r, TKF92Parameters, TKFIndelCost,
     TKFIndelModelInfo,
@@ -88,50 +90,36 @@ impl TKFModel for TKF92FixedIndelModel {
         }
     }
 
-    fn get_blocks<AA: AncestralAlignment>(&self, msa: &AA) -> Vec<usize> {
-        let alignment_blocks = blocks_of_alignment(msa);
-        merge_fragmentation_with_blocks(&self.fragmentation, &alignment_blocks)
-    }
-}
+    fn get_blocks<AA: AncestralAlignment>(&self, msa: &AA) -> Vec<Block> {
+        let mut alignment_blocks = blocks_of_alignment(msa);
+        // determine the self.fragmentation that are not in the blocks vec borders and add them as
+        // blocks by creating a set of all block.border
+        let mut set: HashSet<usize> = self.fragmentation.iter().copied().collect();
+        let already_contained = alignment_blocks
+            .iter()
+            .map(|block| block.border)
+            .collect::<Vec<usize>>();
+        set.retain(|&border| !already_contained.contains(&border));
+        let dummy_len = 1;
+        for new_border in set {
+            use crate::tkf_model::NumBlockAppearances;
 
-/// Merges the user defined fragmentation with the observed block borders in the MSA.
-/// Assumes both inputs are sorted and within MSA length.
-/// This is basically a union of the two sets and then returning the sorted result.
-/// This implementations achieves a better run time than the naive approach.
-#[cfg(test)]
-pub(super) fn merge_fragmentation_with_blocks(
-    fragmentation: &[usize],
-    blocks: &[usize],
-) -> Vec<usize> {
-    let mut frag_iter = fragmentation.iter().peekable();
-    let mut merged = Vec::new();
-    for block in blocks.iter() {
-        let mut next_block = false;
-        while let Some(&frag) = frag_iter.peek() {
-            if frag > block {
-                warn!("Observed right border of block {block} in MSA not in fragmentation, adding it.");
-                merged.push(*block);
-                next_block = true;
-                break;
-            } else if frag == block {
-                next_block = true;
-                break;
-            } else {
-                frag_iter.next();
-            }
+            alignment_blocks.push(Block {
+                border: new_border,
+                site: new_border - 1,
+                len: dummy_len,
+                num_appearances: NumBlockAppearances::Fixed,
+            });
         }
-        if next_block {
-            continue;
-        } else {
-            warn!("Observed right border of block {block} in MSA not in fragmentation, adding it.");
-            merged.push(*block);
+        alignment_blocks.sort_by_key(|block| block.border);
+        // update len of blocks to reflect the new fragmentation
+        let mut prev_border = 0;
+        for block in alignment_blocks.iter_mut() {
+            block.len = block.border - prev_border;
+            prev_border = block.border;
         }
+        alignment_blocks
     }
-    for frag in fragmentation {
-        merged.push(*frag);
-    }
-    merged.sort();
-    merged
 }
 
 #[cfg(test)]
@@ -231,14 +219,14 @@ mod private_tests {
 
     use super::*;
 
-    #[cfg(test)]
-    fn naive_merge(set1: &[usize], set2: &[usize]) -> Vec<usize> {
-        let mut merged: Vec<usize> = set1.to_vec();
-        merged.extend(set2.iter().cloned());
-        merged.sort();
-        merged.dedup();
-        merged
-    }
+    // #[cfg(test)]
+    // fn naive_merge(set1: &[usize], set2: &[usize]) -> Vec<usize> {
+    //     let mut merged: Vec<usize> = set1.to_vec();
+    //     merged.extend(set2.iter().cloned());
+    //     merged.sort();
+    //     merged.dedup();
+    //     merged
+    // }
 
     #[test]
     fn tkf_validate_fragmentation() {
@@ -248,21 +236,21 @@ mod private_tests {
         assert_eq!(validated, vec![1, 3, 4, 13, 15]);
     }
 
-    #[rstest]
-    #[case( vec![3, 5, 7, 10], vec![5, 10, 12], vec![3, 5, 7, 10, 12])]
-    #[case( vec![3, 7, 10, 12], vec![5, 10, 12], vec![3, 5, 7, 10, 12])]
-    #[case( vec![], vec![5, 10, 12], vec![5, 10, 12])]
-    #[case( vec![1, 2, 3, 4], vec![1, 2, 3, 4], vec![1, 2, 3, 4])]
-    #[case( vec![1, 2, 4], vec![1, 2, 3, 4], vec![1, 2, 3, 4])]
-    fn tkf_merge_fragmentations_with_blocks(
-        #[case] fragmentation: Vec<usize>,
-        #[case] blocks: Vec<usize>,
-        #[case] expected: Vec<usize>,
-    ) {
-        let merged = merge_fragmentation_with_blocks(&fragmentation, &blocks);
-        assert_eq!(merged, expected);
-        assert_eq!(merged, naive_merge(&fragmentation, &blocks));
-    }
+    // #[rstest]
+    // #[case( vec![3, 5, 7, 10], vec![5, 10, 12], vec![3, 5, 7, 10, 12])]
+    // #[case( vec![3, 7, 10, 12], vec![5, 10, 12], vec![3, 5, 7, 10, 12])]
+    // #[case( vec![], vec![5, 10, 12], vec![5, 10, 12])]
+    // #[case( vec![1, 2, 3, 4], vec![1, 2, 3, 4], vec![1, 2, 3, 4])]
+    // #[case( vec![1, 2, 4], vec![1, 2, 3, 4], vec![1, 2, 3, 4])]
+    // fn tkf_merge_fragmentations_with_blocks(
+    //     #[case] fragmentation: Vec<usize>,
+    //     #[case] blocks: Vec<usize>,
+    //     #[case] expected: Vec<usize>,
+    // ) {
+    //     let merged = merge_fragmentation_with_blocks(&fragmentation, &blocks);
+    //     assert_eq!(merged, expected);
+    //     assert_eq!(merged, naive_merge(&fragmentation, &blocks));
+    // }
 
     #[test]
     fn tkf_manual_integration_over_fragmentations() {
