@@ -400,7 +400,7 @@ where
             let new_is_transition = is_transition(new, prev_site, curr_site);
 
             if old_is_transition && !new_is_transition {
-                match &mut blocks[block_id-1].num_appearances {
+                match &mut blocks[block_id - 1].num_appearances {
                     NumBlockAppearances::Variable(count) => {
                         assert!(*count > 0, "Tried to substract one from already zero count of block appearances. Please report this at {REPORT_ISSUES_URL}");
                         *count -= 1;
