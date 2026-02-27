@@ -1,6 +1,5 @@
 use fixedbitset::FixedBitSet;
 use log::info;
-use nalgebra::DMatrix;
 use rand::{Rng, SeedableRng};
 
 use crate::alignment::{AncestralAlignment, Mapping};
@@ -10,9 +9,7 @@ use crate::random::RandomGenerator;
 use crate::tkf_model::reestimate::cache::{
     possible_assignments_of_edge, possible_del_or_not, prev_compatible_del_or_not,
 };
-use crate::tkf_model::{
-    log_i1, Event, NumBlockAppearances, TKFIndelCost, TKFIndelModelInfo, TKFModel,
-};
+use crate::tkf_model::{log_i1, Block, Event, TKFIndelCost, TKFIndelModelInfo, TKFModel};
 use crate::tree::NodeIdx::{self, Internal, Leaf};
 use crate::{bail, Result, REPORT_ISSUES_URL};
 
@@ -294,20 +291,13 @@ where
         self.fill_dp_table();
         let backtrack_res = self.backtrack();
         self.set_invalid();
-        self.update_blocking_and_mappings(&backtrack_res);
+        self.update_masa(&backtrack_res);
         debug_assert!(self.cost.phylo.check_dollos_constraint().is_ok());
+        if self.update_table_sizes() {
+            self.cost.logl()
+        } else {
         self.make_valid_for_further_reestimate_calls();
-        // backtrack_res.logl
-        let block_sites = self
-            .cost
-            .model_info
-            .borrow()
-            .blocks
-            .iter()
-            .map(|block| block.site)
-            .collect::<Vec<_>>();
-        println!("blocks in reestimate after reestimate: {block_sites:?}");
-        self.cost.logl()
+        backtrack_res.logl}
     }
 
     /// Resets the DP and backtracking tables. Initialises the [`QuartetEdges`]. Removes the old
@@ -358,105 +348,39 @@ where
         }
     }
 
-    fn update_blocking_and_mappings(&mut self, backtrack_res: &BackTrackingResult) {
-        let block_lengths = &self
-            .cost
-            .model_info
-            .borrow()
-            .blocks
-            .iter()
-            .map(|block| block.len)
-            .collect::<Vec<_>>();
+    fn update_masa(&mut self, backtrack_res: &BackTrackingResult) {
         let seq_len = self.cost.phylo.msa.len();
         // TODO: perhaps pass a ref to the blocks instead of the newly created block_lens
-        let v1_mapping = mapping_from_node_seq(&backtrack_res.v1_bitset, block_lengths, seq_len);
-        let v2_mapping = mapping_from_node_seq(&backtrack_res.v2_bitset, block_lengths, seq_len);
-        let msa = &mut self.cost.phylo.msa;
-        assert!(v1_mapping.len() == msa.len());
-        assert!(v2_mapping.len() == msa.len());
 
-        // update the blocking
-        // this would i thin not be necessary if the ancestral seqs are estimated from a leaf msa
-        // in a way that makes no different choices for the same leaf assignment
-        // because then all block borders are defined through the leaf msa
-        // if however the msa has ancestral seqs that introduce new block borders, then this
-        // updating of new blocks is necessary in some cases.
-        // if we use masas that where created from leaf msa with parsimony ancestors, the
-        // appearance count should never reach zero, since we dont reestimate the leaves.
-        // But if the seqs are simulated is might be necessray
-        //
-        // TODO: check the reestimate/msa for ancestors that introduce blocks that are not already
-        // introduced by the leaves
-        let is_transition = |map: &Mapping, prev_site: usize, site: usize| {
-            map[prev_site].is_some() ^ map[site].is_some()
+        // cannot do let blocks = self.cost.model_info.borrow().blocks here since we need to borrow
+        // mutable later to update the mappings and model info
+        let (v1_mapping, v2_mapping) = {
+            let blocks = &self.cost.model_info.borrow().blocks;
+            (
+                mapping_from_node_seq(&backtrack_res.v1_bitset, blocks, seq_len),
+                mapping_from_node_seq(&backtrack_res.v2_bitset, blocks, seq_len),
+            )
         };
-
-        // perhaps turn this into a real fn
-        let decrease_count_and_is_zero = |old: &Mapping, new: &Mapping, block_id: usize| {
-            let blocks = &mut self.cost.model_info.borrow_mut().blocks;
-            let prev_site = blocks[block_id - 1].site;
-            let curr_site = blocks[block_id].site;
-            let old_is_transition = is_transition(old, prev_site, curr_site);
-            let new_is_transition = is_transition(new, prev_site, curr_site);
-
-            if old_is_transition && !new_is_transition {
-                match &mut blocks[block_id-1].num_appearances {
-                    NumBlockAppearances::Variable(count) => {
-                        assert!(*count > 0, "Tried to substract one from already zero count of block appearances. Please report this at {REPORT_ISSUES_URL}");
-                        *count -= 1;
-                        return *count == 0;
-                    }
-                    NumBlockAppearances::Fixed => {
-                        return false;
-                    }
-                }
-            }
-            false
-        };
-
-        let old_v1_mapping = get_map_from_any_node(msa, self.quartet_edges.v1());
-        let old_v2_mapping = get_map_from_any_node(msa, self.quartet_edges.v2());
-
-        for (old_map, new_map) in [(old_v1_mapping, &v1_mapping), (old_v2_mapping, &v2_mapping)] {
-            let mut num_blocks = self.cost.model_info.borrow().blocks.len();
-            let mut block_id = 1;
-            while block_id < num_blocks {
-                let merge_blocks = decrease_count_and_is_zero(old_map, new_map, block_id);
-                if merge_blocks {
-                    println!("Block with id {block_id} is not an actual block anymore since the number of appearances reached zero. Merging it with the previous block.");
-                    // decrease the dimensions of the matrices in model_info and EdgeSeqsReestimator
-                    // update the blocks in the model_info
-                    let mut model_info = self.cost.model_info.borrow_mut();
-                    let additional_len = model_info.blocks[block_id - 1].len;
-                    model_info.blocks.remove(block_id - 1);
-                    model_info.blocks[block_id - 1].len += additional_len;
-                    num_blocks -= 1;
-
-                    // model_info.node_event_factor.remove_column(block_id - 1); does not work
-                    // since: cannot move out of dereference of `std::cell::RefMut<'_, tkf_model::tkf_indel::TKFIndelModelInfo>`
-                    // so instead we do this mem trick
-                    let col_to_remove = block_id - 1;
-                    let remove_col = |matrix: &mut DMatrix<f64>| {
-                        let old = std::mem::replace(matrix, DMatrix::zeros(0, 0));
-                        *matrix = old.remove_column(col_to_remove);
-                    };
-                    remove_col(&mut model_info.node_event_factor);
-                    remove_col(&mut model_info.subtree_event_factor);
-                    remove_col(&mut model_info.node_eta);
-                    remove_col(&mut model_info.subtree_eta);
-                    self.dp_table.remove(col_to_remove);
-                    self.backtracking_table.remove(col_to_remove);
-                } else {
-                    block_id += 1;
-                }
-            }
-        }
+        // self.dp_table.remove(col_to_remove);
+        // self.backtracking_table.remove(col_to_remove);
 
         // The panics are never triggered, unless something is seriously wrong with the algo.
-        msa.update_ancestral_map(self.quartet_edges.v1(), v1_mapping)
+        self.cost.update_mappings_and_model_info(self.quartet_edges.v1(), v1_mapping)
             .unwrap_or_else(|_| panic!("Failed to update ancestral map for v1. Please report this at {REPORT_ISSUES_URL}"));
-        msa.update_ancestral_map(self.quartet_edges.v2(), v2_mapping)
+        self.cost.update_mappings_and_model_info(self.quartet_edges.v2(), v2_mapping)
             .unwrap_or_else(|_| panic!("Failed to update ancestral map for v2. Please report this at {REPORT_ISSUES_URL}"));
+    }
+
+    fn update_table_sizes(&mut self) -> bool {
+        let old_num_blocks = self.dp_table.len();
+        let new_num_blocks = self.cost.model_info.borrow().blocks.len();
+        assert!(
+            new_num_blocks <= old_num_blocks,
+            "The number of blocks should not increase after re-estimation. Please report this at {REPORT_ISSUES_URL}"
+        );
+        self.dp_table.truncate(new_num_blocks);
+        self.backtracking_table.truncate(new_num_blocks);
+        old_num_blocks != new_num_blocks
     }
 
     /// Updates the tmp values of the model info such that there are valid for further
@@ -746,15 +670,15 @@ where
 }
 
 #[inline]
-fn mapping_from_node_seq(node_seq: &NodeSeq, block_lens: &[usize], seq_len: usize) -> Mapping {
+fn mapping_from_node_seq(node_seq: &NodeSeq, blocks: &[Block], seq_len: usize) -> Mapping {
     debug_assert!(
-        block_lens.iter().sum::<usize>() == seq_len,
+        blocks.iter().map(|b| b.len).sum::<usize>() == seq_len,
         "Block lengths do not sum up to the sequence length."
     );
     let mut mapping = Vec::with_capacity(seq_len);
     let mut count = 0;
-    for (i, &block_len) in block_lens.iter().enumerate() {
-        for _ in 0..block_len {
+    for (i, &block) in blocks.iter().enumerate() {
+        for _ in 0..block.len {
             if node_seq.contains(i) {
                 mapping.push(Some(count));
                 count += 1;

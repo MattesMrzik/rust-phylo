@@ -7,7 +7,7 @@ use itertools::Itertools;
 use lazy_static::lazy_static;
 use nalgebra::{DMatrix, DVector};
 
-use crate::alignment::AncestralAlignment;
+use crate::alignment::{AncestralAlignment, Mapping};
 use crate::likelihood::{ModelSearchCost, ParamRange, TreeSearchCost};
 use crate::phylo_info::PhyloInfo;
 use crate::random::FakeGenerator;
@@ -15,6 +15,7 @@ use crate::substitution_models::FreqVector;
 use crate::tkf_model::reestimate::EdgeSeqsReestimator;
 use crate::tree::NodeIdx::{self, Internal, Leaf};
 use crate::tree::Tree;
+use crate::{Result, REPORT_ISSUES_URL};
 
 lazy_static! {
     pub(super) static ref DUMMY_FREQS: DVector<f64> = DVector::<f64>::zeros(0);
@@ -397,6 +398,98 @@ impl<T: TKFModel, AA: AncestralAlignment> TKFIndelCost<T, AA> {
         } else {
             0.0
         }
+    }
+
+    fn decrease_count_and_is_zero(&self, old: &Mapping, new: &Mapping, block_id: usize) -> bool {
+        let blocks = &mut self.model_info.borrow_mut().blocks;
+        let prev_site = blocks[block_id - 1].site;
+        let curr_site = blocks[block_id].site;
+        let old_is_transition = old[prev_site].is_some() ^ old[curr_site].is_some();
+        let new_is_transition = new[prev_site].is_some() ^ new[curr_site].is_some();
+
+        if old_is_transition && !new_is_transition {
+            match &mut blocks[block_id - 1].num_appearances {
+                NumBlockAppearances::Variable(count) => {
+                    assert!(*count > 0, "Tried to substract one from already zero count of block appearances. Please report this at {REPORT_ISSUES_URL}");
+                    *count -= 1;
+                    return *count == 0;
+                }
+                NumBlockAppearances::Fixed => {
+                    return false;
+                }
+            }
+        }
+        false
+    }
+    // TODO: change this to a fn that extracts cols to remove
+    // then i can have another method that removes them from the cost
+    // and another that removes them from the EdgeSeqsReestimator
+    // this would i thin not be necessary if the ancestral seqs are estimated from a leaf msa
+    // in a way that makes no different choices for the same leaf assignment
+    // because then all block borders are defined through the leaf msa
+    // if however the msa has ancestral seqs that introduce new block borders, then this
+    // updating of new blocks is necessary in some cases.
+    // if we use masas that where created from leaf msa with parsimony ancestors, the
+    // appearance count should never reach zero, since we don't reestimate the leaves.
+    // But if the seqs are simulated is might be necessary
+    //
+    //
+    // TODO: check the reestimate/msa for ancestors that introduce blocks that are not already
+    // introduced by the leaves
+    pub(super) fn update_mappings_and_model_info(
+        &mut self,
+        node_idx: &NodeIdx,
+        new_map: Mapping,
+    ) -> Result<()> {
+        let prev_map = match node_idx {
+            Internal(_) => self.phylo.msa.ancestral_map(node_idx).clone(),
+            Leaf(_) => self.phylo.msa.leaf_map(node_idx).clone(),
+        };
+
+        self.phylo.msa.update_ancestral_map(node_idx, new_map)?;
+        let mut block_id = 1;
+        let mut num_blocks = self.model_info.borrow().blocks.len();
+        while block_id < num_blocks {
+            let merge_blocks = self.decrease_count_and_is_zero(
+                &prev_map,
+                self.phylo.msa.ancestral_map(node_idx),
+                block_id,
+            );
+            if merge_blocks {
+                println!("Merging blocks ");
+                let mut model_info = self.model_info.borrow_mut();
+                // updating the blocks in the model_info, i.e., merge the previous block with the current one
+                let additional_len = model_info.blocks[block_id - 1].len;
+                model_info.blocks.remove(block_id - 1);
+                model_info.blocks[block_id - 1].len += additional_len;
+                num_blocks -= 1;
+
+                // updating the dimensions of the model_info matrices
+                // model_info.node_event_factor.remove_column(block_id - 1); does not work
+                // since: cannot move out of dereference of `std::cell::RefMut<'_, tkf_model::tkf_indel::TKFIndelModelInfo>`
+                // so instead we do this mem trick
+                let remove_col = |matrix: &mut DMatrix<f64>| {
+                    let old = std::mem::replace(matrix, DMatrix::zeros(0, 0));
+                    *matrix = old.remove_column(block_id - 1);
+                };
+                remove_col(&mut model_info.node_event_factor);
+                remove_col(&mut model_info.subtree_event_factor);
+                remove_col(&mut model_info.node_eta);
+                remove_col(&mut model_info.subtree_eta);
+            } else {
+                // not merge_blocks
+                block_id += 1;
+            }
+        }
+        // setting the node and its children tmp values as invalid, since the events on these edges might have
+        // changed due to the updated mapping
+
+        let mut model_info = self.model_info.borrow_mut();
+        model_info.valid.set(usize::from(node_idx), false);
+        for child in &self.phylo.tree.node(node_idx).children {
+            model_info.valid.set(usize::from(child), false);
+        }
+        Ok(())
     }
 }
 

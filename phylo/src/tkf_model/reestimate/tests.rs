@@ -8,7 +8,7 @@ use crate::phylo_info::PhyloInfo;
 use crate::random::FakeGenerator;
 use crate::tkf_model::reestimate::mapping_from_node_seq;
 use crate::tkf_model::tests::setup_test_phylo;
-use crate::tkf_model::{EdgeSeqsReestimator, TKF92IndelCostBuilder};
+use crate::tkf_model::{Block, EdgeSeqsReestimator, NumBlockAppearances, TKF92IndelCostBuilder};
 use crate::{record_wo_desc as record, tree, Error};
 
 #[test]
@@ -84,6 +84,8 @@ fn tkf_mapping_from_node_seq() {
     node_seq.insert(2);
     node_seq.insert(4);
     let block_lens = [2, 3, 1, 4, 1];
+    let dummy_value = 0;
+    let blocks = block_lens.iter().map(|&len| Block { border: dummy_value, site:dummy_value, len, num_appearances: NumBlockAppearances::Fixed}).collect::<Vec<_>>();
     let seq_len: usize = block_lens.iter().sum();
     let expected_mapping = [
         Some(0),
@@ -98,6 +100,6 @@ fn tkf_mapping_from_node_seq() {
         None,    // fourth block finished
         Some(3), // fifth block finished
     ];
-    let mapping = mapping_from_node_seq(&node_seq, &block_lens, seq_len);
+    let mapping = mapping_from_node_seq(&node_seq, &blocks, seq_len);
     assert_eq!(mapping, expected_mapping);
 }

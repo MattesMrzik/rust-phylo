@@ -57,7 +57,6 @@ impl PairwiseAlignment {
         debug_assert_eq!(self.map_x.len(), self.map_y.len());
         self.map_x.len()
     }
-
 }
 
 /// Represents an alignment of sequences that are associated with the leaves of a phylogenetic tree.
