@@ -541,6 +541,67 @@ mod private_tests {
         );
     }
 
+    #[test]
+    fn tkf_homlog_probs() {
+        let lambda = 0.5;
+        let mu = 0.7;
+        let time = 1.23;
+        let beta = beta(lambda, mu, time);
+        let n = 4;
+
+        let prob = homolog_prob(n, lambda, mu, beta, time);
+        let true_prob =
+            (-mu * time).exp() * (1.0 - lambda * beta) * (lambda * beta).powi((n - 1) as i32);
+        assert_relative_eq!(prob, true_prob);
+    }
+
+    #[test]
+    fn tkf_non_homolog_probs() {
+        let lambda = 0.5;
+        let mu = 0.7;
+        let time = 1.23;
+        let beta = beta(lambda, mu, time);
+        let n = 4;
+
+        let prob = non_homolog_prob(n, lambda, mu, beta, time);
+        let true_prob = (1.0 - (-mu * time).exp() - mu * beta)
+            * (1.0 - lambda * beta)
+            * (lambda * beta).powi((n - 1) as i32);
+        assert_relative_eq!(prob, true_prob);
+    }
+
+    #[test]
+    fn tkf_homolog_probs_sum_to_integrated() {
+        let lambda = 0.5;
+        let mu = 0.7;
+        let time = 1.0;
+        let beta = beta(lambda, mu, time);
+        let homolog_integrated = homolog_prob_integrated(mu, time);
+
+        let mut homolog_sum = 0.0;
+        for n in 1..100 {
+            homolog_sum += homolog_prob(n, lambda, mu, beta, time);
+        }
+
+        assert_relative_eq!(homolog_sum, homolog_integrated, epsilon = 1e-10);
+    }
+
+    #[test]
+    fn tkf_non_homolog_probs_sum_to_integrated() {
+        let lambda = 0.5;
+        let mu = 0.7;
+        let time = 1.0;
+        let beta = beta(lambda, mu, time);
+        let non_homolog_integrated = non_homolog_prob_integrated(mu, beta, time);
+
+        let mut non_homolog_sum = 0.0;
+        for n in 1..100 {
+            non_homolog_sum += non_homolog_prob(n, lambda, mu, beta, time);
+        }
+
+        assert_relative_eq!(non_homolog_sum, non_homolog_integrated, epsilon = 1e-10);
+    }
+
     #[cfg(test)]
     fn naive_merge(set1: &[usize], set2: &[usize]) -> Vec<usize> {
         let mut merged: Vec<usize> = set1.to_vec();
