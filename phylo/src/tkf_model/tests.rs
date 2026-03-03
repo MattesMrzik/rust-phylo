@@ -123,7 +123,7 @@ fn tkf92_indel_logl_without_aggregation<AA: AncestralAlignment>(
     let mut last_event_deletion = vec![false; tree.len()];
     for (i, fragment) in blocks.iter().enumerate() {
         let mut event_prob = 1.0;
-        if get_mapping_for_any_node(&phylo.msa, &phylo.tree.root)[fragment.site].is_some() {
+        if get_mapping_for_any_node(&phylo.msa, &phylo.tree.root)[fragment.rep_site].is_some() {
             // the eq seq at the root has a fragment
             event_prob *= lambda / mu * (1.0 - r) / r;
             prob += fragment.len as f64 * r.ln();
@@ -139,9 +139,9 @@ fn tkf92_indel_logl_without_aggregation<AA: AncestralAlignment>(
             let time = tree.node(node_idx).blen;
             let parent_id = &tree.node(node_idx).parent.unwrap();
             let parent_is_gap =
-                get_mapping_for_any_node(&phylo.msa, parent_id)[fragment.site].is_none();
+                get_mapping_for_any_node(&phylo.msa, parent_id)[fragment.rep_site].is_none();
             let current_is_gap =
-                get_mapping_for_any_node(&phylo.msa, node_idx)[fragment.site].is_none();
+                get_mapping_for_any_node(&phylo.msa, node_idx)[fragment.rep_site].is_none();
 
             let beta = beta(lambda, mu, time);
             if i == 0 {
@@ -248,7 +248,7 @@ fn tkf91_get_blocks() {
 
     let block_borders = blocks.iter().map(|b| b.border).collect::<Vec<usize>>();
     assert_eq!(block_borders, (1..msa.len() + 1).collect::<Vec<usize>>());
-    let block_sites = blocks.iter().map(|b| b.site).collect::<Vec<usize>>();
+    let block_sites = blocks.iter().map(|b| b.rep_site).collect::<Vec<usize>>();
     assert_eq!(block_sites, (0..msa.len()).collect::<Vec<usize>>());
     for block in blocks {
         assert_eq!(block.len, 1);
@@ -270,7 +270,7 @@ fn tkf92_get_blocks() {
 
     let block_borders = blocks.iter().map(|b| b.border).collect::<Vec<usize>>();
     assert_eq!(block_borders, vec![1, 3, 4, 5]);
-    let block_sites = blocks.iter().map(|b| b.site).collect::<Vec<usize>>();
+    let block_sites = blocks.iter().map(|b| b.rep_site).collect::<Vec<usize>>();
     assert_eq!(block_sites, vec![0, 2, 3, 4]);
     let block_lens = blocks.iter().map(|b| b.len).collect::<Vec<usize>>();
     assert_eq!(block_lens, vec![1, 2, 1, 1]);
@@ -310,7 +310,7 @@ fn tkf92_fixed_get_blocks() {
 
     let block_borders = blocks.iter().map(|b| b.border).collect::<Vec<usize>>();
     assert_eq!(block_borders, vec![1, 2, 3, 7, 8, 9]);
-    let block_sites = blocks.iter().map(|b| b.site).collect::<Vec<usize>>();
+    let block_sites = blocks.iter().map(|b| b.rep_site).collect::<Vec<usize>>();
     assert_eq!(block_sites, vec![0, 1, 2, 6, 7, 8]);
     let block_lens = blocks.iter().map(|b| b.len).collect::<Vec<usize>>();
     assert_eq!(block_lens, vec![1, 1, 1, 4, 1, 1]);

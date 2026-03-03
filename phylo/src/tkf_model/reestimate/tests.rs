@@ -89,7 +89,7 @@ fn tkf_mapping_from_node_seq() {
         .iter()
         .map(|&len| Block {
             border: dummy_value,
-            site: dummy_value,
+            rep_site: dummy_value,
             len,
             num_appearances: NumBlockAppearances::Fixed,
         })

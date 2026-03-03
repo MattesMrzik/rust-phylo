@@ -417,7 +417,7 @@ where
         let n_blocks = self.cost.model_info.borrow().blocks.len();
         for block_id in 0..n_blocks {
             let mut found_at_least_one = false;
-            let site = self.cost.model_info.borrow().blocks[block_id].site;
+            let site = self.cost.model_info.borrow().blocks[block_id].rep_site;
             for assignment in self.possible_assignments(site) {
                 let events = self.event_for_assignment(assignment, block_id);
                 let event_prob = self.integrated_root_event_prob(&events, block_id);
@@ -487,7 +487,7 @@ where
         // See issue #151 https://github.com/acg-team/rust-phylo/issues/151
         let previous_block = block_id - 1;
         let model_info = self.cost.model_info.borrow();
-        let site = model_info.blocks[previous_block].site;
+        let site = model_info.blocks[previous_block].rep_site;
         for prev_assignment in self.possible_assignments(site) {
             // TODO: here it is not checked whether the `prev_del_or_not` matches the `prev_assignment`
             // which will lead to -inf which is then skipped.
@@ -576,7 +576,7 @@ where
     }
 
     fn event_for_assignment(&self, assignment: &EdgeAssignment, block_id: usize) -> QuartetEvents {
-        let site = self.cost.model_info.borrow().blocks[block_id].site;
+        let site = self.cost.model_info.borrow().blocks[block_id].rep_site;
         let mut events = [Event::Nothing; N_EDGES_IN_QUARTET];
         let v1_has_char = assignment.0;
         let v2_has_char = assignment.1;

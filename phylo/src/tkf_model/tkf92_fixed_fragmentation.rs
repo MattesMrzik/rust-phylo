@@ -107,7 +107,7 @@ impl TKFModel for TKF92FixedIndelModel {
         for new_border in additional_borders {
             alignment_blocks.push(Block {
                 border: new_border,
-                site: new_border - 1,
+                rep_site: new_border - 1,
                 len: dummy_len,
                 num_appearances: NumBlockAppearances::Fixed,
             });
@@ -250,7 +250,7 @@ mod private_tests {
                 "Block border does not match expected border."
             );
             assert_eq!(
-                block.site,
+                block.rep_site,
                 *expected_border - 1,
                 "Block site does not match expected site."
             );

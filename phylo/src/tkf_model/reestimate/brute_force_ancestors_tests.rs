@@ -186,7 +186,7 @@ fn get_edge_assignment_possibilities(
     let t4_mapping = get_mapping_for_any_node(&cost.phylo.msa, &tree.children(v2_idx)[1]);
 
     for (block_id, possible_edge_assignment) in possible_edge_assignments.iter_mut().enumerate() {
-        let site = blocks[block_id].site;
+        let site = blocks[block_id].rep_site;
         let t1_is_char = if let Some(t1_map) = &t1_mapping {
             t1_map[site].is_some()
         } else {
@@ -434,7 +434,7 @@ fn tkf92_reestimate_large_tree_for_file_iterative() {
 
     // iterating over nodes multiple times
     let repeat = 5;
-    let random_nodes = phylo
+    let nodes = phylo
         .tree
         .postorder()
         .iter()
@@ -442,7 +442,7 @@ fn tkf92_reestimate_large_tree_for_file_iterative() {
         .collect::<Vec<_>>()
         .repeat(repeat);
 
-    for (iteration, node) in random_nodes.into_iter().enumerate() {
+    for (iteration, node) in nodes.into_iter().enumerate() {
         println!(
             "Iteration {iteration}, reestimating node {}",
             phylo.tree.node(node).id

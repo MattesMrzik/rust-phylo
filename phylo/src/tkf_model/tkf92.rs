@@ -258,7 +258,7 @@ pub(super) fn blocks_of_alignment<AA: AncestralAlignment>(msa: &AA) -> Blocks {
         .zip(block_lens)
         .map(|(border, len)| Block {
             border,
-            site: border - 1,
+            rep_site: border - 1,
             len,
             num_appearances: NumBlockAppearances::Variable(blocks_with_counts[&border]),
         })

@@ -52,8 +52,8 @@ pub struct Block {
     /// For example, if the block is [3, 5), the block border is 5.
     pub(super) border: usize,
     /// Since within a block the presence or absence of characters in the ancestral mappings are the same,
-    /// we can just use one representative `site` to determine the [event](`Event`) for the whole block.
-    pub(super) site: usize,
+    /// we can just use one representative site to determine the [event](`Event`) for the whole block.
+    pub(super) rep_site: usize,
     /// The length of the block, i.e., border - previous block border.
     pub(super) len: usize,
     /// Either the number of times this block's border appears in the alignment, or whether it should be
@@ -371,7 +371,7 @@ impl<T: TKFModel, AA: AncestralAlignment> TKFIndelCost<T, AA> {
     pub(super) fn determine_event(&self, node_idx: &NodeIdx, block_id: usize) -> Event {
         // the presence or absence of characters is the same for all sites in a block
         // so we can just check the last site of the block
-        let site = self.model_info.borrow().blocks[block_id].site;
+        let site = self.model_info.borrow().blocks[block_id].rep_site;
 
         let parent_is_gap = match self.phylo.tree.node(node_idx).parent {
             Some(parent_idx) => match parent_idx {
@@ -454,8 +454,8 @@ impl<T: TKFModel, AA: AncestralAlignment> TKFIndelCost<T, AA> {
     /// Since we are only checking sites at block borders, we can only merge blocks and not split them.
     fn decrease_count_and_is_zero(&self, old: &Mapping, new: &Mapping, block_id: usize) -> bool {
         let blocks = &mut self.model_info.borrow_mut().blocks;
-        let prev_site = blocks[block_id - 1].site;
-        let curr_site = blocks[block_id].site;
+        let prev_site = blocks[block_id - 1].rep_site;
+        let curr_site = blocks[block_id].rep_site;
         let transition_in_old = old[prev_site].is_some() ^ old[curr_site].is_some();
         let transition_in_new = new[prev_site].is_some() ^ new[curr_site].is_some();
 

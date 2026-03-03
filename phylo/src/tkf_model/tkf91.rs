@@ -83,7 +83,7 @@ impl TKFModel for TKF91IndelModel {
         (1..msa.len() + 1)
             .map(|pos| Block {
                 border: pos,
-                site: pos - 1,
+                rep_site: pos - 1,
                 len: 1,
                 num_appearances: NumBlockAppearances::Fixed,
             })
