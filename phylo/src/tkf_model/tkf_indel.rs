@@ -516,7 +516,15 @@ impl<T: TKFModel, AA: AncestralAlignment> TKFIndelCost<T, AA> {
                 ),
             }
         }
-        self.mapping_conforms_to_blocking(self.phylo.msa.ancestral_map(node_idx))?;
+        if new_map.len() != self.phylo.msa.len() {
+            bail!(
+                AncestralAlignment,
+                "Mapping length {} does not match MSA length {}",
+                new_map.len(),
+                self.phylo.msa.len()
+            );
+        }
+        self.mapping_conforms_to_blocking(&new_map)?;
         self.update_mappings_and_model_info_unchecked(node_idx, new_map);
         Ok(())
     }

@@ -979,7 +979,7 @@ fn tkf_udpate_tree() {
 
 #[rstest]
 #[case::violates_block_1( vec![ Some(0), None, None, None, None, None, None, None, None, None], true)]
-#[case::violates_block_333( vec![ Some(0), Some(1), None, Some(0), None, Some(2), Some(3), Some(4), Some(5), Some(6)], true)]
+#[case::violates_block_3( vec![ Some(0), Some(1), None, Some(0), None, Some(2), Some(3), Some(4), Some(5), Some(6)], true)]
 #[case::violates_block_4( vec![ None, None, None, Some(0), Some(1), Some(2), Some(3), Some(4), Some(5), None], true)]
 #[case::all_none( vec![ None, None, None, None, None, None, None, None, None, None], false)]
 #[case::all_some( vec![ Some(0), Some(0), Some(0), Some(0), Some(0), Some(0), Some(0), Some(0), Some(0), Some(0)], false)]
