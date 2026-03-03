@@ -1149,7 +1149,7 @@ fn tkf91_update_mappings_and_model_info_succeeds() {
         "block borders incorrect"
     );
     let block_lens = blocks.iter().map(|block| block.len()).collect::<Vec<_>>();
-    assert_eq!(block_lens, vec![1; 10], "block lengths incorrect");
+    assert_eq!(block_lens, vec![1; 10], "block lens incorrect");
     let num_appearances = blocks.iter().map(|b| b.num_appearances).collect::<Vec<_>>();
     assert_eq!(
         num_appearances,
