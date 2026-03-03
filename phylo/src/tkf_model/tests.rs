@@ -318,17 +318,7 @@ fn tkf92_fixed_get_blocks() {
         .iter()
         .map(|b| b.num_appearances)
         .collect::<Vec<NumBlockAppearances>>();
-    assert_eq!(
-        block_num_appearances,
-        vec![
-            NumBlockAppearances::Fixed, // block from the additional fragmentation site at 1
-            NumBlockAppearances::Fixed, // block from the additional fragmentation site at 2
-            NumBlockAppearances::Variable(1), // block from the msa, only B1 introduces this border
-            NumBlockAppearances::Variable(2), // block from the msa, both A0 and I1 introduce this border, it does not matter that it's also listed in the additional fragmentation
-            NumBlockAppearances::Variable(2), // block from the msa, both A0 and I1 introduce this border
-            NumBlockAppearances::Variable(3), // block from the msa, all three sequences introduce this border
-        ]
-    );
+    assert_eq!(block_num_appearances, vec![NumBlockAppearances::Fixed; 6]);
 }
 
 #[cfg(test)]

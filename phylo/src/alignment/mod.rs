@@ -514,7 +514,10 @@ impl AncestralAlignment for MASA {
     }
 
     fn update_ancestral_map_unchecked(&mut self, node_idx: &NodeIdx, new_map: Mapping) {
-        let old_map = self.ancestral_maps.get_mut(node_idx).unwrap();
+        let old_map = self
+            .ancestral_maps
+            .get_mut(node_idx)
+            .expect("node_idx should exist in ancestral_maps");
         let id = &self.idx_to_id[usize::from(*node_idx)];
         let old_record = self.ancestral_seqs.record_by_id(id);
         let old_seq = old_record.seq();

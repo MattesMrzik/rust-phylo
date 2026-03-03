@@ -360,6 +360,10 @@ where
         };
         self.cost.update_mappings_and_model_info(self.quartet_edges.v1(), v1_mapping)
             .unwrap_or_else(|err| panic!("Failed to update ancestral map for v1. Please report this at {REPORT_ISSUES_URL}. Error details: {err}"));
+        // Here we assume that after potential updating of the blocking of the msa the v2_mapping
+        // also conforms to this new blocking. Due to the nature of the re-estimation and tkf
+        // likelihood, this should always be the case. If this ever turns out to not be the case,
+        // then a new method "update_mappings_and_model_info_batch" could be implemented.
         self.cost.update_mappings_and_model_info(self.quartet_edges.v2(), v2_mapping)
             .unwrap_or_else(|err| panic!("Failed to update ancestral map for v2. Please report this at {REPORT_ISSUES_URL}. Error details: {err}"));
     }

@@ -75,7 +75,7 @@ impl Block {
         (start, end)
     }
 
-    // Since the len is always >=1 we don't the empty method
+    // Since the len is always >=1 we don't need the empty method
     #[allow(clippy::len_without_is_empty)]
     pub fn len(&self) -> usize {
         self.len
@@ -464,7 +464,7 @@ impl<T: TKFModel, AA: AncestralAlignment> TKFIndelCost<T, AA> {
                 NumBlockAppearances::Variable(count) => {
                     assert!(
                         *count > 0,
-                        "Tried to substract one from already zero count of block appearances. \
+                        "Tried to subtract one from already zero count of block appearances. \
                          Please report this at {REPORT_ISSUES_URL}"
                     );
                     *count -= 1;

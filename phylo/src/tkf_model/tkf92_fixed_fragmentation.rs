@@ -94,10 +94,8 @@ impl TKFModel for TKF92FixedIndelModel {
         // the blocks of the alignment
         let mut alignment_blocks = blocks_of_alignment(msa);
         // get the right exclusive borders of the alignment blocks
-        let already_contained = alignment_blocks
-            .iter()
-            .map(|block| block.border)
-            .collect::<Vec<usize>>();
+        let already_contained: HashSet<usize> =
+            alignment_blocks.iter().map(|block| block.border).collect();
         // determine the borders that are defined by the self.fragmentation but not yet contained in the alignment blocks
         let mut additional_borders: HashSet<usize> = self.fragmentation.iter().copied().collect();
         additional_borders.retain(|&border| !already_contained.contains(&border));
@@ -118,6 +116,7 @@ impl TKFModel for TKF92FixedIndelModel {
         for block in alignment_blocks.iter_mut() {
             block.len = block.border - prev_border;
             prev_border = block.border;
+            block.num_appearances = NumBlockAppearances::Fixed;
         }
         alignment_blocks
     }
