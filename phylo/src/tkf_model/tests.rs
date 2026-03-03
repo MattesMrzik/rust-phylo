@@ -1063,7 +1063,7 @@ fn tkf_update_mappings_and_model_info_fails_not_blocking_conform() {
 }
 
 #[test]
-fn tkf_update_mappings_and_model_info_succeeds() {
+fn tkf92_update_mappings_and_model_info_succeeds() {
     let tree = tree!("(((A1:2.0,B2:2.0)I3:0.3,C4:2.0)R5:1.0);");
     let msa = MASA::from_aligned_with_ancestral(
         Sequences::new(vec![
@@ -1097,26 +1097,18 @@ fn tkf_update_mappings_and_model_info_succeeds() {
     cost.update_mappings_and_model_info_unchecked(node_idx, new_mapping);
     // two blocks got merged into 1, so there is one fewer block
     assert_eq!(cost.model_info.borrow().blocks.len(), 4);
-    let block_right_borders = cost
-        .model_info
-        .borrow()
-        .blocks
+    let blocks = &cost.model_info.borrow().blocks;
+    let block_right_borders = blocks
         .iter()
         .map(|block| block.border)
         .collect::<Vec<_>>();
     assert_eq!(block_right_borders, vec![2, 3, 7, 10]);
-    let block_lens = cost
-        .model_info
-        .borrow()
-        .blocks
+    let block_lens = blocks
         .iter()
-        .map(|block| block.len)
+        .map(|block| block.len())
         .collect::<Vec<_>>();
     assert_eq!(block_lens, vec![2, 1, 4, 3]);
-    let num_appearances = cost
-        .model_info
-        .borrow()
-        .blocks
+    let num_appearances = blocks
         .iter()
         .map(|block| block.num_appearances)
         .collect::<Vec<_>>();
@@ -1128,5 +1120,46 @@ fn tkf_update_mappings_and_model_info_succeeds() {
             NumBlockAppearances::Variable(2), // this increased by one due to the updated mapping
             NumBlockAppearances::Variable(5),
         ]
+    );
+}
+
+#[test]
+fn tkf91_update_mappings_and_model_info_succeeds() {
+    let tree = tree!("(((A1:2.0,B2:2.0)I3:0.3,C4:2.0)R5:1.0);");
+    let msa = MASA::from_aligned_with_ancestral(
+        Sequences::new(vec![
+            record!("A1", b"---TGGA---"),
+            record!("B2", b"-------NNA"),
+            record!("I3", b"---T------"),
+            record!("C4", b"AG--------"),
+            record!("R5", b"--A-------"),
+        ]),
+        &tree,
+    )
+    .unwrap();
+    let phylo = PhyloInfo { msa, tree };
+    let mut cost = TKF91IndelCostBuilder::new(0.1, 0.2, phylo.clone())
+        .build()
+        .unwrap();
+    assert_eq!(cost.model_info.borrow().blocks.len(), 10);
+    let new_mapping = vec![None; 10];
+    let node_idx = &phylo.tree.by_id("R5").idx;
+    cost.update_mappings_and_model_info_unchecked(node_idx, new_mapping);
+    // two blocks got merged into 1, so there is one fewer block
+    assert_eq!(cost.model_info.borrow().blocks.len(), 10);
+    let blocks = &cost.model_info.borrow().blocks;
+    let block_right_borders = blocks.iter().map(|block| block.border).collect::<Vec<_>>();
+    assert_eq!(
+        block_right_borders,
+        (1..=10).collect::<Vec<_>>(),
+        "block borders incorrect"
+    );
+    let block_lens = blocks.iter().map(|block| block.len()).collect::<Vec<_>>();
+    assert_eq!(block_lens, vec![1; 10], "block lengths incorrect");
+    let num_appearances = blocks.iter().map(|b| b.num_appearances).collect::<Vec<_>>();
+    assert_eq!(
+        num_appearances,
+        vec![NumBlockAppearances::Fixed; 10],
+        "num appearances incorrect"
     );
 }
