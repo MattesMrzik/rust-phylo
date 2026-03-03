@@ -4,17 +4,17 @@ use std::fmt::Display;
 use hashbrown::HashSet;
 use log::warn;
 use num_enum::FromPrimitive;
-// use rstest::rstest;
+use rstest::rstest;
 
+use crate::alignment::AncestralAlignment;
+use crate::alphabets::Alphabet;
 use crate::likelihood::{ParamRange, PARAM_RANGE_UNIT_INTERVAL_EXCLUSIVE};
 use crate::phylo_info::PhyloInfo;
-use crate::tkf_model::Block;
 use crate::tkf_model::{
-    blocks_of_alignment, validate_lambda_and_mu, validate_r, TKF92Parameters, TKFIndelCost,
-    TKFIndelModelInfo,
+    blocks_of_alignment, validate_lambda_and_mu, validate_r, Block, Blocks, NumBlockAppearances,
+    TKF92Parameters, TKFIndelCost, TKFIndelModelInfo, TKFModel,
 };
 use crate::Result;
-use crate::{alignment::AncestralAlignment, tkf_model::TKFModel};
 
 /// TKF92 indel model with a `fixed fragmentation` (and without a substitution model),
 /// which means that the provided fragmentation will be regarded as the true fragmentation.
@@ -90,20 +90,21 @@ impl TKFModel for TKF92FixedIndelModel {
         }
     }
 
-    fn get_blocks<AA: AncestralAlignment>(&self, msa: &AA) -> Vec<Block> {
+    fn get_blocks<AA: AncestralAlignment>(&self, msa: &AA) -> Blocks {
+        // the blocks of the alignment
         let mut alignment_blocks = blocks_of_alignment(msa);
-        // determine the self.fragmentation that are not in the blocks vec borders and add them as
-        // blocks by creating a set of all block.border
-        let mut set: HashSet<usize> = self.fragmentation.iter().copied().collect();
+        // get the right exclusive borders of the alignment blocks
         let already_contained = alignment_blocks
             .iter()
             .map(|block| block.border)
             .collect::<Vec<usize>>();
-        set.retain(|&border| !already_contained.contains(&border));
+        // determine the borders that are defined by the self.fragmentation but not yet contained in the alignment blocks
+        let mut additional_borders: HashSet<usize> = self.fragmentation.iter().copied().collect();
+        additional_borders.retain(|&border| !already_contained.contains(&border));
+        // we will update the length to its correct value after we have added the new blocks and
+        // sorted them by their border
         let dummy_len = 1;
-        for new_border in set {
-            use crate::tkf_model::NumBlockAppearances;
-
+        for new_border in additional_borders {
             alignment_blocks.push(Block {
                 border: new_border,
                 site: new_border - 1,
@@ -112,7 +113,7 @@ impl TKFModel for TKF92FixedIndelModel {
             });
         }
         alignment_blocks.sort_by_key(|block| block.border);
-        // update len of blocks to reflect the new fragmentation
+        // update len of blocks
         let mut prev_border = 0;
         for block in alignment_blocks.iter_mut() {
             block.len = block.border - prev_border;
@@ -214,19 +215,11 @@ mod private_tests {
 
     use crate::alignment::{Sequences, MASA};
     use crate::phylo_info::{PhyloInfo, PhyloInfoBuilder};
+    use crate::tkf_model::tests::setup_test_phylo;
     use crate::tkf_model::TKF92IndelCostBuilder;
     use crate::{record_wo_desc as record, tree};
 
     use super::*;
-
-    // #[cfg(test)]
-    // fn naive_merge(set1: &[usize], set2: &[usize]) -> Vec<usize> {
-    //     let mut merged: Vec<usize> = set1.to_vec();
-    //     merged.extend(set2.iter().cloned());
-    //     merged.sort();
-    //     merged.dedup();
-    //     merged
-    // }
 
     #[test]
     fn tkf_validate_fragmentation() {
@@ -236,21 +229,39 @@ mod private_tests {
         assert_eq!(validated, vec![1, 3, 4, 13, 15]);
     }
 
-    // #[rstest]
-    // #[case( vec![3, 5, 7, 10], vec![5, 10, 12], vec![3, 5, 7, 10, 12])]
-    // #[case( vec![3, 7, 10, 12], vec![5, 10, 12], vec![3, 5, 7, 10, 12])]
-    // #[case( vec![], vec![5, 10, 12], vec![5, 10, 12])]
-    // #[case( vec![1, 2, 3, 4], vec![1, 2, 3, 4], vec![1, 2, 3, 4])]
-    // #[case( vec![1, 2, 4], vec![1, 2, 3, 4], vec![1, 2, 3, 4])]
-    // fn tkf_merge_fragmentations_with_blocks(
-    //     #[case] fragmentation: Vec<usize>,
-    //     #[case] blocks: Vec<usize>,
-    //     #[case] expected: Vec<usize>,
-    // ) {
-    //     let merged = merge_fragmentation_with_blocks(&fragmentation, &blocks);
-    //     assert_eq!(merged, expected);
-    //     assert_eq!(merged, naive_merge(&fragmentation, &blocks));
-    // }
+    #[rstest]
+    #[case( vec![3, 5, 7, 10],  vec![2, 3, 5, 7, 10])]
+    #[case( vec![3, 7, 10], vec![2, 3, 7, 10])]
+    #[case( vec![], vec![2, 3, 7, 10])]
+    #[case( vec![1, 2, 3, 4],  vec![1, 2, 3, 4, 7, 10])]
+    #[case( vec![1, 2, 4],  vec![1, 2, 3, 4, 7, 10])]
+    fn tkf_init_fixed_fragment(#[case] fragmentation: Vec<usize>, #[case] expected: Vec<usize>) {
+        let phylo = setup_test_phylo(Alphabet::dna());
+        // the blocks of this alignment are [2, 3, 7, 10]
+        let cost = TKF92FixedIndelCostBuilder::new(1.0, 1.1, 0.5, fragmentation, phylo)
+            .build()
+            .unwrap();
+        let mut prev_border = 0;
+        let blocks = &cost.model_info.borrow().blocks;
+        for (i, expected_border) in expected.iter().enumerate() {
+            let block = &blocks[i];
+            assert_eq!(
+                block.border, *expected_border,
+                "Block border does not match expected border."
+            );
+            assert_eq!(
+                block.site,
+                *expected_border - 1,
+                "Block site does not match expected site."
+            );
+            assert_eq!(
+                block.len,
+                *expected_border - prev_border,
+                "Block length does not match expected length."
+            );
+            prev_border = *expected_border;
+        }
+    }
 
     #[test]
     fn tkf_manual_integration_over_fragmentations() {

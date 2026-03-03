@@ -9,7 +9,7 @@ use crate::random::RandomGenerator;
 use crate::tkf_model::reestimate::cache::{
     possible_assignments_of_edge, possible_del_or_not, prev_compatible_del_or_not,
 };
-use crate::tkf_model::{log_i1, Block, Event, TKFIndelCost, TKFIndelModelInfo, TKFModel};
+use crate::tkf_model::{log_i1, Blocks, Event, TKFIndelCost, TKFIndelModelInfo, TKFModel};
 use crate::tree::NodeIdx::{self, Internal, Leaf};
 use crate::{bail, Result, REPORT_ISSUES_URL};
 
@@ -296,8 +296,9 @@ where
         if self.update_table_sizes() {
             self.cost.logl()
         } else {
-        self.make_valid_for_further_reestimate_calls();
-        backtrack_res.logl}
+            self.make_valid_for_further_reestimate_calls();
+            backtrack_res.logl
+        }
     }
 
     /// Resets the DP and backtracking tables. Initialises the [`QuartetEdges`]. Removes the old
@@ -350,10 +351,6 @@ where
 
     fn update_masa(&mut self, backtrack_res: &BackTrackingResult) {
         let seq_len = self.cost.phylo.msa.len();
-        // TODO: perhaps pass a ref to the blocks instead of the newly created block_lens
-
-        // cannot do let blocks = self.cost.model_info.borrow().blocks here since we need to borrow
-        // mutable later to update the mappings and model info
         let (v1_mapping, v2_mapping) = {
             let blocks = &self.cost.model_info.borrow().blocks;
             (
@@ -361,14 +358,10 @@ where
                 mapping_from_node_seq(&backtrack_res.v2_bitset, blocks, seq_len),
             )
         };
-        // self.dp_table.remove(col_to_remove);
-        // self.backtracking_table.remove(col_to_remove);
-
-        // The panics are never triggered, unless something is seriously wrong with the algo.
         self.cost.update_mappings_and_model_info(self.quartet_edges.v1(), v1_mapping)
-            .unwrap_or_else(|_| panic!("Failed to update ancestral map for v1. Please report this at {REPORT_ISSUES_URL}"));
+            .unwrap_or_else(|err| panic!("Failed to update ancestral map for v1. Please report this at {REPORT_ISSUES_URL}. Error details: {err}"));
         self.cost.update_mappings_and_model_info(self.quartet_edges.v2(), v2_mapping)
-            .unwrap_or_else(|_| panic!("Failed to update ancestral map for v2. Please report this at {REPORT_ISSUES_URL}"));
+            .unwrap_or_else(|err| panic!("Failed to update ancestral map for v2. Please report this at {REPORT_ISSUES_URL}. Error details: {err}"));
     }
 
     fn update_table_sizes(&mut self) -> bool {
@@ -670,7 +663,7 @@ where
 }
 
 #[inline]
-fn mapping_from_node_seq(node_seq: &NodeSeq, blocks: &[Block], seq_len: usize) -> Mapping {
+fn mapping_from_node_seq(node_seq: &NodeSeq, blocks: &Blocks, seq_len: usize) -> Mapping {
     debug_assert!(
         blocks.iter().map(|b| b.len).sum::<usize>() == seq_len,
         "Block lengths do not sum up to the sequence length."

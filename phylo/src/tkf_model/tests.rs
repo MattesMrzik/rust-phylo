@@ -1,6 +1,7 @@
 use approx::assert_relative_eq;
 use assert_matches::assert_matches;
 use nalgebra::DVector;
+use rstest::rstest;
 
 use crate::alignment::{Alignment, AncestralAlignment, Mapping, Sequences, MASA};
 use crate::alphabets::Alphabet;
@@ -974,4 +975,158 @@ fn tkf_udpate_tree() {
     let clean_logl = TreeSearchCost::cost(&clean_cost);
     assert_ne!(original_logl, new_logl);
     assert_eq!(new_logl, clean_logl);
+}
+
+#[rstest]
+#[case::violates_block_1( vec![ Some(0), None, None, None, None, None, None, None, None, None], true)]
+#[case::violates_block_333( vec![ Some(0), Some(1), None, Some(0), None, Some(2), Some(3), Some(4), Some(5), Some(6)], true)]
+#[case::violates_block_4( vec![ None, None, None, Some(0), Some(1), Some(2), Some(3), Some(4), Some(5), None], true)]
+#[case::all_none( vec![ None, None, None, None, None, None, None, None, None, None], false)]
+#[case::all_some( vec![ Some(0), Some(0), Some(0), Some(0), Some(0), Some(0), Some(0), Some(0), Some(0), Some(0)], false)]
+fn tkf_mapping_conforms_to_blocking(
+    #[case] new_mapping: Vec<Option<usize>>,
+    #[case] should_error: bool,
+) {
+    // the blocks are [0:2), [2:3), [3:7), [7:10)
+    let phylo = setup_test_phylo(Alphabet::dna());
+    let mut cost = TKF92IndelCostBuilder::new(0.1, 0.2, 0.3, phylo.clone())
+        .build()
+        .unwrap();
+    let result = cost.update_mappings_and_model_info(&Internal(0), new_mapping);
+    if should_error {
+        assert_matches!(
+            result,
+            Err(Error::TKF(msg))
+                if msg.contains(
+                    "new mapping does not conform to the current blocking of the alignment"
+                )
+        );
+    } else {
+        assert!(result.is_ok());
+    }
+}
+
+#[test]
+fn tkf_update_mappings_and_model_info_fails_wrong_length_map() {
+    let phylo = setup_test_phylo(Alphabet::dna());
+    let mut cost = TKF92IndelCostBuilder::new(0.1, 0.2, 0.3, phylo.clone())
+        .build()
+        .unwrap();
+    let err = cost.update_mappings_and_model_info(&Internal(0), vec![]);
+    assert_matches!(
+        err, Err(Error::AncestralAlignment(msg)) if msg.contains(
+        "does not match MSA length")
+    );
+}
+
+#[test]
+fn tkf_update_mappings_and_model_info_fails_wrong_internal_node() {
+    let phylo = setup_test_phylo(Alphabet::dna());
+    let mut cost = TKF92IndelCostBuilder::new(0.1, 0.2, 0.3, phylo.clone())
+        .build()
+        .unwrap();
+    let new_mapping = vec![None; 10];
+    let err = cost.update_mappings_and_model_info(&Internal(1000), new_mapping);
+    assert_matches!(
+        err, Err(Error::AncestralAlignment(msg)) if msg.contains(
+        "not a valid internal node in the tree")
+    );
+}
+
+#[test]
+fn tkf_update_mappings_and_model_info_fails_leaf() {
+    let phylo = setup_test_phylo(Alphabet::dna());
+    let mut cost = TKF92IndelCostBuilder::new(0.1, 0.2, 0.3, phylo.clone())
+        .build()
+        .unwrap();
+    let new_mapping = vec![None; 10];
+    let err = cost.update_mappings_and_model_info(&Leaf(0), new_mapping);
+    assert_matches!(
+        err, Err(Error::AncestralAlignment(msg)) if msg.contains(
+        "ancestral map cannot be set for a leaf node like")
+    );
+}
+
+#[test]
+fn tkf_update_mappings_and_model_info_fails_not_blocking_conform() {
+    let phylo = setup_test_phylo(Alphabet::dna());
+    let mut cost = TKF92IndelCostBuilder::new(0.1, 0.2, 0.3, phylo.clone())
+        .build()
+        .unwrap();
+    let mut new_mapping = vec![None; 10];
+    new_mapping[0] = Some(0);
+    let err = cost.update_mappings_and_model_info(&Internal(0), new_mapping);
+    assert_matches!(
+        err, Err(Error::TKF(msg)) if msg.contains(
+        "new mapping does not conform to the current blocking of the alignment")
+    );
+}
+
+#[test]
+fn tkf_update_mappings_and_model_info_succeeds() {
+    let tree = tree!("(((A1:2.0,B2:2.0)I3:0.3,C4:2.0)R5:1.0);");
+    let msa = MASA::from_aligned_with_ancestral(
+        Sequences::new(vec![
+            record!("A1", b"--GTGGA---"),
+            record!("B2", b"-------NNA"),
+            record!("I3", b"--TT------"),
+            record!("C4", b"AGG-------"),
+            record!("R5", b"--A-------"),
+        ]),
+        &tree,
+    )
+    .unwrap();
+    let phylo = PhyloInfo { msa, tree };
+    let mut cost = TKF92IndelCostBuilder::new(0.1, 0.2, 0.3, phylo.clone())
+        .build()
+        .unwrap();
+    assert_eq!(cost.model_info.borrow().blocks.len(), 5);
+    let new_mapping = vec![
+        None,
+        None,
+        Some(0),
+        Some(1),
+        Some(2),
+        Some(3),
+        Some(4),
+        None,
+        None,
+        None,
+    ];
+    let node_idx = &phylo.tree.by_id("I3").idx;
+    cost.update_mappings_and_model_info_unchecked(node_idx, new_mapping);
+    // two blocks got merged into 1, so there is one fewer block
+    assert_eq!(cost.model_info.borrow().blocks.len(), 4);
+    let block_right_borders = cost
+        .model_info
+        .borrow()
+        .blocks
+        .iter()
+        .map(|block| block.border)
+        .collect::<Vec<_>>();
+    assert_eq!(block_right_borders, vec![2, 3, 7, 10]);
+    let block_lens = cost
+        .model_info
+        .borrow()
+        .blocks
+        .iter()
+        .map(|block| block.len)
+        .collect::<Vec<_>>();
+    assert_eq!(block_lens, vec![2, 1, 4, 3]);
+    let num_appearances = cost
+        .model_info
+        .borrow()
+        .blocks
+        .iter()
+        .map(|block| block.num_appearances)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        num_appearances,
+        vec![
+            NumBlockAppearances::Variable(3),
+            NumBlockAppearances::Variable(2),
+            NumBlockAppearances::Variable(2), // this increased by one due to the updated mapping
+            NumBlockAppearances::Variable(5),
+        ]
+    );
 }

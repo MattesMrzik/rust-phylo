@@ -17,7 +17,7 @@ use crate::tkf_model::reestimate::cache::possible_assignments_of_edge;
 use crate::tkf_model::reestimate::mapping_from_node_seq;
 use crate::tkf_model::tests::get_mapping_for_any_node;
 #[cfg(test)]
-use crate::tkf_model::Block;
+use crate::tkf_model::Blocks;
 use crate::tkf_model::{EdgeSeqsReestimator, TKF92IndelCostBuilder, TKFIndelCost, TKFModel};
 use crate::tree::NodeIdx;
 
@@ -84,7 +84,7 @@ fn test_edge_seqs() {
 #[cfg(test)]
 fn edge_seqs_to_mappings(
     edge_seqs: &[(bool, bool)],
-    blocks: &[Block],
+    blocks: &Blocks,
     seq_len: usize,
 ) -> (Vec<Option<usize>>, Vec<Option<usize>>) {
     let mut v2_fixed_bit_set = FixedBitSet::with_capacity(blocks.len());
@@ -144,7 +144,7 @@ fn make_nodes_dirty<T: TKFModel>(cost: &mut TKFIndelCost<T, MASA>, v2_idx: &Node
 #[cfg(test)]
 fn cost_for_edge_seqs<T: TKFModel>(
     v2_idx: &NodeIdx,
-    cost: &mut TKFIndelCost<T, MASA>,
+    mut cost: TKFIndelCost<T, MASA>,
     edge_seqs: &[(bool, bool)],
 ) -> f64 {
     let v1_idx = &cost.phylo.tree.node(v2_idx).parent.unwrap();
@@ -158,7 +158,7 @@ fn cost_for_edge_seqs<T: TKFModel>(
     cost.update_mappings_and_model_info(v2_idx, new_v2_mapping)
         .expect("Could not update ancestral map for v2");
 
-    make_nodes_dirty(cost, v2_idx);
+    make_nodes_dirty(&mut cost, v2_idx);
 
     cost.logl()
 }
@@ -209,14 +209,14 @@ fn get_edge_assignment_possibilities(
 fn brute_force_max_for_possibilities_single_thread<T: TKFModel>(
     possible_edge_assignments: Vec<Vec<(bool, bool)>>,
     number_of_possibilities: usize,
-    cost: &mut TKFIndelCost<T, MASA>,
+    cost: TKFIndelCost<T, MASA>,
     v2_idx: &NodeIdx,
 ) -> f64 {
     let mut max: f64 = f64::MIN;
     for i in 0..number_of_possibilities {
         print_progress(i, number_of_possibilities);
         let possibility = edge_seqs(i, &possible_edge_assignments);
-        let current = cost_for_edge_seqs(v2_idx, &mut cost.clone(), &possibility);
+        let current = cost_for_edge_seqs(v2_idx, cost.clone(), &possibility);
         max = max.max(current);
     }
     clear_progress_line();
@@ -226,7 +226,7 @@ fn brute_force_max_for_possibilities_single_thread<T: TKFModel>(
 // single thread calculation
 #[cfg(test)]
 #[cfg(not(feature = "multithread-brute-force-asr"))]
-fn brute_force_max<T: TKFModel + Send>(mut cost: TKFIndelCost<T, MASA>, v2_idx: &NodeIdx) -> f64 {
+fn brute_force_max<T: TKFModel + Send>(cost: TKFIndelCost<T, MASA>, v2_idx: &NodeIdx) -> f64 {
     let possible_edge_assignments = get_edge_assignment_possibilities(&cost, v2_idx);
     let number_of_possibilities = number_of_possibilities(&possible_edge_assignments);
     println!(
@@ -236,7 +236,7 @@ fn brute_force_max<T: TKFModel + Send>(mut cost: TKFIndelCost<T, MASA>, v2_idx: 
     brute_force_max_for_possibilities_single_thread(
         possible_edge_assignments,
         number_of_possibilities,
-        &mut cost,
+        cost,
         v2_idx,
     )
 }
@@ -260,14 +260,14 @@ fn brute_force_max_for_possibilities_multi_thread(
         .enumerate()
         .zip(cost_clones)
         .into_par_iter()
-        .map(move |((chunk_id, chunk), mut thread_cost)| {
+        .map(move |((chunk_id, chunk), thread_cost)| {
             let mut max: f64 = f64::MIN;
             for i in chunk {
                 if chunk_id == 0 {
                     print_progress(i, number_of_possibilities / num_threads);
                 }
                 let possibility = edge_seqs(i, &possible_edge_assignments);
-                let current = cost_for_edge_seqs(v2_idx, &mut thread_cost.clone(), &possibility);
+                let current = cost_for_edge_seqs(v2_idx, thread_cost.clone(), &possibility);
                 max = max.max(current);
             }
             max
@@ -288,8 +288,9 @@ fn brute_force_max<T: TKFModel + Send>(mut cost: TKFIndelCost<T, MASA>, v2_idx: 
         number_of_possibilities,
         cost.phylo.tree.node(v2_idx).id,
     );
+    let num_threads = rayon::current_num_threads();
+    // initialising the tmp values in the cost.model_info
     let _ = cost.cost();
-    let num_threads = rayon::current_num_threads() / 2;
     // if the number of possibilities is small, do single thread
     if number_of_possibilities < num_threads * 2 {
         brute_force_max_for_possibilities_single_thread(

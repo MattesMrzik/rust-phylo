@@ -10,8 +10,8 @@ use crate::likelihood::{ParamRange, PARAM_RANGE_UNIT_INTERVAL_EXCLUSIVE};
 use crate::phylo_info::PhyloInfo;
 use crate::substitution_models::{QMatrix, SubstModel, SubstitutionCostBuilder as SCB};
 use crate::tkf_model::{
-    validate_lambda_and_mu, Block, NumBlockAppearances, TKFCost, TKFIndelCost, TKFIndelModelInfo,
-    TKFModel, DEFAULT_LAMBDA, DEFAULT_MU, DEFAULT_R,
+    validate_lambda_and_mu, Block, Blocks, NumBlockAppearances, TKFCost, TKFIndelCost,
+    TKFIndelModelInfo, TKFModel, DEFAULT_LAMBDA, DEFAULT_MU, DEFAULT_R,
 };
 use crate::{bail, Result};
 
@@ -106,7 +106,7 @@ impl TKFModel for TKF92IndelModel {
         }
     }
 
-    fn get_blocks<AA: AncestralAlignment>(&self, msa: &AA) -> Vec<Block> {
+    fn get_blocks<AA: AncestralAlignment>(&self, msa: &AA) -> Blocks {
         blocks_of_alignment(msa)
     }
 }
@@ -226,11 +226,9 @@ impl<Q: QMatrix, AA: AncestralAlignment> TKF92CostBuilder<Q, AA> {
     }
 }
 
-/// Determines the block borders from the alignment. A block border is defined as a
-/// position where any sequence changes from gap to non-gap or vice versa. Returns a sorted
-/// vector of the right exclusive block borders.
-pub(super) fn blocks_of_alignment<AA: AncestralAlignment>(msa: &AA) -> Vec<Block> {
-    // TODO: this set can be removed
+/// Determines the blocks from the alignment. A block border is defined as a
+/// position where any sequence changes from gap to non-gap or vice versa.
+pub(super) fn blocks_of_alignment<AA: AncestralAlignment>(msa: &AA) -> Blocks {
     let mut blocks_with_counts = HashMap::new();
     if msa.len() == 0 {
         return vec![];
@@ -252,10 +250,10 @@ pub(super) fn blocks_of_alignment<AA: AncestralAlignment>(msa: &AA) -> Vec<Block
         let total_num_seqs = msa.seq_count() + msa.ancestral_seqs().len();
         blocks_with_counts.insert(map.len(), total_num_seqs);
     }
-    let mut blocks: Vec<usize> = blocks_with_counts.keys().copied().collect();
-    blocks.sort();
-    let block_lens = get_block_lengths(&blocks);
-    blocks
+    let mut block_right_borders: Vec<usize> = blocks_with_counts.keys().copied().collect();
+    block_right_borders.sort();
+    let block_lens = get_block_lengths(&block_right_borders);
+    block_right_borders
         .into_iter()
         .zip(block_lens)
         .map(|(border, len)| Block {
