@@ -1098,15 +1098,9 @@ fn tkf92_update_mappings_and_model_info_succeeds() {
     // two blocks got merged into 1, so there is one fewer block
     assert_eq!(cost.model_info.borrow().blocks.len(), 4);
     let blocks = &cost.model_info.borrow().blocks;
-    let block_right_borders = blocks
-        .iter()
-        .map(|block| block.border)
-        .collect::<Vec<_>>();
+    let block_right_borders = blocks.iter().map(|block| block.border).collect::<Vec<_>>();
     assert_eq!(block_right_borders, vec![2, 3, 7, 10]);
-    let block_lens = blocks
-        .iter()
-        .map(|block| block.len())
-        .collect::<Vec<_>>();
+    let block_lens = blocks.iter().map(|block| block.len()).collect::<Vec<_>>();
     assert_eq!(block_lens, vec![2, 1, 4, 3]);
     let num_appearances = blocks
         .iter()
