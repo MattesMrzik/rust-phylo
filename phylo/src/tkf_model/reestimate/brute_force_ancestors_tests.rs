@@ -280,7 +280,7 @@ fn brute_force_max_for_possibilities_multi_thread(
 // multi thread  calculation
 #[cfg(test)]
 #[cfg(feature = "multithread-brute-force-asr")]
-fn brute_force_max<T: TKFModel + Send>(mut cost: TKFIndelCost<T, MASA>, v2_idx: &NodeIdx) -> f64 {
+fn brute_force_max<T: TKFModel + Send>(cost: TKFIndelCost<T, MASA>, v2_idx: &NodeIdx) -> f64 {
     let possible_edge_assignments = get_edge_assignment_possibilities(&cost, v2_idx);
     let number_of_possibilities = number_of_possibilities(&possible_edge_assignments);
     println!(
@@ -296,7 +296,7 @@ fn brute_force_max<T: TKFModel + Send>(mut cost: TKFIndelCost<T, MASA>, v2_idx: 
         brute_force_max_for_possibilities_single_thread(
             possible_edge_assignments,
             number_of_possibilities,
-            &mut cost,
+            cost,
             v2_idx,
         )
     } else {
