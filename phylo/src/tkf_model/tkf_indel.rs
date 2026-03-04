@@ -78,6 +78,7 @@ impl Block {
     // Since the len is always >=1 we don't need the empty method
     #[allow(clippy::len_without_is_empty)]
     pub fn len(&self) -> usize {
+        debug_assert!(self.len > 0, "Block length should always be greater than 0. Please report this at {REPORT_ISSUES_URL}");
         self.len
     }
 }
@@ -436,7 +437,7 @@ impl<T: TKFModel, AA: AncestralAlignment> TKFIndelCost<T, AA> {
                 if !rest.iter().all(|x| x.is_some() == required_state) {
                     bail!(
                     TKF,
-                    "The new mapping does not conform to the current blocking of the alignment, \
+                    "the new mapping does not conform to the current blocking of the alignment, \
                      i.e., presence or absence of characters in the ancestral mapping \
                      is not uniform within every block."
                 );
@@ -506,10 +507,7 @@ impl<T: TKFModel, AA: AncestralAlignment> TKFIndelCost<T, AA> {
     ) -> Result<()> {
         if self.phylo.msa.ancestral_maps().get(node_idx).is_none() {
             match node_idx {
-                Internal(_) => bail!(
-                    AncestralAlignment,
-                    "{node_idx} is not a valid internal node in the tree"
-                ),
+                Internal(_) => bail!(AncestralAlignment, "no ancestral map found for: {node_idx}"),
                 Leaf(_) => bail!(
                     AncestralAlignment,
                     "ancestral map cannot be set for a leaf node like {node_idx}"
@@ -519,7 +517,7 @@ impl<T: TKFModel, AA: AncestralAlignment> TKFIndelCost<T, AA> {
         if new_map.len() != self.phylo.msa.len() {
             bail!(
                 AncestralAlignment,
-                "Mapping length {} does not match MSA length {}",
+                "mapping length {} does not match MSA length {}",
                 new_map.len(),
                 self.phylo.msa.len()
             );

@@ -247,9 +247,9 @@ pub(super) fn blocks_of_alignment<AA: AncestralAlignment>(msa: &AA) -> Blocks {
             }
             previous_is_char = current_is_char;
         }
-        let total_num_seqs = msa.seq_count() + msa.ancestral_seqs().len();
-        blocks_with_counts.insert(map.len(), total_num_seqs);
     }
+    let total_num_seqs = msa.seq_count() + msa.ancestral_seqs().len();
+    blocks_with_counts.insert(msa.len(), total_num_seqs);
     let mut block_right_borders: Vec<usize> = blocks_with_counts.keys().copied().collect();
     block_right_borders.sort();
     let block_lens = get_block_lengths(&block_right_borders);

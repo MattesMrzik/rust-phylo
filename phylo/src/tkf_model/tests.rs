@@ -1019,7 +1019,7 @@ fn tkf_update_mappings_and_model_info_fails_wrong_internal_node() {
     let err = cost.update_mappings_and_model_info(&Internal(1000), new_mapping);
     assert_matches!(
         err, Err(Error::AncestralAlignment(msg)) if msg.contains(
-        "not a valid internal node in the tree")
+        "no ancestral map found for: internal node 1000")
     );
 }
 

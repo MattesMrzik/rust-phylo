@@ -134,10 +134,7 @@ pub trait AncestralAlignment: Alignment {
             Ok(())
         } else {
             match node_idx {
-                Int(_) => bail!(
-                    AncestralAlignment,
-                    "{node_idx} is not a valid internal node in the tree"
-                ),
+                Int(_) => bail!(AncestralAlignment, "no ancestral map found for: {node_idx}"),
                 Leaf(_) => bail!(
                     AncestralAlignment,
                     "ancestral map cannot be set for a leaf node like {node_idx}"
