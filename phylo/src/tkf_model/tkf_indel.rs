@@ -540,19 +540,26 @@ impl<T: TKFModel, AA: AncestralAlignment> TKFIndelCost<T, AA> {
 
         let mut block_id = 1;
         let mut num_blocks = self.model_info.borrow().blocks.len();
+        let mut merged = false;
         while block_id < num_blocks {
             let new_map = self.phylo.msa.ancestral_map(node_idx);
             let merge_blocks = self.decrease_count_and_is_zero(&prev_map, new_map, block_id);
             if merge_blocks {
                 self.merge_blocks_and_adjust_dimensions(block_id);
+                merged = true;
                 num_blocks -= 1;
             } else {
                 block_id += 1;
             }
         }
-        // setting the node and its children tmp values as invalid, since the events on these edges might have
-        // changed due to the updated mapping
-        self.set_affected_nodes_as_invalid(node_idx);
+        if merged {
+            // the node_eta of all nodes need to be correctly updated next time the logl is called
+            self.model_info.borrow_mut().valid.clear();
+        } else {
+            // setting the node and its children tmp values as invalid, since the events on these edges might have
+            // changed due to the updated mapping
+            self.set_affected_nodes_as_invalid(node_idx);
+        }
     }
 
     fn merge_blocks_and_adjust_dimensions(&mut self, block_id: usize) {
