@@ -123,10 +123,10 @@ fn tkf92_indel_logl_without_aggregation<AA: AncestralAlignment>(
     let mut last_event_deletion = vec![false; tree.len()];
     for (i, fragment) in blocks.iter().enumerate() {
         let mut event_prob = 1.0;
-        if get_mapping_for_any_node(&phylo.msa, &phylo.tree.root)[fragment.rep_site].is_some() {
+        if get_mapping_for_any_node(&phylo.msa, &phylo.tree.root)[fragment.rep_site()].is_some() {
             // the eq seq at the root has a fragment
             event_prob *= lambda / mu * (1.0 - r) / r;
-            prob += fragment.len as f64 * r.ln();
+            prob += fragment.len() as f64 * r.ln();
         }
         for node_idx in tree.postorder() {
             // skipping the root of the tree because it has no parent and therefore also no
@@ -139,9 +139,9 @@ fn tkf92_indel_logl_without_aggregation<AA: AncestralAlignment>(
             let time = tree.node(node_idx).blen;
             let parent_id = &tree.node(node_idx).parent.unwrap();
             let parent_is_gap =
-                get_mapping_for_any_node(&phylo.msa, parent_id)[fragment.rep_site].is_none();
+                get_mapping_for_any_node(&phylo.msa, parent_id)[fragment.rep_site()].is_none();
             let current_is_gap =
-                get_mapping_for_any_node(&phylo.msa, node_idx)[fragment.rep_site].is_none();
+                get_mapping_for_any_node(&phylo.msa, node_idx)[fragment.rep_site()].is_none();
 
             let beta = beta(lambda, mu, time);
             if i == 0 {
@@ -165,12 +165,12 @@ fn tkf92_indel_logl_without_aggregation<AA: AncestralAlignment>(
                     prob -= n0(mu, beta).ln();
                 }
                 event_prob *= lambda * beta * (1.0 - r) / r;
-                prob += fragment.len as f64 * r.ln();
+                prob += fragment.len() as f64 * r.ln();
                 last_event_deletion[node_id_value] = false;
             }
         }
         prob += event_prob.ln();
-        prob += (fragment.len - 1) as f64 * (1.0 + event_prob).ln();
+        prob += (fragment.len() - 1) as f64 * (1.0 + event_prob).ln();
     }
     prob
 }
@@ -246,13 +246,16 @@ fn tkf91_get_blocks() {
 
     let blocks = TKF91IndelModel::default().get_blocks(&msa);
 
-    let block_borders = blocks.iter().map(|b| b.border).collect::<Vec<usize>>();
+    let block_borders = blocks
+        .iter()
+        .map(|b| b.coordinates().1)
+        .collect::<Vec<usize>>();
     assert_eq!(block_borders, (1..msa.len() + 1).collect::<Vec<usize>>());
-    let block_sites = blocks.iter().map(|b| b.rep_site).collect::<Vec<usize>>();
+    let block_sites = blocks.iter().map(|b| b.rep_site()).collect::<Vec<usize>>();
     assert_eq!(block_sites, (0..msa.len()).collect::<Vec<usize>>());
     for block in blocks {
-        assert_eq!(block.len, 1);
-        assert_eq!(block.num_appearances, NumBlockAppearances::Fixed);
+        assert_eq!(block.len(), 1);
+        assert_eq!(block.num_appearances(), NumBlockAppearances::Fixed);
     }
 }
 
@@ -268,15 +271,18 @@ fn tkf92_get_blocks() {
 
     let blocks = TKF92IndelModel::default().get_blocks(&msa);
 
-    let block_borders = blocks.iter().map(|b| b.border).collect::<Vec<usize>>();
+    let block_borders = blocks
+        .iter()
+        .map(|b| b.coordinates().1)
+        .collect::<Vec<usize>>();
     assert_eq!(block_borders, vec![1, 3, 4, 5]);
-    let block_sites = blocks.iter().map(|b| b.rep_site).collect::<Vec<usize>>();
+    let block_sites = blocks.iter().map(|b| b.rep_site()).collect::<Vec<usize>>();
     assert_eq!(block_sites, vec![0, 2, 3, 4]);
-    let block_lens = blocks.iter().map(|b| b.len).collect::<Vec<usize>>();
+    let block_lens = blocks.iter().map(|b| b.len()).collect::<Vec<usize>>();
     assert_eq!(block_lens, vec![1, 2, 1, 1]);
     let block_num_appearances = blocks
         .iter()
-        .map(|b| b.num_appearances)
+        .map(|b| b.num_appearances())
         .collect::<Vec<NumBlockAppearances>>();
     assert_eq!(
         block_num_appearances,
@@ -308,15 +314,18 @@ fn tkf92_fixed_get_blocks() {
     };
     let blocks = model.get_blocks(&msa);
 
-    let block_borders = blocks.iter().map(|b| b.border).collect::<Vec<usize>>();
+    let block_borders = blocks
+        .iter()
+        .map(|b| b.coordinates().1)
+        .collect::<Vec<usize>>();
     assert_eq!(block_borders, vec![1, 2, 3, 7, 8, 9]);
-    let block_sites = blocks.iter().map(|b| b.rep_site).collect::<Vec<usize>>();
+    let block_sites = blocks.iter().map(|b| b.rep_site()).collect::<Vec<usize>>();
     assert_eq!(block_sites, vec![0, 1, 2, 6, 7, 8]);
-    let block_lens = blocks.iter().map(|b| b.len).collect::<Vec<usize>>();
+    let block_lens = blocks.iter().map(|b| b.len()).collect::<Vec<usize>>();
     assert_eq!(block_lens, vec![1, 1, 1, 4, 1, 1]);
     let block_num_appearances = blocks
         .iter()
-        .map(|b| b.num_appearances)
+        .map(|b| b.num_appearances())
         .collect::<Vec<NumBlockAppearances>>();
     assert_eq!(block_num_appearances, vec![NumBlockAppearances::Fixed; 6]);
 }
@@ -1088,13 +1097,16 @@ fn tkf92_update_mappings_and_model_info_succeeds() {
     // two blocks got merged into 1, so there is one fewer block
     assert_eq!(cost.model_info.borrow().blocks.len(), 4);
     let blocks = &cost.model_info.borrow().blocks;
-    let block_right_borders = blocks.iter().map(|block| block.border).collect::<Vec<_>>();
+    let block_right_borders = blocks
+        .iter()
+        .map(|block| block.coordinates().1)
+        .collect::<Vec<_>>();
     assert_eq!(block_right_borders, vec![2, 3, 7, 10]);
     let block_lens = blocks.iter().map(|block| block.len()).collect::<Vec<_>>();
     assert_eq!(block_lens, vec![2, 1, 4, 3]);
     let num_appearances = blocks
         .iter()
-        .map(|block| block.num_appearances)
+        .map(|block| block.num_appearances())
         .collect::<Vec<_>>();
     assert_eq!(
         num_appearances,
@@ -1132,7 +1144,10 @@ fn tkf91_update_mappings_and_model_info_succeeds() {
     // two blocks got merged into 1, so there is one fewer block
     assert_eq!(cost.model_info.borrow().blocks.len(), 10);
     let blocks = &cost.model_info.borrow().blocks;
-    let block_right_borders = blocks.iter().map(|block| block.border).collect::<Vec<_>>();
+    let block_right_borders = blocks
+        .iter()
+        .map(|block| block.coordinates().1)
+        .collect::<Vec<_>>();
     assert_eq!(
         block_right_borders,
         (1..=10).collect::<Vec<_>>(),
@@ -1140,7 +1155,10 @@ fn tkf91_update_mappings_and_model_info_succeeds() {
     );
     let block_lens = blocks.iter().map(|block| block.len()).collect::<Vec<_>>();
     assert_eq!(block_lens, vec![1; 10], "block lens incorrect");
-    let num_appearances = blocks.iter().map(|b| b.num_appearances).collect::<Vec<_>>();
+    let num_appearances = blocks
+        .iter()
+        .map(|b| b.num_appearances())
+        .collect::<Vec<_>>();
     assert_eq!(
         num_appearances,
         vec![NumBlockAppearances::Fixed; 10],

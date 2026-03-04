@@ -186,7 +186,7 @@ fn get_edge_assignment_possibilities(
     let t4_mapping = get_mapping_for_any_node(&cost.phylo.msa, &tree.children(v2_idx)[1]);
 
     for (block_id, possible_edge_assignment) in possible_edge_assignments.iter_mut().enumerate() {
-        let site = blocks[block_id].rep_site;
+        let site = blocks[block_id].rep_site();
         let t1_is_char = if let Some(t1_map) = &t1_mapping {
             t1_map[site].is_some()
         } else {

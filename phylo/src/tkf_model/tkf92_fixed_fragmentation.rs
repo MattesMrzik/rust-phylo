@@ -1,7 +1,6 @@
 use std::cell::RefCell;
 use std::fmt::Display;
 
-use hashbrown::HashSet;
 use log::warn;
 use num_enum::FromPrimitive;
 use rstest::rstest;
@@ -91,34 +90,25 @@ impl TKFModel for TKF92FixedIndelModel {
     }
 
     fn get_blocks<AA: AncestralAlignment>(&self, msa: &AA) -> Blocks {
-        // the blocks of the alignment
-        let mut alignment_blocks = blocks_of_alignment(msa);
-        // get the right exclusive borders of the alignment blocks
-        let already_contained: HashSet<usize> =
-            alignment_blocks.iter().map(|block| block.border).collect();
-        // determine the borders that are defined by the self.fragmentation but not yet contained in the alignment blocks
-        let mut additional_borders: HashSet<usize> = self.fragmentation.iter().copied().collect();
-        additional_borders.retain(|&border| !already_contained.contains(&border));
-        // we will update the length to its correct value after we have added the new blocks and
-        // sorted them by their border
-        let dummy_len = 1;
-        for new_border in additional_borders {
-            alignment_blocks.push(Block {
-                border: new_border,
-                rep_site: new_border - 1,
-                len: dummy_len,
-                num_appearances: NumBlockAppearances::Fixed,
-            });
-        }
-        alignment_blocks.sort_by_key(|block| block.border);
-        // update len of blocks
+        // collect all right-exclusive block borders: from the alignment and from the fixed fragmentation
+        let alignment_blocks = blocks_of_alignment(msa);
+        let mut all_borders: Vec<usize> = alignment_blocks
+            .iter()
+            .map(|block| block.coordinates().1)
+            .chain(self.fragmentation.iter().copied())
+            .collect();
+        all_borders.sort_unstable();
+        all_borders.dedup();
+        // build blocks in a single pass with correct lengths
         let mut prev_border = 0;
-        for block in alignment_blocks.iter_mut() {
-            block.len = block.border - prev_border;
-            prev_border = block.border;
-            block.num_appearances = NumBlockAppearances::Fixed;
-        }
-        alignment_blocks
+        all_borders
+            .into_iter()
+            .map(|border| {
+                let len = border - prev_border;
+                prev_border = border;
+                Block::new(border, border - 1, len, NumBlockAppearances::Fixed)
+            })
+            .collect()
     }
 }
 
@@ -245,16 +235,17 @@ mod private_tests {
         for (i, expected_border) in expected.iter().enumerate() {
             let block = &blocks[i];
             assert_eq!(
-                block.border, *expected_border,
+                block.coordinates().1,
+                *expected_border,
                 "Block border does not match expected border."
             );
             assert_eq!(
-                block.rep_site,
+                block.rep_site(),
                 *expected_border - 1,
                 "Block site does not match expected site."
             );
             assert_eq!(
-                block.len,
+                block.len(),
                 *expected_border - prev_border,
                 "Block length does not match expected length."
             );

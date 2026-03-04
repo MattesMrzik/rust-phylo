@@ -81,12 +81,7 @@ impl TKFModel for TKF91IndelModel {
     /// Since TKF91 is a single-residue indel model, each position is its own block.
     fn get_blocks<AA: AncestralAlignment>(&self, msa: &AA) -> Vec<super::Block> {
         (1..msa.len() + 1)
-            .map(|pos| Block {
-                border: pos,
-                rep_site: pos - 1,
-                len: 1,
-                num_appearances: NumBlockAppearances::Fixed,
-            })
+            .map(|pos| Block::new(pos, pos - 1, 1, NumBlockAppearances::Fixed))
             .collect()
     }
 }

@@ -421,7 +421,7 @@ where
         let n_blocks = self.cost.model_info.borrow().blocks.len();
         for block_id in 0..n_blocks {
             let mut found_at_least_one = false;
-            let site = self.cost.model_info.borrow().blocks[block_id].rep_site;
+            let site = self.cost.model_info.borrow().blocks[block_id].rep_site();
             for assignment in self.possible_assignments(site) {
                 let events = self.event_for_assignment(assignment, block_id);
                 let event_prob = self.integrated_root_event_prob(&events, block_id);
@@ -491,7 +491,7 @@ where
         // See issue #151 https://github.com/acg-team/rust-phylo/issues/151
         let previous_block = block_id - 1;
         let model_info = self.cost.model_info.borrow();
-        let site = model_info.blocks[previous_block].rep_site;
+        let site = model_info.blocks[previous_block].rep_site();
         for prev_assignment in self.possible_assignments(site) {
             // TODO: here it is not checked whether the `prev_del_or_not` matches the `prev_assignment`
             // which will lead to -inf which is then skipped.
@@ -542,7 +542,7 @@ where
     fn integrated_root_event_prob(&self, events: &QuartetEvents, block_id: usize) -> f64 {
         let root_id = usize::from(self.cost.phylo.tree.root);
         let model_info = self.cost.model_info.borrow();
-        let block_len = model_info.blocks[block_id].len;
+        let block_len = model_info.blocks[block_id].len();
         let mut x = model_info.subtree_event_factor[(root_id, block_id)];
         x *= self.quartet_event_factor(events);
         self.cost.model.block_prob(x, block_len)
@@ -580,7 +580,7 @@ where
     }
 
     fn event_for_assignment(&self, assignment: &EdgeAssignment, block_id: usize) -> QuartetEvents {
-        let site = self.cost.model_info.borrow().blocks[block_id].rep_site;
+        let site = self.cost.model_info.borrow().blocks[block_id].rep_site();
         let mut events = [Event::Nothing; N_EDGES_IN_QUARTET];
         let v1_has_char = assignment.0;
         let v2_has_char = assignment.1;
@@ -669,13 +669,13 @@ where
 #[inline]
 fn mapping_from_node_seq(node_seq: &NodeSeq, blocks: &Blocks, seq_len: usize) -> Mapping {
     debug_assert!(
-        blocks.iter().map(|b| b.len).sum::<usize>() == seq_len,
+        blocks.iter().map(|b| b.len()).sum::<usize>() == seq_len,
         "Block lengths do not sum up to the sequence length."
     );
     let mut mapping = Vec::with_capacity(seq_len);
     let mut count = 0;
     for (i, &block) in blocks.iter().enumerate() {
-        for _ in 0..block.len {
+        for _ in 0..block.len() {
             if node_seq.contains(i) {
                 mapping.push(Some(count));
                 count += 1;

@@ -256,11 +256,13 @@ pub(super) fn blocks_of_alignment<AA: AncestralAlignment>(msa: &AA) -> Blocks {
     block_right_borders
         .into_iter()
         .zip(block_lens)
-        .map(|(border, len)| Block {
-            border,
-            rep_site: border - 1,
-            len,
-            num_appearances: NumBlockAppearances::Variable(blocks_with_counts[&border]),
+        .map(|(border, len)| {
+            Block::new(
+                border,
+                border - 1,
+                len,
+                NumBlockAppearances::Variable(blocks_with_counts[&border]),
+            )
         })
         .collect()
 }

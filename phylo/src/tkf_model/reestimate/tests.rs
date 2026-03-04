@@ -84,15 +84,18 @@ fn tkf_mapping_from_node_seq() {
     node_seq.insert(2);
     node_seq.insert(4);
     let block_lens = [2, 3, 1, 4, 1];
-    let dummy_value = 0;
+    // a vector that contains the borders of the block
+    let borders = block_lens
+        .iter()
+        .scan(0, |acc, &len| {
+            *acc += len;
+            Some(*acc)
+        })
+        .collect::<Vec<_>>();
     let blocks = block_lens
         .iter()
-        .map(|&len| Block {
-            border: dummy_value,
-            rep_site: dummy_value,
-            len,
-            num_appearances: NumBlockAppearances::Fixed,
-        })
+        .zip(borders)
+        .map(|(&len, border)| Block::new(border, border - 1, len, NumBlockAppearances::Fixed))
         .collect::<Vec<_>>();
     let seq_len: usize = block_lens.iter().sum();
     let expected_mapping = [

@@ -50,12 +50,12 @@ pub type Blocks = Vec<Block>;
 pub struct Block {
     /// The right exclusive interval border of the block.
     /// For example, if the block is [3, 5), the block border is 5.
-    pub(super) border: usize,
+    border: usize,
     /// Since within a block the presence or absence of characters in the ancestral mappings are the same,
     /// we can just use one representative site to determine the [event](`Event`) for the whole block.
-    pub(super) rep_site: usize,
+    rep_site: usize,
     /// The length of the block, i.e., border - previous block border.
-    pub(super) len: usize,
+    len: usize,
     /// Either the number of times this block's border appears in the alignment, or whether it should be
     /// treated as a fixed block independently of the number of appearances.
     /// Under the [`crate::tkf_model::TKF91IndelModel`] all blocks are
@@ -64,10 +64,49 @@ pub struct Block {
     /// [variable](`NumBlockAppearances::Variable`), since during
     /// [re-estimation](`EdgeSeqsReestimator`) the block borders can change and we need to keep
     /// track of how many times they appear in the alignment to know when to merge blocks.
-    pub(super) num_appearances: NumBlockAppearances,
+    num_appearances: NumBlockAppearances,
 }
 
 impl Block {
+    /// Creates a new [`Block`], panicking if any invariant is violated:
+    /// - `border > 0`
+    /// - `len > 0`
+    /// - `rep_site` is within the half-open interval `[border - len, border)`
+    pub(super) fn new(
+        border: usize,
+        rep_site: usize,
+        len: usize,
+        num_appearances: NumBlockAppearances,
+    ) -> Self {
+        assert!(border > 0, "Block border must be greater than 0.");
+        assert!(len > 0, "Block length must be greater than 0.");
+        assert!(
+            rep_site >= border - len && rep_site < border,
+            "Block rep_site {rep_site} must lie within [{}, {border}).",
+            border - len
+        );
+        Block {
+            border,
+            rep_site,
+            len,
+            num_appearances,
+        }
+    }
+
+    pub(super) fn rep_site(&self) -> usize {
+        self.rep_site
+    }
+
+    /// Returns a mutable reference to the number of appearances of this block's border (i.e., [`Self::coordinates`]\().1) in the alignment.
+    pub(super) fn num_appearances_mut(&mut self) -> &mut NumBlockAppearances {
+        &mut self.num_appearances
+    }
+
+    #[cfg(test)]
+    pub(super) fn num_appearances(&self) -> NumBlockAppearances {
+        self.num_appearances
+    }
+
     /// Returns the coordinates of the block as a tuple [start, end)
     pub fn coordinates(&self) -> (usize, usize) {
         let start = self.border - self.len;
@@ -75,10 +114,9 @@ impl Block {
         (start, end)
     }
 
-    // Since the len is always >=1 we don't need the empty method
+    /// Returns the length of the block (which is always greater than 0).
     #[allow(clippy::len_without_is_empty)]
     pub fn len(&self) -> usize {
-        debug_assert!(self.len > 0, "Block length should always be greater than 0. Please report this at {REPORT_ISSUES_URL}");
         self.len
     }
 }
@@ -461,7 +499,7 @@ impl<T: TKFModel, AA: AncestralAlignment> TKFIndelCost<T, AA> {
         let transition_in_new = new[prev_site].is_some() ^ new[curr_site].is_some();
 
         if transition_in_old && !transition_in_new {
-            match &mut blocks[block_id - 1].num_appearances {
+            match &mut blocks[block_id - 1].num_appearances_mut() {
                 NumBlockAppearances::Variable(count) => {
                     assert!(
                         *count > 0,
