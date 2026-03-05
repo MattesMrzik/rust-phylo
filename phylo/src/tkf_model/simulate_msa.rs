@@ -415,58 +415,108 @@ impl<T: TKFModel + FragmentSampler, Q: QMatrix, R: Rng + SeedableRng + RngCore>
             while !tree_stack.is_empty() {
                 let current_link = tree_stack.remove(0);
                 if current_link.is_immortal {
-                    for branch_child in &current_link.children {
-                        for (child_id, child_link) in branch_child.iter().enumerate() {
-                            if child_id == 0 {
-                                tree_stack.push(child_link);
-                            } else {
-                                insertions.insert(0, child_link);
-                            }
-                        }
-                    }
+                    self.dispatch_immortal_children(current_link, &mut tree_stack, &mut insertions);
                 } else {
-                    msa.get_mut(&current_link.node)
+                    self.process_link(
+                        current_link,
+                        msa,
+                        fragmentation,
+                        &mut tree_stack,
+                        &mut insertions,
+                    );
+                }
+            }
+        }
+    }
+
+    /// Pushes the children of an immortal link onto the traversal stacks.
+    ///
+    /// The first child of each branch continues the homolog tree traversal (`tree_stack`) which is
+    /// the immortal surviving; any additional children are new insertions and go onto the `insertions` queue.
+    fn dispatch_immortal_children<'a>(
+        &self,
+        link: &'a TKFLink,
+        tree_stack: &mut Vec<&'a TKFLink>,
+        insertions: &mut Vec<&'a TKFLink>,
+    ) {
+        for branch_child in &link.children {
+            for (child_id, child_link) in branch_child.iter().enumerate() {
+                if child_id == 0 {
+                    tree_stack.push(child_link);
+                } else {
+                    insertions.insert(0, child_link);
+                }
+            }
+        }
+    }
+
+    /// Writes one non-immortal link's contribution to the MSA and updates the traversal stacks.
+    ///
+    /// - Appends `AMB_CHAR * length` to the owning node.
+    /// - Records a fragmentation boundary for root-owned links and insertion links.
+    /// - Fills `NOTHING_CHAR` gaps into all non-owning nodes for insertion links.
+    /// - Applies each branch fate: queues homolog/insertion children, or fills deletion gaps.
+    fn process_link<'a>(
+        &self,
+        link: &'a TKFLink,
+        msa: &mut Seqs,
+        fragmentation: &mut Vec<usize>,
+        tree_stack: &mut Vec<&'a TKFLink>,
+        insertions: &mut Vec<&'a TKFLink>,
+    ) {
+        msa.get_mut(&link.node)
+            .unwrap()
+            .extend_from_slice(&vec![AMB_CHAR; link.length]);
+        if link.node == self.tree.root || link.is_insertion {
+            let fragment_boundary = link.length + fragmentation.last().unwrap_or(&0);
+            fragmentation.push(fragment_boundary);
+        }
+        if link.is_insertion {
+            self.insertion_gaps(link.length, msa, &link.node);
+        }
+        for (branch_id, child_links) in link.children.iter().enumerate() {
+            self.apply_fate(link, branch_id, child_links, msa, tree_stack, insertions);
+        }
+    }
+
+    /// Applies a single branch fate for a non-immortal link.
+    ///
+    /// - `Homolog`: queues the surviving child onto `tree_stack` and its insertions onto `insertions`.
+    /// - `Deletion` / `NonHomolog`: fills deletion gaps for all descendants; `NonHomolog` also
+    ///   queues the new insertion children.
+    fn apply_fate<'a>(
+        &self,
+        link: &'a TKFLink,
+        branch_id: usize,
+        child_links: &'a [TKFLink],
+        msa: &mut Seqs,
+        tree_stack: &mut Vec<&'a TKFLink>,
+        insertions: &mut Vec<&'a TKFLink>,
+    ) {
+        match &link.fates[branch_id] {
+            LinkFate::Homolog(_) => {
+                tree_stack.push(&child_links[0]);
+                for l in child_links.iter().skip(1) {
+                    insertions.insert(0, l);
+                }
+            }
+            LinkFate::Deletion => {
+                let child_node = self.tree.children(&link.node)[branch_id];
+                for descendant_node in self.tree.preorder_subroot(&child_node) {
+                    msa.get_mut(&descendant_node)
                         .unwrap()
-                        .extend_from_slice(&vec![AMB_CHAR; current_link.length]);
-                    if current_link.node == self.tree.root || current_link.is_insertion {
-                        let fragment_boundry =
-                            current_link.length + fragmentation.last().unwrap_or(&0);
-                        fragmentation.push(fragment_boundry);
-                    }
-                    // normal link
-                    if current_link.is_insertion {
-                        self.insertion_gaps(current_link.length, msa, &current_link.node);
-                    }
-                    for (branch_id, child_links) in current_link.children.iter().enumerate() {
-                        match &current_link.fates[branch_id] {
-                            LinkFate::Homolog(_) => {
-                                tree_stack.push(&child_links[0]);
-                                for l in child_links.iter().skip(1) {
-                                    insertions.insert(0, l); // i think this inserts like [0, 5, 4, 3, 2, 1] perhaps we want [0, 1, 2, 3, 4, 5]
-                                }
-                            }
-                            LinkFate::Deletion => {
-                                //insert gaps for all descendants
-                                let child_node = self.tree.children(&current_link.node)[branch_id];
-                                for descendant_node in self.tree.preorder_subroot(&child_node) {
-                                    msa.get_mut(&descendant_node).unwrap().extend_from_slice(
-                                        &vec![DELETION_CHAR; current_link.length],
-                                    );
-                                }
-                            }
-                            LinkFate::NonHomolog(_) => {
-                                for l in child_links {
-                                    insertions.insert(0, l); // i think this inserts like [0, 5, 4, 3, 2, 1] perhaps we want [0, 1, 2, 3, 4, 5]
-                                }
-                                let child_node = self.tree.children(&current_link.node)[branch_id];
-                                for descendant_node in self.tree.preorder_subroot(&child_node) {
-                                    msa.get_mut(&descendant_node).unwrap().extend_from_slice(
-                                        &vec![DELETION_CHAR; current_link.length],
-                                    );
-                                }
-                            }
-                        };
-                    }
+                        .extend_from_slice(&vec![DELETION_CHAR; link.length]);
+                }
+            }
+            LinkFate::NonHomolog(_) => {
+                for l in child_links {
+                    insertions.insert(0, l);
+                }
+                let child_node = self.tree.children(&link.node)[branch_id];
+                for descendant_node in self.tree.preorder_subroot(&child_node) {
+                    msa.get_mut(&descendant_node)
+                        .unwrap()
+                        .extend_from_slice(&vec![DELETION_CHAR; link.length]);
                 }
             }
         }
