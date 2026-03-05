@@ -6,6 +6,7 @@ use rand::{Rng, RngCore, SeedableRng};
 use rand_distr::{Distribution, Geometric};
 
 use crate::alignment::{AncestralAlignment, Sequences, MASA};
+use crate::alphabets::AMB_CHAR;
 use crate::phylo_info::PhyloInfo;
 use crate::random::RandomGenerator;
 use crate::substitution_models::{QMatrix, SubstModel};
@@ -15,25 +16,19 @@ use crate::{record_wo_desc as record, Result};
 
 const DELETION_CHAR: u8 = b'-';
 const FRAGMENT_BOUNDARY_CHAR: u8 = b',';
-const WILDCARD_CHAR: u8 = b'N';
 const NOTHING_CHAR: u8 = b'_';
 
+/// Since these sequences are built incrementally, we can't use the [`Sequences`] which hold immutable [`record`]s`.
 type Seqs = HashMap<NodeIdx, Vec<u8>>;
 
 pub struct TKF92MSASimulator<Q: QMatrix, R: Rng + SeedableRng + RngCore> {
+    /// or do we want to have a cost here that includes the substitution and a generic TKFIndel cost
     indel_model: TKF92IndelModel,
     _subst_model: SubstModel<Q>,
     tree: Tree,
     cumulative_logl: RefCell<f64>,
     rng: RefCell<RandomGenerator<R>>,
     max_insertion_length: usize,
-}
-
-pub struct TKF92MSASimulationResult {
-    msa: MASA,
-    msa_with_non_emitting_cols: MASA,
-    fragmentation: Vec<usize>,
-    logl: f64,
 }
 
 /// All the descendant links associated to a single branch.
@@ -95,6 +90,13 @@ enum LinkFate {
     Homolog(usize),
     /// The link is deleted but produces `usize` many insertions to the right of it.
     NonHomolog(usize),
+}
+
+pub struct TKF92MSASimulationResult {
+    msa: MASA,
+    msa_with_non_emitting_cols: MASA,
+    fragmentation: Vec<usize>,
+    logl: f64,
 }
 
 impl TKF92MSASimulationResult {
@@ -427,7 +429,7 @@ impl<Q: QMatrix, R: Rng + SeedableRng + RngCore> TKF92MSASimulator<Q, R> {
                 } else {
                     msa.get_mut(&current_link.node)
                         .unwrap()
-                        .extend_from_slice(&vec![WILDCARD_CHAR; current_link.length]);
+                        .extend_from_slice(&vec![AMB_CHAR; current_link.length]);
                     msa.get_mut(&current_link.node)
                         .unwrap()
                         .push(FRAGMENT_BOUNDARY_CHAR);
