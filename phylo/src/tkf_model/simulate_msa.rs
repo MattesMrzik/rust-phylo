@@ -378,9 +378,8 @@ impl<T: TKFModel + FragmentSampler, Q: QMatrix, R: Rng + SeedableRng + RngCore>
             msa.insert(*node, Vec::new());
         }
         let mut fragmentation: Vec<usize> = Vec::new();
-        let mut root_residue_count: usize = 0;
         for link in links {
-            self.append_link_to_msa(link, &mut msa, &mut fragmentation, &mut root_residue_count);
+            self.append_link_to_msa(link, &mut msa, &mut fragmentation);
         }
         (msa, fragmentation)
     }
@@ -409,13 +408,7 @@ impl<T: TKFModel + FragmentSampler, Q: QMatrix, R: Rng + SeedableRng + RngCore>
         MASA::from_aligned_with_ancestral(seqs, &self.tree).unwrap()
     }
 
-    fn append_link_to_msa(
-        &self,
-        link: &TKFLink,
-        msa: &mut Seqs,
-        fragmentation: &mut Vec<usize>,
-        root_residue_count: &mut usize,
-    ) {
+    fn append_link_to_msa(&self, link: &TKFLink, msa: &mut Seqs, fragmentation: &mut Vec<usize>) {
         let mut insertions = vec![link];
         while !insertions.is_empty() {
             let mut tree_stack = vec![insertions.remove(0)];
@@ -436,8 +429,9 @@ impl<T: TKFModel + FragmentSampler, Q: QMatrix, R: Rng + SeedableRng + RngCore>
                         .unwrap()
                         .extend_from_slice(&vec![AMB_CHAR; current_link.length]);
                     if current_link.node == self.tree.root || current_link.is_insertion {
-                        *root_residue_count += current_link.length;
-                        fragmentation.push(*root_residue_count);
+                        let fragment_boundry =
+                            current_link.length + fragmentation.last().unwrap_or(&0);
+                        fragmentation.push(fragment_boundry);
                     }
                     // normal link
                     if current_link.is_insertion {
