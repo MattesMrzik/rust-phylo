@@ -26,7 +26,6 @@ pub trait FragmentSampler {
 }
 
 const DELETION_CHAR: u8 = b'-';
-const FRAGMENT_BOUNDARY_CHAR: u8 = b',';
 const NOTHING_CHAR: u8 = b'_';
 
 /// Since these sequences are built incrementally, we can't use the [`Sequences`] which hold immutable [`record`]s`.
@@ -343,7 +342,6 @@ impl<T: TKFModel + FragmentSampler, Q: QMatrix, R: Rng + SeedableRng + RngCore>
 
     /// Used for the conversion of the link structure to an MSA.
     /// Inserts gaps in the MSA
-    ///
     fn insertion_gaps(&self, length: usize, msa: &mut Seqs, insertion_node: &NodeIdx) {
         self.insertion_gaps_subtree(length, msa, &self.tree.root, insertion_node);
     }
@@ -361,9 +359,6 @@ impl<T: TKFModel + FragmentSampler, Q: QMatrix, R: Rng + SeedableRng + RngCore>
         msa.get_mut(subtree_node)
             .unwrap()
             .extend_from_slice(&vec![NOTHING_CHAR; length]);
-        msa.get_mut(subtree_node)
-            .unwrap()
-            .push(FRAGMENT_BOUNDARY_CHAR);
         for child_node in self.tree.children(subtree_node) {
             self.insertion_gaps_subtree(length, msa, child_node, insertion_node);
         }
@@ -373,31 +368,21 @@ impl<T: TKFModel + FragmentSampler, Q: QMatrix, R: Rng + SeedableRng + RngCore>
     pub fn simulate_msa(&self) -> (Seqs, f64, Vec<usize>) {
         *self.cumulative_logl.borrow_mut() = 0.0;
         let links = self.build_msa_links();
-        let msa = self.links_to_msa(&links);
-        let fragmentation = self.get_fragmentation(&msa);
+        let (msa, fragmentation) = self.links_to_msa(&links);
         (msa, *self.cumulative_logl.borrow(), fragmentation)
     }
 
-    fn get_fragmentation(&self, msa: &Seqs) -> Vec<usize> {
-        let root_seq = msa.get(&self.tree.root).unwrap();
-        let mut fragmentation = Vec::new();
-        for (i, &c) in root_seq.iter().enumerate() {
-            if c == FRAGMENT_BOUNDARY_CHAR {
-                fragmentation.push(i - fragmentation.len());
-            }
-        }
-        fragmentation
-    }
-
-    fn links_to_msa(&self, links: &Vec<TKFLink>) -> Seqs {
+    fn links_to_msa(&self, links: &Vec<TKFLink>) -> (Seqs, Vec<usize>) {
         let mut msa: Seqs = HashMap::new();
         for node in self.tree.preorder() {
             msa.insert(*node, Vec::new());
         }
+        let mut fragmentation: Vec<usize> = Vec::new();
+        let mut root_residue_count: usize = 0;
         for link in links {
-            self.append_link_to_msa(link, &mut msa);
+            self.append_link_to_msa(link, &mut msa, &mut fragmentation, &mut root_residue_count);
         }
-        msa
+        (msa, fragmentation)
     }
 
     fn msa_to_alignment(&self, msa: &Seqs) -> MASA {
@@ -407,7 +392,6 @@ impl<T: TKFModel + FragmentSampler, Q: QMatrix, R: Rng + SeedableRng + RngCore>
                 record!(
                     &self.tree.node(node).id,
                     &seq.iter()
-                        .filter(|x| **x != FRAGMENT_BOUNDARY_CHAR)
                         .map(|x| {
                             if *x == NOTHING_CHAR {
                                 &DELETION_CHAR
@@ -425,7 +409,13 @@ impl<T: TKFModel + FragmentSampler, Q: QMatrix, R: Rng + SeedableRng + RngCore>
         MASA::from_aligned_with_ancestral(seqs, &self.tree).unwrap()
     }
 
-    fn append_link_to_msa(&self, link: &TKFLink, msa: &mut Seqs) {
+    fn append_link_to_msa(
+        &self,
+        link: &TKFLink,
+        msa: &mut Seqs,
+        fragmentation: &mut Vec<usize>,
+        root_residue_count: &mut usize,
+    ) {
         let mut insertions = vec![link];
         while !insertions.is_empty() {
             let mut tree_stack = vec![insertions.remove(0)];
@@ -445,12 +435,12 @@ impl<T: TKFModel + FragmentSampler, Q: QMatrix, R: Rng + SeedableRng + RngCore>
                     msa.get_mut(&current_link.node)
                         .unwrap()
                         .extend_from_slice(&vec![AMB_CHAR; current_link.length]);
-                    msa.get_mut(&current_link.node)
-                        .unwrap()
-                        .push(FRAGMENT_BOUNDARY_CHAR);
+                    if current_link.node == self.tree.root || current_link.is_insertion {
+                        *root_residue_count += current_link.length;
+                        fragmentation.push(*root_residue_count);
+                    }
                     // normal link
                     if current_link.is_insertion {
-                        // this should not be called on the root
                         self.insertion_gaps(current_link.length, msa, &current_link.node);
                     }
                     for (branch_id, child_links) in current_link.children.iter().enumerate() {
@@ -468,9 +458,6 @@ impl<T: TKFModel + FragmentSampler, Q: QMatrix, R: Rng + SeedableRng + RngCore>
                                     msa.get_mut(&descendant_node).unwrap().extend_from_slice(
                                         &vec![DELETION_CHAR; current_link.length],
                                     );
-                                    msa.get_mut(&descendant_node)
-                                        .unwrap()
-                                        .push(FRAGMENT_BOUNDARY_CHAR);
                                 }
                             }
                             LinkFate::NonHomolog(_) => {
@@ -482,9 +469,6 @@ impl<T: TKFModel + FragmentSampler, Q: QMatrix, R: Rng + SeedableRng + RngCore>
                                     msa.get_mut(&descendant_node).unwrap().extend_from_slice(
                                         &vec![DELETION_CHAR; current_link.length],
                                     );
-                                    msa.get_mut(&descendant_node)
-                                        .unwrap()
-                                        .push(FRAGMENT_BOUNDARY_CHAR);
                                 }
                             }
                         };
