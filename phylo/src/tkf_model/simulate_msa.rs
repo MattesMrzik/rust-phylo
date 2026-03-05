@@ -16,8 +16,8 @@ use crate::{record_wo_desc as record, Result};
 
 /// Abstracts over how a single fragment's length is sampled.
 ///
-/// TKF92 draws from a geometric distribution parameterised by `r`.
-/// TKF91 always returns length 1 (each residue is its own independent link).
+/// [TKF92](`crate::tkf_model::TKF92IndelModel`) draws from a geometric distribution parameterised by `r`.
+/// [TKF91](`crate::tkf_model::TKF91IndelModel`) always returns length 1 (each residue is its own independent link).
 ///
 /// Returns `(length, log_probability)` so that the caller can accumulate
 /// the simulation log-likelihood without any model-specific logic.
@@ -130,8 +130,11 @@ impl<AA: AncestralAlignment> TKFMSASimulationResult<AA> {
     }
 }
 
-impl<T: TKFModel + FragmentSampler, Q: QMatrix, R: Rng + SeedableRng + RngCore>
-    TKFMSASimulator<T, Q, R>
+impl<T, Q, R> TKFMSASimulator<T, Q, R>
+where
+    T: TKFModel + FragmentSampler,
+    Q: QMatrix,
+    R: Rng + SeedableRng + RngCore,
 {
     pub fn new(
         indel_model: T,
