@@ -513,13 +513,11 @@ mod private_tests {
     use approx::assert_relative_eq;
     use rstest::rstest;
 
-    use crate::alignment::AncestralAlignment;
     use crate::phylo_info::PhyloInfo;
     use crate::random::DefaultGenerator;
     use crate::substitution_models::{SubstModel, JC69};
-    use crate::tkf_model::{
-        beta, h1, log_i1, log_n1, n0, tests::get_mapping_for_any_node, TKFModel,
-    };
+    use crate::tkf_model::TKF92FixedIndelCostBuilder;
+    use crate::tkf_model::{beta, n0};
     use crate::tree::tree_parser::from_newick;
 
     use super::*;
@@ -604,94 +602,6 @@ mod private_tests {
         assert_relative_eq!(non_homolog_sum, non_homolog_integrated, epsilon = 1e-10);
     }
 
-    #[cfg(test)]
-    fn naive_merge(set1: &[usize], set2: &[usize]) -> Vec<usize> {
-        let mut merged: Vec<usize> = set1.to_vec();
-        merged.extend(set2.iter().cloned());
-        merged.sort();
-        merged.dedup();
-        merged
-    }
-
-    #[cfg(test)]
-    fn tkf92_fixed<AA: AncestralAlignment>(
-        model: &TKF92IndelModel,
-        phylo: &PhyloInfo<AA>,
-        fragmentation: &[usize],
-    ) -> f64 {
-        let blocks = TKF92IndelModel::get_blocks(&phylo.msa);
-        let blocks = naive_merge(&blocks, fragmentation);
-
-        let tree = &phylo.tree;
-        let lambda = model.lambda();
-        let mu = model.mu();
-        let r = model.params()[2];
-
-        // for the root
-        let mut prob: f64 = (1.0 - lambda / mu).ln();
-
-        for node_idx in tree.preorder() {
-            if node_idx == &tree.root {
-                continue;
-            }
-            let time = tree.node(node_idx).blen;
-            let beta = beta(lambda, mu, time);
-            prob += log_i1(lambda, beta);
-        }
-        let mut last_event_deletion = vec![false; tree.len()];
-        for (i, fragment) in blocks.iter().enumerate() {
-            let mut event_prob = 1.0;
-            let fragment_len = if i == 0 {
-                *fragment
-            } else {
-                fragment - blocks[i - 1]
-            };
-            if get_mapping_for_any_node(&phylo.msa, &phylo.tree.root)[fragment - 1].is_some() {
-                // the eq seq at the root has a fragment
-                event_prob *= lambda / mu;
-            }
-            for node_idx in tree.postorder() {
-                // skipping the root of the tree because it has no parent and therefore also no
-                // mutations probabilities
-
-                if node_idx == &tree.root {
-                    continue;
-                }
-                let node_id_value = usize::from(node_idx);
-                let time = tree.node(node_idx).blen;
-                let parent_id = &tree.node(node_idx).parent.unwrap();
-                let parent_is_gap =
-                    get_mapping_for_any_node(&phylo.msa, parent_id)[fragment - 1].is_none();
-                let current_is_gap =
-                    get_mapping_for_any_node(&phylo.msa, node_idx)[fragment - 1].is_none();
-
-                let beta = beta(lambda, mu, time);
-                if parent_is_gap && current_is_gap {
-                    continue;
-                } else if !parent_is_gap && !current_is_gap {
-                    // homolog block
-                    event_prob *= h1(lambda, mu, beta, time);
-                    last_event_deletion[node_id_value] = false;
-                } else if !parent_is_gap && current_is_gap {
-                    // deletion
-                    event_prob *= n0(mu, beta);
-                    last_event_deletion[node_id_value] = true;
-                } else if parent_is_gap && !current_is_gap {
-                    // insertion
-                    if last_event_deletion[node_id_value] {
-                        prob += log_n1(lambda, mu, beta, time);
-                        prob -= (lambda * beta).ln();
-                        prob -= n0(mu, beta).ln();
-                    }
-                    event_prob *= lambda * beta;
-                    last_event_deletion[node_id_value] = false;
-                }
-            }
-            prob += event_prob.ln() + (fragment_len as f64 - 1.0) * r.ln() + (1.0 - r).ln();
-        }
-        prob
-    }
-
     #[test]
     fn simulate() {
         let lambda = 1.1;
@@ -727,7 +637,10 @@ mod private_tests {
             msa: alignment,
             tree,
         };
-        let cost = tkf92_fixed(&simulator.indel_model, &phylo, &fragmentation);
+        let cost = TKF92FixedIndelCostBuilder::new(lambda, mu, r, fragmentation, phylo)
+            .build()
+            .unwrap()
+            .logl();
         assert_relative_eq!(logl, cost, epsilon = 1e-10);
     }
 }
