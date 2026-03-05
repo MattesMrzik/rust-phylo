@@ -5,7 +5,7 @@ use log::warn;
 use rand::{Rng, RngCore, SeedableRng};
 use rand_distr::{Distribution, Geometric};
 
-use crate::alignment::{AncestralAlignment, Sequences, MASA};
+use crate::alignment::{AncestralAlignment, Sequences};
 use crate::alphabets::AMB_CHAR;
 use crate::phylo_info::PhyloInfo;
 use crate::random::RandomGenerator;
@@ -105,19 +105,19 @@ enum LinkFate {
     NonHomolog(usize),
 }
 
-pub struct TKF92MSASimulationResult {
-    msa: MASA,
-    msa_with_non_emitting_cols: MASA,
+pub struct TKFMSASimulationResult<AA: AncestralAlignment> {
+    msa: AA,
+    msa_with_non_emitting_cols: AA,
     fragmentation: Vec<usize>,
     logl: f64,
 }
 
-impl TKF92MSASimulationResult {
-    pub fn msa(&self) -> &MASA {
+impl<AA: AncestralAlignment> TKFMSASimulationResult<AA> {
+    pub fn msa(&self) -> &AA {
         &self.msa
     }
 
-    pub fn msa_with_non_emitting_cols(&self) -> &MASA {
+    pub fn msa_with_non_emitting_cols(&self) -> &AA {
         &self.msa_with_non_emitting_cols
     }
 
@@ -150,9 +150,9 @@ impl<T: TKFModel + FragmentSampler, Q: QMatrix, R: Rng + SeedableRng + RngCore>
         }
     }
 
-    pub(crate) fn _double_check_simulation_logl_with_cost_calculation(
+    pub(crate) fn _double_check_simulation_logl_with_cost_calculation<AA: AncestralAlignment>(
         &self,
-        result: &TKF92MSASimulationResult,
+        result: &TKFMSASimulationResult<AA>,
     ) -> Result<()> {
         let _phylo = PhyloInfo {
             msa: result.msa.clone(),
@@ -202,7 +202,7 @@ impl<T: TKFModel + FragmentSampler, Q: QMatrix, R: Rng + SeedableRng + RngCore>
                 return LinkFate::Homolog(n - 1); // n - 1 because we are not counting the original link
             }
         }
-        // didnt return in the loop, capping insertion at length max_insertion_length
+        // didn't return in the loop, capping insertion at length max_insertion_length
         let homolog_prob_integrated = homolog_prob_integrated(mu, time);
         let homolog_prob = homolog_prob_integrated - cumulative_prob;
         *self.cumulative_logl.borrow_mut() += homolog_prob.ln();
@@ -226,7 +226,7 @@ impl<T: TKFModel + FragmentSampler, Q: QMatrix, R: Rng + SeedableRng + RngCore>
                 return LinkFate::NonHomolog(n);
             }
         }
-        // didnt return ind the loop, capping insertion at length max_insertion_length
+        // didn't return in the loop, capping insertion at length max_insertion_length
         let non_homolog_prob_integrated = non_homolog_prob_integrated(mu, beta, time);
         let non_homolog_prob = non_homolog_prob_integrated - cumulative_prob;
         *self.cumulative_logl.borrow_mut() += non_homolog_prob.ln();
@@ -243,16 +243,16 @@ impl<T: TKFModel + FragmentSampler, Q: QMatrix, R: Rng + SeedableRng + RngCore>
         let uniform_sample = self.rng.borrow_mut().random::<f64>();
         let lambda = self.indel_model.lambda();
         let beta = beta(lambda, self.indel_model.mu(), time);
-        let mut comulative_prob = 0.0;
+        let mut cumulative_prob = 0.0;
         for n in 1..self.max_insertion_length {
             let immortal_prob = immortal_prob(n, lambda, beta);
-            comulative_prob += immortal_prob;
-            if uniform_sample < comulative_prob {
+            cumulative_prob += immortal_prob;
+            if uniform_sample < cumulative_prob {
                 *self.cumulative_logl.borrow_mut() += immortal_prob.ln();
                 return n - 1;
             }
         }
-        let immortal_prob = 1.0 - comulative_prob;
+        let immortal_prob = 1.0 - cumulative_prob;
         *self.cumulative_logl.borrow_mut() += immortal_prob.ln();
         self.max_insertion_length
     }
@@ -364,12 +364,18 @@ impl<T: TKFModel + FragmentSampler, Q: QMatrix, R: Rng + SeedableRng + RngCore>
         }
     }
 
-    // TODO this shoudl return a simulation result
-    pub fn simulate_msa(&self) -> (Seqs, f64, Vec<usize>) {
+    pub fn simulate_msa<AA: AncestralAlignment>(&self) -> TKFMSASimulationResult<AA> {
         *self.cumulative_logl.borrow_mut() = 0.0;
         let links = self.build_msa_links();
-        let (msa, fragmentation) = self.links_to_msa(&links);
-        (msa, *self.cumulative_logl.borrow(), fragmentation)
+        let (raw_msa, fragmentation) = self.links_to_msa(&links);
+        let msa: AA = self.msa_to_alignment(&raw_msa);
+        let msa_with_non_emitting_cols: AA = self.msa_to_alignment_with_non_emitting_cols(&raw_msa);
+        TKFMSASimulationResult {
+            msa,
+            msa_with_non_emitting_cols,
+            fragmentation,
+            logl: *self.cumulative_logl.borrow(),
+        }
     }
 
     fn links_to_msa(&self, links: &Vec<TKFLink>) -> (Seqs, Vec<usize>) {
@@ -384,7 +390,7 @@ impl<T: TKFModel + FragmentSampler, Q: QMatrix, R: Rng + SeedableRng + RngCore>
         (msa, fragmentation)
     }
 
-    fn msa_to_alignment(&self, msa: &Seqs) -> MASA {
+    fn msa_to_alignment<AA: AncestralAlignment>(&self, msa: &Seqs) -> AA {
         let records = msa
             .iter()
             .map(|(node, seq)| {
@@ -405,7 +411,19 @@ impl<T: TKFModel + FragmentSampler, Q: QMatrix, R: Rng + SeedableRng + RngCore>
             .collect();
 
         let seqs = Sequences::new(records);
-        MASA::from_aligned_with_ancestral(seqs, &self.tree).unwrap()
+        AA::from_aligned_with_ancestral(seqs, &self.tree).unwrap()
+    }
+
+    /// is the same as `msa_to_alignment` but keeps the NOTHING_CHAR instead of converting them to
+    /// normal gaps ie DELETION_CHAR
+    fn msa_to_alignment_with_non_emitting_cols<AA: AncestralAlignment>(&self, msa: &Seqs) -> AA {
+        let records = msa
+            .iter()
+            .map(|(node, seq)| record!(&self.tree.node(node).id, seq))
+            .collect();
+
+        let seqs = Sequences::new(records);
+        AA::from_aligned_with_ancestral(seqs, &self.tree).unwrap()
     }
 
     fn append_link_to_msa(&self, link: &TKFLink, msa: &mut Seqs, fragmentation: &mut Vec<usize>) {
@@ -537,7 +555,7 @@ fn homolog_prob(n: usize, lambda: f64, mu: f64, beta: f64, time: f64) -> f64 {
     h1_val * (lambda * beta).powi((n - 1) as i32)
 }
 
-/// In the TKF model n is at least 1 bc otherwise we should have used n0
+/// In the TKF model n is at least 1 because otherwise we should have used n0
 fn non_homolog_prob(n: usize, lambda: f64, mu: f64, beta: f64, time: f64) -> f64 {
     let t1 = 1.0 - (-mu * time).exp() - mu * beta;
     let t2 = 1.0 - lambda * beta;
@@ -556,6 +574,7 @@ mod private_tests {
     use approx::assert_relative_eq;
     use rstest::rstest;
 
+    use crate::alignment::{Alignment, AncestralAlignment, MASA};
     use crate::phylo_info::PhyloInfo;
     use crate::random::DefaultGenerator;
     use crate::substitution_models::{SubstModel, JC69};
@@ -585,7 +604,7 @@ mod private_tests {
     }
 
     #[test]
-    fn tkf_homlog_probs() {
+    fn tkf_homolog_probs() {
         let lambda = 0.5;
         let mu = 0.7;
         let time = 1.23;
@@ -661,30 +680,24 @@ mod private_tests {
             DefaultGenerator::default(),
             12, // max insertion length
         );
-        let (msa, logl, fragmentation): (Seqs, f64, Vec<usize>) = simulator.simulate_msa();
-        assert_eq!(msa.len(), 7);
-        for (node, seq) in msa.iter() {
-            println!(
-                "Node {}: {}",
-                tree.node(node).id,
-                String::from_utf8_lossy(seq)
-            );
-        }
+        let result: TKFMSASimulationResult<MASA> = simulator.simulate_msa();
+        let alignment = result.msa();
+        assert_eq!(alignment.seq_count() + alignment.ancestral_seqs().len(), 7);
+        println!("Alignment:\n{}", alignment);
         println!(
             "Fragmentation points in the root sequence: {:?}",
-            fragmentation
+            result.fragmentation()
         );
-        let alignment = simulator.msa_to_alignment(&msa);
-        println!("Alignment:\n{}", alignment);
         let phylo = PhyloInfo {
-            msa: alignment,
+            msa: alignment.clone(),
             tree,
         };
-        let cost = TKF92FixedIndelCostBuilder::new(lambda, mu, r, fragmentation, phylo)
-            .build()
-            .unwrap()
-            .logl();
-        assert_relative_eq!(logl, cost, epsilon = 1e-10);
+        let cost =
+            TKF92FixedIndelCostBuilder::new(lambda, mu, r, result.fragmentation().clone(), phylo)
+                .build()
+                .unwrap()
+                .logl();
+        assert_relative_eq!(result.logl(), cost, epsilon = 1e-10);
     }
 
     #[test]
@@ -702,28 +715,29 @@ mod private_tests {
             DefaultGenerator::default(),
             12, // max insertion length
         );
-        let (msa, logl, fragmentation): (Seqs, f64, Vec<usize>) = simulator.simulate_msa();
-        assert_eq!(msa.len(), 7);
+        let result: TKFMSASimulationResult<MASA> = simulator.simulate_msa();
+        let alignment = result.msa();
+        assert_eq!(alignment.seq_count() + alignment.ancestral_seqs().len(), 7);
 
         // In TKF91 every residue is its own independent link (fragment length == 1), so the
         // fragmentation must be exactly [1, 2, 3, ..., n_cols].
-        let n_cols = fragmentation.len();
+        let n_cols = result.fragmentation().len();
         let expected_fragmentation: Vec<usize> = (1..=n_cols).collect();
         assert_eq!(
-            fragmentation, expected_fragmentation,
+            result.fragmentation(),
+            &expected_fragmentation,
             "TKF91 fragmentation must have every column as its own block"
         );
 
         // The simulation logl must equal the TKF91 indel cost for the same alignment.
-        let alignment = simulator.msa_to_alignment(&msa);
         let phylo = PhyloInfo {
-            msa: alignment,
+            msa: alignment.clone(),
             tree,
         };
         let cost = TKF91IndelCostBuilder::new(lambda, mu, phylo)
             .build()
             .unwrap()
             .logl();
-        assert_relative_eq!(logl, cost, epsilon = 1e-10);
+        assert_relative_eq!(result.logl(), cost, epsilon = 1e-10);
     }
 }
