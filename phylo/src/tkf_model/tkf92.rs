@@ -9,6 +9,7 @@ use crate::alignment::AncestralAlignment;
 use crate::likelihood::{ParamRange, PARAM_RANGE_UNIT_INTERVAL_EXCLUSIVE};
 use crate::phylo_info::PhyloInfo;
 use crate::substitution_models::{QMatrix, SubstModel, SubstitutionCostBuilder as SCB};
+use crate::tkf_model::simulate_msa::FragmentSampler;
 use crate::tkf_model::{
     validate_lambda_and_mu, TKFCost, TKFIndelCost, TKFIndelModelInfo, TKFModel, DEFAULT_LAMBDA,
     DEFAULT_MU, DEFAULT_R,
@@ -130,6 +131,22 @@ impl Display for TKF92IndelModel {
             self.mu(),
             self.r(),
         )
+    }
+}
+
+impl FragmentSampler for TKF92IndelModel {
+    /// Samples fragment length from a geometric distribution parameterised by `r`.
+    /// `r` is the probability that the next residue continues the current fragment,
+    /// so `1 - r` is the stopping (success) probability of the geometric draw.
+    /// Returns `(length, log_probability)`.
+    fn sample_fragment_length<R: rand::Rng>(&self, rng: &mut R) -> (usize, f64) {
+        use rand_distr::{Distribution, Geometric};
+        let prob_of_success = 1.0 - self.r();
+        let geom = Geometric::new(prob_of_success).unwrap();
+        let choice = geom.sample(rng);
+        // Geometric PMF: (1-p)^k * p  where k = number of failures before first success
+        let log_prob = (choice as f64) * (1.0 - prob_of_success).ln() + prob_of_success.ln();
+        (choice as usize + 1, log_prob) // +1: every fragment has at least one character
     }
 }
 

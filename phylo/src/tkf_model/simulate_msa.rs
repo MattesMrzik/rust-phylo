@@ -10,9 +10,20 @@ use crate::alphabets::AMB_CHAR;
 use crate::phylo_info::PhyloInfo;
 use crate::random::RandomGenerator;
 use crate::substitution_models::{QMatrix, SubstModel};
-use crate::tkf_model::{beta, h1, n0, TKF92IndelModel, TKFModel};
+use crate::tkf_model::{beta, h1, n0, TKFModel};
 use crate::tree::{NodeIdx, Tree};
 use crate::{record_wo_desc as record, Result};
+
+/// Abstracts over how a single fragment's length is sampled.
+///
+/// TKF92 draws from a geometric distribution parameterised by `r`.
+/// TKF91 always returns length 1 (each residue is its own independent link).
+///
+/// Returns `(length, log_probability)` so that the caller can accumulate
+/// the simulation log-likelihood without any model-specific logic.
+pub trait FragmentSampler {
+    fn sample_fragment_length<R: Rng>(&self, rng: &mut R) -> (usize, f64);
+}
 
 const DELETION_CHAR: u8 = b'-';
 const FRAGMENT_BOUNDARY_CHAR: u8 = b',';
@@ -21,9 +32,12 @@ const NOTHING_CHAR: u8 = b'_';
 /// Since these sequences are built incrementally, we can't use the [`Sequences`] which hold immutable [`record`]s`.
 type Seqs = HashMap<NodeIdx, Vec<u8>>;
 
-pub struct TKF92MSASimulator<Q: QMatrix, R: Rng + SeedableRng + RngCore> {
-    /// or do we want to have a cost here that includes the substitution and a generic TKFIndel cost
-    indel_model: TKF92IndelModel,
+pub struct TKFMSASimulator<
+    T: TKFModel + FragmentSampler,
+    Q: QMatrix,
+    R: Rng + SeedableRng + RngCore,
+> {
+    indel_model: T,
     _subst_model: SubstModel<Q>,
     tree: Tree,
     cumulative_logl: RefCell<f64>,
@@ -117,9 +131,11 @@ impl TKF92MSASimulationResult {
     }
 }
 
-impl<Q: QMatrix, R: Rng + SeedableRng + RngCore> TKF92MSASimulator<Q, R> {
+impl<T: TKFModel + FragmentSampler, Q: QMatrix, R: Rng + SeedableRng + RngCore>
+    TKFMSASimulator<T, Q, R>
+{
     pub fn new(
-        indel_model: TKF92IndelModel,
+        indel_model: T,
         substitution_model: SubstModel<Q>,
         tree: Tree,
         rng: RandomGenerator<R>,
@@ -252,12 +268,11 @@ impl<Q: QMatrix, R: Rng + SeedableRng + RngCore> TKF92MSASimulator<Q, R> {
     }
 
     fn sample_fragment_length(&self) -> usize {
-        let prob_of_success = 1.0 - self.indel_model.r(); // ie stopping the fragment
-        let geom = Geometric::new(prob_of_success).unwrap();
-        let choice = geom.sample(&mut self.rng.borrow_mut().rng);
-        let prob = (1.0 - prob_of_success).powi((choice) as i32) * prob_of_success;
-        *self.cumulative_logl.borrow_mut() += prob.ln();
-        (choice + 1) as usize // each fragment contains at least one character
+        let (length, log_prob) = self
+            .indel_model
+            .sample_fragment_length(&mut self.rng.borrow_mut().rng);
+        *self.cumulative_logl.borrow_mut() += log_prob;
+        length
     }
 
     fn build_root_links(&self) -> Vec<TKFLink> {
@@ -517,7 +532,7 @@ mod private_tests {
     use crate::random::DefaultGenerator;
     use crate::substitution_models::{SubstModel, JC69};
     use crate::tkf_model::TKF92FixedIndelCostBuilder;
-    use crate::tkf_model::{beta, n0};
+    use crate::tkf_model::{beta, n0, TKF91IndelCostBuilder, TKF91IndelModel, TKF92IndelModel};
     use crate::tree::tree_parser::from_newick;
 
     use super::*;
@@ -603,7 +618,7 @@ mod private_tests {
     }
 
     #[test]
-    fn simulate() {
+    fn tkf92_simulate() {
         let lambda = 1.1;
         let mu = 1.2;
         let r = 0.6;
@@ -611,14 +626,14 @@ mod private_tests {
         let tkf_model = TKF92IndelModel::new(lambda, mu, r);
         let tree =
             from_newick("((A_:0.5,B_:0.5)AB:0.7,(C_:0.6,D_:0.6)CD:0.6)R_;").unwrap()[0].clone();
-        let simulator = TKF92MSASimulator::new(
+        let simulator = TKFMSASimulator::new(
             tkf_model,
             jc69,
             tree.clone(),
             DefaultGenerator::default(),
             12, // max insertion length
         );
-        let (msa, logl, fragmentation) = simulator.simulate_msa();
+        let (msa, logl, fragmentation): (Seqs, f64, Vec<usize>) = simulator.simulate_msa();
         assert_eq!(msa.len(), 7);
         for (node, seq) in msa.iter() {
             println!(
@@ -638,6 +653,46 @@ mod private_tests {
             tree,
         };
         let cost = TKF92FixedIndelCostBuilder::new(lambda, mu, r, fragmentation, phylo)
+            .build()
+            .unwrap()
+            .logl();
+        assert_relative_eq!(logl, cost, epsilon = 1e-10);
+    }
+
+    #[test]
+    fn tkf91_simulate() {
+        let jc69 = SubstModel::<JC69>::new(&[], &[]);
+        let tkf_model = TKF91IndelModel::default();
+        let lambda = tkf_model.lambda();
+        let mu = tkf_model.mu();
+        let tree =
+            from_newick("((A_:0.5,B_:0.5)AB:0.7,(C_:0.6,D_:0.6)CD:0.6)R_;").unwrap()[0].clone();
+        let simulator = TKFMSASimulator::new(
+            tkf_model,
+            jc69,
+            tree.clone(),
+            DefaultGenerator::default(),
+            12, // max insertion length
+        );
+        let (msa, logl, fragmentation): (Seqs, f64, Vec<usize>) = simulator.simulate_msa();
+        assert_eq!(msa.len(), 7);
+
+        // In TKF91 every residue is its own independent link (fragment length == 1), so the
+        // fragmentation must be exactly [1, 2, 3, ..., n_cols].
+        let n_cols = fragmentation.len();
+        let expected_fragmentation: Vec<usize> = (1..=n_cols).collect();
+        assert_eq!(
+            fragmentation, expected_fragmentation,
+            "TKF91 fragmentation must have every column as its own block"
+        );
+
+        // The simulation logl must equal the TKF91 indel cost for the same alignment.
+        let alignment = simulator.msa_to_alignment(&msa);
+        let phylo = PhyloInfo {
+            msa: alignment,
+            tree,
+        };
+        let cost = TKF91IndelCostBuilder::new(lambda, mu, phylo)
             .build()
             .unwrap()
             .logl();
