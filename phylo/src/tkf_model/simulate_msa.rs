@@ -7,12 +7,11 @@ use rand_distr::{Distribution, Geometric};
 
 use crate::alignment::{AncestralAlignment, Sequences};
 use crate::alphabets::AMB_CHAR;
-use crate::phylo_info::PhyloInfo;
 use crate::random::RandomGenerator;
+use crate::record_wo_desc as record;
 use crate::substitution_models::{QMatrix, SubstModel};
 use crate::tkf_model::{beta, h1, n0, TKFModel};
 use crate::tree::{NodeIdx, Tree};
-use crate::{record_wo_desc as record, Result};
 
 /// Abstracts over how a single fragment's length is sampled.
 ///
@@ -31,6 +30,8 @@ const NOTHING_CHAR: u8 = b'_';
 /// Since these sequences are built incrementally, we can't use the [`Sequences`] which hold immutable [`record`]s`.
 type Seqs = HashMap<NodeIdx, Vec<u8>>;
 
+/// uses parameters lambda mu, substitution model and FragmentSampler to simulate an MSA under the
+/// TKF model.
 pub struct TKFMSASimulator<
     T: TKFModel + FragmentSampler,
     Q: QMatrix,
@@ -151,18 +152,6 @@ where
             rng: RefCell::new(rng),
             max_insertion_length,
         }
-    }
-
-    pub(crate) fn _double_check_simulation_logl_with_cost_calculation<AA: AncestralAlignment>(
-        &self,
-        result: &TKFMSASimulationResult<AA>,
-    ) -> Result<()> {
-        let _phylo = PhyloInfo {
-            msa: result.msa.clone(),
-            tree: self.tree.clone(),
-        };
-        // TODO: wait until the tkf tree seach cost pr is merged, then i can use that here
-        Ok(())
     }
 
     fn sample_tkf_link_fate(&self, time: f64) -> LinkFate {
