@@ -1,14 +1,15 @@
 use std::cell::RefCell;
 
 use hashbrown::HashMap;
+use log::warn;
 use rand::{distr::weighted::WeightedIndex, Rng, RngCore, SeedableRng};
 
 use crate::alignment::{AlignmentSimulation, AncestralAlignment, Sequences};
 use crate::random::RandomGenerator;
-use crate::record_wo_desc as record;
 use crate::substitution_models::{QMatrix, SubstMatrix, SubstModel};
 use crate::tree::{NodeIdx, Tree};
-use crate::Result;
+use crate::{bail, record_wo_desc as record};
+use crate::{Result, MAX_BLEN};
 
 pub struct SubstitutionSimulatorBuilder<Q, R>
 where
@@ -40,32 +41,39 @@ where
     }
 
     pub fn alignment_length(mut self, length: usize) -> Self {
+        if length == 0 {
+            warn!("Setting alignment_length to 0 will produce an empty alignment");
+        }
         self.alignment_length = Some(length);
         self
     }
 
     pub fn build(self) -> Result<SubstitutionSimulator<Q, R>> {
-        let alignment_length = self
-            .alignment_length
-            .ok_or_else(|| crate::Error::Alignment("alignment_length must be set".to_string()))?;
-
-        // Precompute transition matrices P = exp(Q * branch_length) for each non-root node.
+        let alignment_length = match self.alignment_length {
+            Some(x) => x,
+            None => {
+                bail!(
+                    AlignmentSimulation,
+                    "alignment_length must be set before building the substitution simulator"
+                )
+            }
+        };
         let p_matrices: HashMap<NodeIdx, SubstMatrix> = self
             .tree
-            .postorder()
+            .preorder()
             .iter()
-            .filter_map(|idx| self.tree.parent(idx).map(|_| *idx))
+            .skip(1) // skip root
             .map(|idx| {
-                let blen = self.tree.node(&idx).blen;
+                let blen = self.tree.node(idx).blen;
                 // Reimplement p(time) without requiring the EvoModel trait here.
                 // Because otherwise passing the PIP model would be fine, but it isn't
                 let qmat = self.model.qmatrix.q().clone();
-                let p = if blen > crate::MAX_BLEN {
-                    (qmat * crate::MAX_BLEN).exp()
+                let p = if blen > MAX_BLEN {
+                    (qmat * MAX_BLEN).exp()
                 } else {
                     (qmat * blen).exp()
                 };
-                (idx, p)
+                (*idx, p)
             })
             .collect();
 
@@ -79,12 +87,13 @@ where
     }
 }
 
+#[derive(Debug)]
 pub struct SubstitutionSimulator<Q, R>
 where
     Q: QMatrix,
     R: Rng + SeedableRng + RngCore,
 {
-    model: crate::substitution_models::SubstModel<Q>,
+    model: SubstModel<Q>,
     tree: Tree,
     p_matrices: HashMap<NodeIdx, SubstMatrix>,
     rng: RefCell<RandomGenerator<R>>,
@@ -157,33 +166,18 @@ where
 #[cfg(test)]
 #[cfg_attr(coverage, coverage(off))]
 mod tests {
-    use super::*;
+    use assert_matches::assert_matches;
+
     use crate::alignment::{Alignment, MASA};
     use crate::random::DefaultGenerator;
-    use crate::substitution_models::dna_models::JC69;
-    use crate::substitution_models::SubstModel;
+    use crate::substitution_models::{dna_models::JC69, SubstModel};
     use crate::tree::tree_parser::from_newick;
+    use crate::Error;
+
+    use super::*;
 
     #[test]
-    fn test_substitution_simulator_basic() {
-        let model = SubstModel::<JC69>::new(&[], &[]);
-        let tree = from_newick("((A:0.5,B:0.5)AB:0.7,(C:0.6,D:0.6)CD:0.6)R;").unwrap()[0].clone();
-        let rng = DefaultGenerator::new(42);
-
-        let simulator = SubstitutionSimulatorBuilder::new(model, tree.clone(), rng)
-            .alignment_length(100)
-            .build()
-            .unwrap();
-
-        let alignment: MASA = simulator.simulate_ancestral_alignment();
-
-        assert_eq!(alignment.len(), 100);
-        assert_eq!(alignment.seq_count(), 4);
-        assert_eq!(alignment.ancestral_seqs().len(), 3);
-    }
-
-    #[test]
-    fn test_substitution_simulator_longer_tree() {
+    fn test_substitution_simulator() {
         let model = SubstModel::<JC69>::new(&[], &[]);
         let tree = from_newick("((A:2.0,B:2.0)AB:2.0,(C:2.0,D:2.0)CD:2.0)R;").unwrap()[0].clone();
         let rng = DefaultGenerator::new(123);
@@ -200,23 +194,10 @@ mod tests {
             alignment.seq_count() + alignment.ancestral_seqs().len(),
             tree.len()
         );
-    }
-
-    #[test]
-    fn test_substitution_simulator_three_taxa() {
-        let model = SubstModel::<JC69>::new(&[], &[]);
-        let tree = from_newick("((A:0.1,B:0.1)AB:0.1,C:0.2)R;").unwrap()[0].clone();
-        let rng = DefaultGenerator::new(999);
-
-        let simulator = SubstitutionSimulatorBuilder::new(model, tree.clone(), rng)
-            .alignment_length(200)
-            .build()
-            .unwrap();
-
-        let alignment: MASA = simulator.simulate_ancestral_alignment();
-
-        assert_eq!(alignment.len(), 200);
-        assert_eq!(alignment.seq_count(), 3);
+        // no gaps in this simulation, so all sequences should have the same length as the alignment
+        for seq in alignment.seqs() {
+            assert_eq!(seq.seq().len(), alignment.len());
+        }
     }
 
     #[test]
@@ -248,13 +229,27 @@ mod tests {
     }
 
     #[test]
+    fn test_builder_alignment_length_zero() {
+        let model = SubstModel::<JC69>::new(&[], &[]);
+        let tree = from_newick("((A:0.5,B:0.5)AB:0.7);").unwrap()[0].clone();
+        let rng = DefaultGenerator::new(42);
+
+        let masa = SubstitutionSimulatorBuilder::new(model, tree, rng)
+            .alignment_length(0)
+            .build()
+            .unwrap()
+            .simulate_ancestral_alignment::<MASA>();
+
+        assert_eq!(masa.len(), 0);
+    }
+
+    #[test]
     fn test_builder_requires_alignment_length() {
         let model = SubstModel::<JC69>::new(&[], &[]);
         let tree = from_newick("((A:0.5,B:0.5)AB:0.7);").unwrap()[0].clone();
         let rng = DefaultGenerator::new(42);
 
         let result = SubstitutionSimulatorBuilder::new(model, tree, rng).build();
-
-        assert!(result.is_err());
+        assert_matches!(result, Err(Error::AlignmentSimulation(msg)) if msg.contains("alignment_length must be set"));
     }
 }
