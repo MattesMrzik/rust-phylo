@@ -1,18 +1,20 @@
 use std::cell::RefCell;
 
+use bio::io::fasta::Record;
 use hashbrown::HashMap;
 use log::warn;
 use rand::{Rng, RngCore, SeedableRng};
 use rand_distr::{Distribution, Geometric};
 
 use crate::alignment::{AlignmentSimulation, AncestralAlignment, Sequences};
-use crate::alphabets::AMB_CHAR;
+use crate::alphabets::{AMB_CHAR, GAP};
 use crate::random::RandomGenerator;
 use crate::record_wo_desc as record;
+use crate::substitution_models::{QMatrix, SubstModel, SubstitutionSimulatorBuilder};
 use crate::tkf_model::{beta, h1, n0, TKFModel};
 use crate::tree::{NodeIdx, Tree};
 
-impl<T, R> AlignmentSimulation for TKFMSASimulator<T, R>
+impl<T, R> AlignmentSimulation for TKFIndelMSASimulator<T, R>
 where
     T: TKFModel + FragmentSampler,
     R: Rng + SeedableRng + RngCore,
@@ -26,6 +28,117 @@ where
             logl: _,
         } = result;
         msa
+    }
+}
+
+/// Simulates a full TKF process: first indels (TKF) then substitutions.
+///
+/// The simulator runs the indel simulator to obtain an MSA with gaps, then
+/// simulates substitutions along the same tree for the number of columns
+/// produced by the indel simulation and finally uses the indel MSA as a mask
+/// to replace characters with gaps where the indel process produced deletions.
+pub struct TKFMSASimulator<Q, T, R>
+where
+    Q: QMatrix,
+    T: TKFModel + FragmentSampler,
+    R: Rng + SeedableRng + RngCore,
+{
+    indel_sim: TKFIndelMSASimulator<T, R>,
+    subst_model: SubstModel<Q>,
+}
+
+impl<Q, T, R> TKFMSASimulator<Q, T, R>
+where
+    Q: QMatrix,
+    T: TKFModel + FragmentSampler,
+    R: Rng + SeedableRng + RngCore,
+{
+    pub fn new(
+        indel_model: T,
+        subst_model: SubstModel<Q>,
+        tree: Tree,
+        rng: RandomGenerator<R>,
+        max_insertion_length: usize,
+    ) -> Self {
+        let indel_sim = TKFIndelMSASimulator::new(indel_model, tree, rng, max_insertion_length);
+        Self {
+            indel_sim,
+            subst_model,
+        }
+    }
+
+    /// Simulate an ancestral alignment with indels and substitutions.
+    ///
+    /// The returned `TKFMSASimulationResult` contains the final alignment where
+    /// positions deleted by the indel process are gaps and surviving positions
+    /// have characters sampled by the substitution model.
+    pub fn simulate_msa<AA: AncestralAlignment>(&self) -> TKFMSASimulationResult<AA> {
+        // First simulate indels
+        let indel_result: TKFMSASimulationResult<AA> = self.indel_sim.simulate_msa();
+        let indel_msa = indel_result.msa();
+
+        // Alignment length for substitution simulation
+        let aln_len = indel_msa.len();
+
+        // Build substitution simulator using a clone of the indel RNG at its current state
+        let rng_clone = self.indel_sim.rng.borrow().clone();
+        let subst_builder = SubstitutionSimulatorBuilder::new(
+            self.subst_model.clone(),
+            self.indel_sim.tree.clone(),
+            rng_clone,
+        )
+        .alignment_length(aln_len)
+        .build()
+        .unwrap();
+
+        let subst_msa: AA = subst_builder.simulate_ancestral_alignment();
+
+        // Now mask the substitution msa with deletions from the indel msa
+        // Construct a combined sequences vector (including ancestral records)
+        let mut combined_records: Vec<Record> = Vec::new();
+        for node in self.indel_sim.tree.preorder() {
+            let id = self.indel_sim.tree.node(node).id.clone();
+
+            // get mask seq (from indel msa) and subst seq (from substitution msa)
+            let mask_mapping = indel_msa.ancestral_map(node);
+            let subst_seq = match node {
+                NodeIdx::Leaf(leaf_id) => subst_msa.seqs().record_by_id(&id).seq(),
+                NodeIdx::Internal(internal_id) => {
+                    subst_msa.ancestral_seqs().record_by_id(&id).seq()
+                }
+            };
+
+            debug_assert!(
+                mask_mapping.len() == subst_seq.len(),
+                "Mask and substitution sequences must be the same length"
+            );
+            // apply mask: if mask is a gap, put a gap; otherwise keep the subst charactera
+            let final_seq: Vec<u8> = mask_mapping
+                .iter()
+                .zip(subst_seq.iter())
+                .map(
+                    |(mask, subst_char)| {
+                        if mask.is_some() {
+                            *subst_char
+                        } else {
+                            GAP
+                        }
+                    },
+                )
+                .collect();
+
+            combined_records.push(record!(&id, &final_seq));
+        }
+
+        let seqs = Sequences::new(combined_records);
+        let final_msa: AA = AA::from_aligned_with_ancestral(seqs, &self.indel_sim.tree).unwrap();
+
+        TKFMSASimulationResult {
+            msa: final_msa,
+            msa_with_non_emitting_cols: indel_result.msa_with_non_emitting_cols().clone(),
+            fragmentation: indel_result.fragmentation().clone(),
+            logl: indel_result.logl(),
+        }
     }
 }
 
@@ -48,7 +161,7 @@ type Seqs = HashMap<NodeIdx, Vec<u8>>;
 
 /// uses parameters lambda mu, substitution model and FragmentSampler to simulate an MSA under the
 /// TKF model.
-pub struct TKFMSASimulator<T: TKFModel + FragmentSampler, R: Rng + SeedableRng + RngCore> {
+pub struct TKFIndelMSASimulator<T: TKFModel + FragmentSampler, R: Rng + SeedableRng + RngCore> {
     indel_model: T,
     tree: Tree,
     cumulative_logl: RefCell<f64>,
@@ -142,7 +255,7 @@ impl<AA: AncestralAlignment> TKFMSASimulationResult<AA> {
     }
 }
 
-impl<T, R> TKFMSASimulator<T, R>
+impl<T, R> TKFIndelMSASimulator<T, R>
 where
     T: TKFModel + FragmentSampler,
     R: Rng + SeedableRng + RngCore,
@@ -671,7 +784,7 @@ mod private_tests {
         let tkf_model = TKF92IndelModel::new(lambda, mu, r);
         let tree =
             from_newick("((A_:0.5,B_:0.5)AB:0.7,(C_:0.6,D_:0.6)CD:0.6)R_;").unwrap()[0].clone();
-        let simulator = TKFMSASimulator::new(
+        let simulator = TKFIndelMSASimulator::new(
             tkf_model,
             tree.clone(),
             DefaultGenerator::default(),
@@ -704,12 +817,13 @@ mod private_tests {
         let mu = tkf_model.mu();
         let tree =
             from_newick("((A_:0.5,B_:0.5)AB:0.7,(C_:0.6,D_:0.6)CD:0.6)R_;").unwrap()[0].clone();
-        let simulator = TKFMSASimulator::new(
+        let simulator = TKFIndelMSASimulator::new(
             tkf_model,
             tree.clone(),
             DefaultGenerator::default(),
             12, // max insertion length
         );
+        // TODO use the trait fn call here instead
         let result: TKFMSASimulationResult<MASA> = simulator.simulate_msa();
         let alignment = result.msa();
         assert_eq!(alignment.seq_count() + alignment.ancestral_seqs().len(), 7);
@@ -736,3 +850,5 @@ mod private_tests {
         assert_relative_eq!(result.logl(), cost, epsilon = 1e-10);
     }
 }
+// TODO write a test that checks that msa from indel porocess has non emiting leaf cols and the
+// other msa in the result has them removed
