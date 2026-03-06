@@ -165,21 +165,21 @@ where
 
 #[cfg(test)]
 #[cfg_attr(coverage, coverage(off))]
-mod tests {
+mod private_tests {
     use assert_matches::assert_matches;
 
     use crate::alignment::{Alignment, MASA};
     use crate::random::DefaultGenerator;
-    use crate::substitution_models::{dna_models::JC69, SubstModel};
-    use crate::tree::tree_parser::from_newick;
-    use crate::Error;
+    use crate::substitution_models::{dna_models::GTR, SubstModel};
+    use crate::{tree, Error};
 
     use super::*;
 
     #[test]
     fn test_substitution_simulator() {
-        let model = SubstModel::<JC69>::new(&[], &[]);
-        let tree = from_newick("((A:2.0,B:2.0)AB:2.0,(C:2.0,D:2.0)CD:2.0)R;").unwrap()[0].clone();
+        // GTR with chosen freqs and rate parameters
+        let model = SubstModel::<GTR>::new(&[0.3, 0.2, 0.2, 0.3], &[0.8, 1.2, 0.9, 1.1, 0.7]);
+        let tree = tree!("((A:2.0,B:2.0)AB:2.0,(C:2.0,D:2.0)CD:2.0)R;");
         let rng = DefaultGenerator::new(123);
 
         let simulator = SubstitutionSimulatorBuilder::new(model, tree.clone(), rng)
@@ -202,8 +202,9 @@ mod tests {
 
     #[test]
     fn test_reproducibility() {
-        let model = SubstModel::<JC69>::new(&[], &[]);
-        let tree = from_newick("((A:0.5,B:0.5)AB:0.7,(C:0.6,D:0.6)CD:0.6)R;").unwrap()[0].clone();
+        // GTR with same parameters to ensure reproducibility across RNGs
+        let model = SubstModel::<GTR>::new(&[0.3, 0.2, 0.2, 0.3], &[0.8, 1.2, 0.9, 1.1, 0.7]);
+        let tree = tree!("((A:0.5,B:0.5)AB:0.7,(C:0.6,D:0.6)CD:0.6)R;");
 
         let rng1 = DefaultGenerator::new(42);
         let rng2 = DefaultGenerator::new(42);
@@ -230,8 +231,8 @@ mod tests {
 
     #[test]
     fn test_builder_alignment_length_zero() {
-        let model = SubstModel::<JC69>::new(&[], &[]);
-        let tree = from_newick("((A:0.5,B:0.5)AB:0.7);").unwrap()[0].clone();
+        let model = SubstModel::<GTR>::new(&[0.3, 0.2, 0.2, 0.3], &[0.8, 1.2, 0.9, 1.1, 0.7]);
+        let tree = tree!("((A:0.5,B:0.5)AB:0.7);");
         let rng = DefaultGenerator::new(42);
 
         let masa = SubstitutionSimulatorBuilder::new(model, tree, rng)
@@ -245,8 +246,8 @@ mod tests {
 
     #[test]
     fn test_builder_requires_alignment_length() {
-        let model = SubstModel::<JC69>::new(&[], &[]);
-        let tree = from_newick("((A:0.5,B:0.5)AB:0.7);").unwrap()[0].clone();
+        let model = SubstModel::<GTR>::new(&[0.3, 0.2, 0.2, 0.3], &[0.8, 1.2, 0.9, 1.1, 0.7]);
+        let tree = tree!("((A:0.5,B:0.5)AB:0.7);");
         let rng = DefaultGenerator::new(42);
 
         let result = SubstitutionSimulatorBuilder::new(model, tree, rng).build();
