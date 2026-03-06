@@ -4,22 +4,25 @@ use hashbrown::HashMap;
 use rand::{distr::weighted::WeightedIndex, Rng, RngCore, SeedableRng};
 
 use crate::alignment::{AlignmentSimulation, AncestralAlignment, Sequences};
-use crate::evolutionary_models::EvoModel;
 use crate::random::RandomGenerator;
 use crate::record_wo_desc as record;
-use crate::substitution_models::SubstMatrix;
+use crate::substitution_models::{QMatrix, SubstMatrix, SubstModel};
 use crate::tree::{NodeIdx, Tree};
 use crate::Result;
 
-pub struct SubstitutionSimulatorBuilder<M: EvoModel, R: Rng + SeedableRng + RngCore> {
-    model: M,
+pub struct SubstitutionSimulatorBuilder<Q: QMatrix, R: Rng + SeedableRng + RngCore> {
+    model: SubstModel<Q>,
     tree: Tree,
     rng: RandomGenerator<R>,
     alignment_length: Option<usize>,
 }
 
-impl<M: EvoModel, R: Rng + SeedableRng + RngCore> SubstitutionSimulatorBuilder<M, R> {
-    pub fn new(model: M, tree: Tree, rng: RandomGenerator<R>) -> Self {
+impl<Q: QMatrix, R: Rng + SeedableRng + RngCore> SubstitutionSimulatorBuilder<Q, R> {
+    pub fn new(
+        model: crate::substitution_models::SubstModel<Q>,
+        tree: Tree,
+        rng: RandomGenerator<R>,
+    ) -> Self {
         Self {
             model,
             tree,
@@ -33,11 +36,12 @@ impl<M: EvoModel, R: Rng + SeedableRng + RngCore> SubstitutionSimulatorBuilder<M
         self
     }
 
-    pub fn build(self) -> Result<SubstitutionSimulator<M, R>> {
+    pub fn build(self) -> Result<SubstitutionSimulator<Q, R>> {
         let alignment_length = self
             .alignment_length
             .ok_or_else(|| crate::Error::Alignment("alignment_length must be set".to_string()))?;
 
+        // Precompute transition matrices P = exp(Q * branch_length) for each non-root node.
         let p_matrices: HashMap<NodeIdx, SubstMatrix> = self
             .tree
             .postorder()
@@ -45,7 +49,15 @@ impl<M: EvoModel, R: Rng + SeedableRng + RngCore> SubstitutionSimulatorBuilder<M
             .filter_map(|idx| self.tree.parent(idx).map(|_| *idx))
             .map(|idx| {
                 let blen = self.tree.node(&idx).blen;
-                (idx, self.model.p(blen))
+                // Reimplement p(time) without requiring the EvoModel trait here.
+                // Because otherwise passing the PIP model would be fine, but it isn't
+                let qmat = self.model.qmatrix.q().clone();
+                let p = if blen > crate::MAX_BLEN {
+                    (qmat * crate::MAX_BLEN).exp()
+                } else {
+                    (qmat * blen).exp()
+                };
+                (idx, p)
             })
             .collect();
 
@@ -59,17 +71,18 @@ impl<M: EvoModel, R: Rng + SeedableRng + RngCore> SubstitutionSimulatorBuilder<M
     }
 }
 
-pub struct SubstitutionSimulator<M: EvoModel, R: Rng + SeedableRng + RngCore> {
-    model: M,
+pub struct SubstitutionSimulator<Q: QMatrix, R: Rng + SeedableRng + RngCore> {
+    model: crate::substitution_models::SubstModel<Q>,
     tree: Tree,
     p_matrices: HashMap<NodeIdx, SubstMatrix>,
     rng: RefCell<RandomGenerator<R>>,
     alignment_length: usize,
 }
 
-impl<M: EvoModel, R: Rng + SeedableRng + RngCore> SubstitutionSimulator<M, R> {
+impl<Q: QMatrix, R: Rng + SeedableRng + RngCore> SubstitutionSimulator<Q, R> {
     fn sample_from_freqs(&self) -> usize {
-        let dist = WeightedIndex::new(self.model.freqs().as_slice()).unwrap();
+        let freqs = self.model.qmatrix.freqs();
+        let dist = WeightedIndex::new(freqs.as_slice()).unwrap();
         self.rng.borrow_mut().sample(&dist)
     }
 
@@ -81,12 +94,12 @@ impl<M: EvoModel, R: Rng + SeedableRng + RngCore> SubstitutionSimulator<M, R> {
     }
 
     fn state_to_char(&self, state: usize) -> u8 {
-        M::alphabet().symbols()[state]
+        Q::alphabet().symbols()[state]
     }
 }
 
-impl<M: EvoModel, R: Rng + SeedableRng + RngCore> AlignmentSimulation
-    for SubstitutionSimulator<M, R>
+impl<Q: QMatrix, R: Rng + SeedableRng + RngCore> AlignmentSimulation
+    for SubstitutionSimulator<Q, R>
 {
     fn simulate_ancestral_alignment<AA: AncestralAlignment>(&self) -> AA {
         let mut sequences: HashMap<NodeIdx, Vec<usize>> = HashMap::with_capacity(self.tree.len());
