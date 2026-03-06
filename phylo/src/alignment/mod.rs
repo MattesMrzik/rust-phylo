@@ -616,6 +616,10 @@ impl MASA {
     }
 }
 
+pub trait AlignmentSimulation {
+    fn simulate_ancestral_alignment<AA: AncestralAlignment>(&self) -> AA;
+}
+
 #[cfg(test)]
 #[cfg_attr(coverage, coverage(off))]
 mod tests;

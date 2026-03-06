@@ -5,13 +5,29 @@ use log::warn;
 use rand::{Rng, RngCore, SeedableRng};
 use rand_distr::{Distribution, Geometric};
 
-use crate::alignment::{AncestralAlignment, Sequences};
+use crate::alignment::{AlignmentSimulation, AncestralAlignment, Sequences};
 use crate::alphabets::AMB_CHAR;
 use crate::random::RandomGenerator;
 use crate::record_wo_desc as record;
-use crate::substitution_models::{QMatrix, SubstModel};
 use crate::tkf_model::{beta, h1, n0, TKFModel};
 use crate::tree::{NodeIdx, Tree};
+
+impl<T, R> AlignmentSimulation for TKFMSASimulator<T, R>
+where
+    T: TKFModel + FragmentSampler,
+    R: Rng + SeedableRng + RngCore,
+{
+    fn simulate_ancestral_alignment<AA: AncestralAlignment>(&self) -> AA {
+        let result = self.simulate_msa();
+        let TKFMSASimulationResult {
+            msa,
+            msa_with_non_emitting_cols: _,
+            fragmentation: _,
+            logl: _,
+        } = result;
+        msa
+    }
+}
 
 /// Abstracts over how a single fragment's length is sampled.
 ///
@@ -32,13 +48,8 @@ type Seqs = HashMap<NodeIdx, Vec<u8>>;
 
 /// uses parameters lambda mu, substitution model and FragmentSampler to simulate an MSA under the
 /// TKF model.
-pub struct TKFMSASimulator<
-    T: TKFModel + FragmentSampler,
-    Q: QMatrix,
-    R: Rng + SeedableRng + RngCore,
-> {
+pub struct TKFMSASimulator<T: TKFModel + FragmentSampler, R: Rng + SeedableRng + RngCore> {
     indel_model: T,
-    _subst_model: SubstModel<Q>,
     tree: Tree,
     cumulative_logl: RefCell<f64>,
     rng: RefCell<RandomGenerator<R>>,
@@ -131,22 +142,19 @@ impl<AA: AncestralAlignment> TKFMSASimulationResult<AA> {
     }
 }
 
-impl<T, Q, R> TKFMSASimulator<T, Q, R>
+impl<T, R> TKFMSASimulator<T, R>
 where
     T: TKFModel + FragmentSampler,
-    Q: QMatrix,
     R: Rng + SeedableRng + RngCore,
 {
     pub fn new(
         indel_model: T,
-        substitution_model: SubstModel<Q>,
         tree: Tree,
         rng: RandomGenerator<R>,
         max_insertion_length: usize,
     ) -> Self {
         Self {
             indel_model,
-            _subst_model: substitution_model,
             tree,
             cumulative_logl: RefCell::new(0.0),
             rng: RefCell::new(rng),
@@ -569,7 +577,6 @@ mod private_tests {
     use crate::alignment::{Alignment, AncestralAlignment, MASA};
     use crate::phylo_info::PhyloInfo;
     use crate::random::DefaultGenerator;
-    use crate::substitution_models::{SubstModel, JC69};
     use crate::tkf_model::TKF92FixedIndelCostBuilder;
     use crate::tkf_model::{beta, n0, TKF91IndelCostBuilder, TKF91IndelModel, TKF92IndelModel};
     use crate::tree::tree_parser::from_newick;
@@ -661,13 +668,11 @@ mod private_tests {
         let lambda = 1.1;
         let mu = 1.2;
         let r = 0.6;
-        let jc69 = SubstModel::<JC69>::new(&[], &[]);
         let tkf_model = TKF92IndelModel::new(lambda, mu, r);
         let tree =
             from_newick("((A_:0.5,B_:0.5)AB:0.7,(C_:0.6,D_:0.6)CD:0.6)R_;").unwrap()[0].clone();
         let simulator = TKFMSASimulator::new(
             tkf_model,
-            jc69,
             tree.clone(),
             DefaultGenerator::default(),
             12, // max insertion length
@@ -694,7 +699,6 @@ mod private_tests {
 
     #[test]
     fn tkf91_simulate() {
-        let jc69 = SubstModel::<JC69>::new(&[], &[]);
         let tkf_model = TKF91IndelModel::default();
         let lambda = tkf_model.lambda();
         let mu = tkf_model.mu();
@@ -702,7 +706,6 @@ mod private_tests {
             from_newick("((A_:0.5,B_:0.5)AB:0.7,(C_:0.6,D_:0.6)CD:0.6)R_;").unwrap()[0].clone();
         let simulator = TKFMSASimulator::new(
             tkf_model,
-            jc69,
             tree.clone(),
             DefaultGenerator::default(),
             12, // max insertion length
