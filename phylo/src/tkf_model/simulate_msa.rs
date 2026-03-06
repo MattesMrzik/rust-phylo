@@ -51,7 +51,7 @@ impl<Q, T, R> TKFMSASimulator<Q, T, R>
 where
     Q: QMatrix,
     T: TKFModel + FragmentSampler,
-    R: Rng + SeedableRng + RngCore,
+    R: Rng + SeedableRng + RngCore + Clone,
 {
     pub fn new(
         indel_model: T,
@@ -102,10 +102,8 @@ where
             // get mask seq (from indel msa) and subst seq (from substitution msa)
             let mask_mapping = indel_msa.ancestral_map(node);
             let subst_seq = match node {
-                NodeIdx::Leaf(leaf_id) => subst_msa.seqs().record_by_id(&id).seq(),
-                NodeIdx::Internal(internal_id) => {
-                    subst_msa.ancestral_seqs().record_by_id(&id).seq()
-                }
+                NodeIdx::Leaf(_) => subst_msa.seqs().record_by_id(&id).seq(),
+                NodeIdx::Internal(_) => subst_msa.ancestral_seqs().record_by_id(&id).seq(),
             };
 
             debug_assert!(
