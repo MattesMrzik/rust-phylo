@@ -10,14 +10,22 @@ use crate::substitution_models::{QMatrix, SubstMatrix, SubstModel};
 use crate::tree::{NodeIdx, Tree};
 use crate::Result;
 
-pub struct SubstitutionSimulatorBuilder<Q: QMatrix, R: Rng + SeedableRng + RngCore> {
+pub struct SubstitutionSimulatorBuilder<Q, R>
+where
+    Q: QMatrix,
+    R: Rng + SeedableRng + RngCore,
+{
     model: SubstModel<Q>,
     tree: Tree,
     rng: RandomGenerator<R>,
     alignment_length: Option<usize>,
 }
 
-impl<Q: QMatrix, R: Rng + SeedableRng + RngCore> SubstitutionSimulatorBuilder<Q, R> {
+impl<Q, R> SubstitutionSimulatorBuilder<Q, R>
+where
+    Q: QMatrix,
+    R: Rng + SeedableRng + RngCore,
+{
     pub fn new(
         model: crate::substitution_models::SubstModel<Q>,
         tree: Tree,
@@ -71,7 +79,11 @@ impl<Q: QMatrix, R: Rng + SeedableRng + RngCore> SubstitutionSimulatorBuilder<Q,
     }
 }
 
-pub struct SubstitutionSimulator<Q: QMatrix, R: Rng + SeedableRng + RngCore> {
+pub struct SubstitutionSimulator<Q, R>
+where
+    Q: QMatrix,
+    R: Rng + SeedableRng + RngCore,
+{
     model: crate::substitution_models::SubstModel<Q>,
     tree: Tree,
     p_matrices: HashMap<NodeIdx, SubstMatrix>,
@@ -79,7 +91,11 @@ pub struct SubstitutionSimulator<Q: QMatrix, R: Rng + SeedableRng + RngCore> {
     alignment_length: usize,
 }
 
-impl<Q: QMatrix, R: Rng + SeedableRng + RngCore> SubstitutionSimulator<Q, R> {
+impl<Q, R> SubstitutionSimulator<Q, R>
+where
+    Q: QMatrix,
+    R: Rng + SeedableRng + RngCore,
+{
     fn sample_from_freqs(&self) -> usize {
         let freqs = self.model.qmatrix.freqs();
         let dist = WeightedIndex::new(freqs.as_slice()).unwrap();
@@ -98,8 +114,10 @@ impl<Q: QMatrix, R: Rng + SeedableRng + RngCore> SubstitutionSimulator<Q, R> {
     }
 }
 
-impl<Q: QMatrix, R: Rng + SeedableRng + RngCore> AlignmentSimulation
-    for SubstitutionSimulator<Q, R>
+impl<Q, R> AlignmentSimulation for SubstitutionSimulator<Q, R>
+where
+    Q: QMatrix,
+    R: Rng + SeedableRng + RngCore,
 {
     fn simulate_ancestral_alignment<AA: AncestralAlignment>(&self) -> AA {
         let mut sequences: HashMap<NodeIdx, Vec<usize>> = HashMap::with_capacity(self.tree.len());
