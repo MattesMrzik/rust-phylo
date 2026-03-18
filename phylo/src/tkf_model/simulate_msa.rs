@@ -23,7 +23,6 @@ where
         let result = self.simulate_msa();
         let TKFMSASimulationResult {
             msa,
-            msa_with_non_emitting_cols: _,
             fragmentation: _,
             logl: _,
         } = result;
@@ -33,7 +32,7 @@ where
 
 /// Simulates a full TKF process: first indels (TKF) then substitutions.
 ///
-/// The simulator runs the indel simulator to obtain an MSA with gaps, then
+/// The simulator runs the [indel simulator](TKFIndelMSASimulator) to obtain an MSA with gaps, then
 /// simulates substitutions along the same tree for the number of columns
 /// produced by the indel simulation and finally uses the indel MSA as a mask
 /// to replace characters with gaps where the indel process produced deletions.
@@ -133,7 +132,6 @@ where
 
         TKFMSASimulationResult {
             msa: final_msa,
-            msa_with_non_emitting_cols: indel_result.msa_with_non_emitting_cols().clone(),
             fragmentation: indel_result.fragmentation().clone(),
             logl: indel_result.logl(),
         }
@@ -151,14 +149,11 @@ pub trait FragmentSampler {
     fn sample_fragment_length<R: Rng>(&self, rng: &mut R) -> (usize, f64);
 }
 
-const DELETION_CHAR: u8 = b'-';
-const NOTHING_CHAR: u8 = b'_';
-
 /// Since these sequences are built incrementally, we can't use the [`Sequences`] which hold immutable [`record`]s`.
 type Seqs = HashMap<NodeIdx, Vec<u8>>;
 
-/// uses parameters lambda mu, substitution model and FragmentSampler to simulate an MSA under the
-/// TKF model.
+/// Simulates the indel process under a [TKFModel](crate::tkf_model::TKFModel) to produce an MSA
+/// containing only [`GAP`]s and [`AMB_CHAR`]s, representing the indel history.
 pub struct TKFIndelMSASimulator<T: TKFModel + FragmentSampler, R: Rng + SeedableRng + RngCore> {
     indel_model: T,
     tree: Tree,
@@ -230,7 +225,6 @@ enum LinkFate {
 
 pub struct TKFMSASimulationResult<AA: AncestralAlignment> {
     msa: AA,
-    msa_with_non_emitting_cols: AA,
     fragmentation: Vec<usize>,
     logl: f64,
 }
@@ -238,10 +232,6 @@ pub struct TKFMSASimulationResult<AA: AncestralAlignment> {
 impl<AA: AncestralAlignment> TKFMSASimulationResult<AA> {
     pub fn msa(&self) -> &AA {
         &self.msa
-    }
-
-    pub fn msa_with_non_emitting_cols(&self) -> &AA {
-        &self.msa_with_non_emitting_cols
     }
 
     pub fn fragmentation(&self) -> &Vec<usize> {
@@ -469,7 +459,7 @@ where
         }
         msa.get_mut(subtree_node)
             .unwrap()
-            .extend_from_slice(&vec![NOTHING_CHAR; length]);
+            .extend_from_slice(&vec![GAP; length]);
         for child_node in self.tree.children(subtree_node) {
             self.insertion_gaps_subtree(length, msa, child_node, insertion_node);
         }
@@ -480,10 +470,8 @@ where
         let links = self.build_msa_links();
         let (raw_msa, fragmentation) = self.links_to_msa(&links);
         let msa: AA = self.msa_to_alignment(&raw_msa);
-        let msa_with_non_emitting_cols: AA = self.msa_to_alignment_with_non_emitting_cols(&raw_msa);
         TKFMSASimulationResult {
             msa,
-            msa_with_non_emitting_cols,
             fragmentation,
             logl: *self.cumulative_logl.borrow(),
         }
@@ -502,32 +490,6 @@ where
     }
 
     fn msa_to_alignment<AA: AncestralAlignment>(&self, msa: &Seqs) -> AA {
-        let records = msa
-            .iter()
-            .map(|(node, seq)| {
-                record!(
-                    &self.tree.node(node).id,
-                    &seq.iter()
-                        .map(|x| {
-                            if *x == NOTHING_CHAR {
-                                &DELETION_CHAR
-                            } else {
-                                x
-                            }
-                        })
-                        .cloned()
-                        .collect::<Vec<u8>>()
-                )
-            })
-            .collect();
-
-        let seqs = Sequences::new(records);
-        AA::from_aligned_with_ancestral(seqs, &self.tree).unwrap()
-    }
-
-    /// is the same as `msa_to_alignment` but keeps the NOTHING_CHAR instead of converting them to
-    /// normal gaps ie DELETION_CHAR
-    fn msa_to_alignment_with_non_emitting_cols<AA: AncestralAlignment>(&self, msa: &Seqs) -> AA {
         let records = msa
             .iter()
             .map(|(node, seq)| record!(&self.tree.node(node).id, seq))
@@ -634,7 +596,7 @@ where
                 for descendant_node in self.tree.preorder_subroot(&child_node) {
                     msa.get_mut(&descendant_node)
                         .unwrap()
-                        .extend_from_slice(&vec![DELETION_CHAR; link.length]);
+                        .extend_from_slice(&vec![GAP; link.length]);
                 }
             }
             LinkFate::NonHomolog(_) => {
@@ -645,7 +607,7 @@ where
                 for descendant_node in self.tree.preorder_subroot(&child_node) {
                     msa.get_mut(&descendant_node)
                         .unwrap()
-                        .extend_from_slice(&vec![DELETION_CHAR; link.length]);
+                        .extend_from_slice(&vec![GAP; link.length]);
                 }
             }
         }
@@ -688,9 +650,11 @@ mod private_tests {
     use crate::alignment::{Alignment, AncestralAlignment, MASA};
     use crate::phylo_info::PhyloInfo;
     use crate::random::DefaultGenerator;
-    use crate::tkf_model::TKF92FixedIndelCostBuilder;
-    use crate::tkf_model::{beta, n0, TKF91IndelCostBuilder, TKF91IndelModel, TKF92IndelModel};
-    use crate::tree::tree_parser::from_newick;
+    use crate::tkf_model::{
+        beta, n0, TKF91IndelCostBuilder, TKF91IndelModel, TKF92FixedIndelCostBuilder,
+        TKF92IndelModel,
+    };
+    use crate::tree;
 
     use super::*;
 
@@ -780,8 +744,7 @@ mod private_tests {
         let mu = 1.2;
         let r = 0.6;
         let tkf_model = TKF92IndelModel::new(lambda, mu, r);
-        let tree =
-            from_newick("((A_:0.5,B_:0.5)AB:0.7,(C_:0.6,D_:0.6)CD:0.6)R_;").unwrap()[0].clone();
+        let tree = tree!("((A:0.5,B:0.5)AB:0.7,(C:0.6,D:0.6)CD:0.6)R;");
         let simulator = TKFIndelMSASimulator::new(
             tkf_model,
             tree.clone(),
@@ -813,15 +776,13 @@ mod private_tests {
         let tkf_model = TKF91IndelModel::default();
         let lambda = tkf_model.lambda();
         let mu = tkf_model.mu();
-        let tree =
-            from_newick("((A_:0.5,B_:0.5)AB:0.7,(C_:0.6,D_:0.6)CD:0.6)R_;").unwrap()[0].clone();
+        let tree = tree!("((A:0.5,B:0.5)AB:0.7,(C:0.6,D:0.6)CD:0.6)R;");
         let simulator = TKFIndelMSASimulator::new(
             tkf_model,
             tree.clone(),
             DefaultGenerator::default(),
             12, // max insertion length
         );
-        // TODO use the trait fn call here instead
         let result: TKFMSASimulationResult<MASA> = simulator.simulate_msa();
         let alignment = result.msa();
         assert_eq!(alignment.seq_count() + alignment.ancestral_seqs().len(), 7);
@@ -848,5 +809,3 @@ mod private_tests {
         assert_relative_eq!(result.logl(), cost, epsilon = 1e-10);
     }
 }
-// TODO write a test that checks that msa from indel porocess has non emiting leaf cols and the
-// other msa in the result has them removed

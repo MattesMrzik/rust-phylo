@@ -344,8 +344,7 @@ pub struct MASA {
     ancestral_seqs: Sequences,
     leaf_maps: SeqMaps,
     ancestral_maps: SeqMaps,
-    // TODO: this needs to be implemented
-    //       see issue #150 https://github.com/acg-team/rust-phylo/issues/150
+    // TODO: this needs to be implemented, see issue #150 https://github.com/acg-team/rust-phylo/issues/150
     internal_alignments: InternalAlignments,
     idx_to_id: Vec<String>,
 }
