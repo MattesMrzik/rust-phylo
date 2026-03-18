@@ -3,13 +3,13 @@ use std::fmt::{Debug, Display};
 use hashbrown::HashMap;
 use itertools::Itertools;
 
-use crate::alphabets::{Alphabet, AMB_CHAR};
+use crate::alphabets::{Alphabet, AMB_CHAR, GAP};
 use crate::asr::AncestralSequenceReconstruction;
 use crate::parsimony_presence_absence::ParsimonyPresenceAbsence;
 use crate::phylo_info::{
     set_missing_tree_node_ids, validate_ids_with_ancestors, validate_taxa_ids,
 };
-use crate::tree::{NodeIdx, NodeIdx::Internal as Int, NodeIdx::Leaf, Tree};
+use crate::tree::{NodeIdx, NodeIdx::Internal, NodeIdx::Leaf, Tree};
 use crate::{align, aligned_seq, bail, record, Result};
 
 pub mod sequences;
@@ -133,6 +133,8 @@ pub trait AncestralAlignment: Alignment {
     /// Constructs an ancestral alignment instance from aligned sequences and a phylogenetic tree. Is called
     /// by the default implementation of [`Self::from_aligned_with_ancestral`].
     fn from_aligned_with_ancestral_unchecked(all_seqs: Sequences, tree: &Tree) -> Self;
+
+    fn remove_extinct_columns(&mut self);
 }
 
 #[derive(Debug, Clone)]
@@ -305,7 +307,7 @@ impl Alignment for MSA {
         let mut idx_to_id = vec![String::new(); tree.len()];
         for node_idx in tree.postorder() {
             match node_idx {
-                Int(_) => {
+                Internal(_) => {
                     let childs = tree.children(node_idx);
                     let map_x = stack[&childs[0]].clone();
                     let map_y = stack[&childs[1]].clone();
@@ -359,7 +361,7 @@ impl Display for MASA {
         for (node_idx, seq_map) in both_maps {
             let id = &self.idx_to_id[usize::from(node_idx)];
             let record = match node_idx {
-                Int(_) => self.ancestral_seqs.record_by_id(id),
+                Internal(_) => self.ancestral_seqs.record_by_id(id),
                 Leaf(_) => self.leaf_seqs.record_by_id(id),
             };
             let aligned_seq = aligned_seq!(seq_map, record.seq());
@@ -497,7 +499,7 @@ impl AncestralAlignment for MASA {
             Ok(())
         } else {
             match node_idx {
-                Int(_) => bail!(
+                Internal(_) => bail!(
                     AncestralAlignment,
                     "{node_idx} is not a valid internal node in the tree"
                 ),
@@ -541,7 +543,7 @@ impl AncestralAlignment for MASA {
             let record = all_seqs.record_by_id(tree.node_id(node_idx));
             let mapping = align!(record.seq());
             match node_idx {
-                Int(_) => {
+                Internal(_) => {
                     ancestral_maps.insert(*node_idx, mapping);
                     ancestral_records.push(record.clone());
                 }
@@ -575,6 +577,51 @@ impl AncestralAlignment for MASA {
             ancestral_maps,
             idx_to_id,
             internal_alignments: HashMap::<NodeIdx, PairwiseAlignment>::new(),
+        }
+    }
+
+    fn remove_extinct_columns(&mut self) {
+        // determine columns for which all leave mappings are None
+        let mut keep_cols = vec![false; self.len()];
+        for map in self.leaf_maps().values() {
+            for (col_idx, site) in map.iter().enumerate() {
+                if site.is_some() {
+                    keep_cols[col_idx] = true;
+                }
+            }
+        }
+
+        if keep_cols.iter().all(|b| *b) {
+            return;
+        }
+        for (node_idx, map) in self
+            .leaf_maps
+            .iter_mut()
+            .chain(self.ancestral_maps.iter_mut())
+        {
+            let node_id = &self.idx_to_id[usize::from(*node_idx)];
+            let aligned_seq = match node_idx {
+                Internal(_) => aligned_seq!(map, self.ancestral_seqs.record_by_id(node_id).seq()),
+                Leaf(_) => aligned_seq!(map, self.leaf_seqs.record_by_id(node_id).seq()),
+            };
+            let new_map = align!(aligned_seq);
+            let new_seq = aligned_seq
+                .iter()
+                .filter(|c| **c != GAP)
+                .cloned()
+                .collect::<Vec<u8>>();
+            *map = new_map;
+            let desc = match node_idx {
+                Internal(_) => self.ancestral_seqs.record_by_id(node_id).desc(),
+                Leaf(_) => self.leaf_seqs.record_by_id(node_id).desc(),
+            };
+            let new_record = record!(node_id, desc, &new_seq);
+            match node_idx {
+                Internal(_) => self.ancestral_seqs.update_record(node_id, new_record),
+                Leaf(_) => self.leaf_seqs.update_record(node_id, new_record),
+            }
+            .expect("updating ancestral record failed. Please report this at ");
+            // TODO add the url
         }
     }
 }
@@ -612,6 +659,8 @@ impl MASA {
         self.ancestral_seqs
             .update_record(id, new_record)
             .expect("updating ancestral record failed. Please report this at https://github.com/acg-team/rust-phylo/issues");
+        // TODO: check capitilization of the first char in the string when used with .expect, see also other occurences
+        // TODO: also use the URL if update blocks is merged
     }
 }
 
