@@ -149,7 +149,7 @@ pub trait FragmentSampler {
     fn sample_fragment_length<R: Rng>(&self, rng: &mut R) -> (usize, f64);
 }
 
-/// Since these sequences are built incrementally, we can't use the [`Sequences`] which hold immutable [`record`]s`.
+/// Since these sequences are built incrementally, we can't use the [`Sequences`] which hold immutable [records](`record`).
 type Seqs = HashMap<NodeIdx, Vec<u8>>;
 
 /// Simulates the indel process under a [TKFModel](crate::tkf_model::TKFModel) to produce an MSA
@@ -745,11 +745,16 @@ mod private_tests {
         let r = 0.6;
         let tkf_model = TKF92IndelModel::new(lambda, mu, r);
         let tree = tree!("((A:0.5,B:0.5)AB:0.7,(C:0.6,D:0.6)CD:0.6)R;");
+
+        // Should be so large that it doesn't kick in. Because otherwise the
+        // accumulated logl would not match the clean cost. Since event probabilities
+        // are summed together for the case of drawing a max_insertion_length.
+        let max_insertion_length = 100;
         let simulator = TKFIndelMSASimulator::new(
             tkf_model,
             tree.clone(),
             DefaultGenerator::default(),
-            12, // max insertion length
+            max_insertion_length,
         );
         let result: TKFMSASimulationResult<MASA> = simulator.simulate_msa();
         let alignment = result.msa();
@@ -777,11 +782,16 @@ mod private_tests {
         let lambda = tkf_model.lambda();
         let mu = tkf_model.mu();
         let tree = tree!("((A:0.5,B:0.5)AB:0.7,(C:0.6,D:0.6)CD:0.6)R;");
+
+        // Should be so large that it doesn't kick in. Because otherwise the
+        // accumulated logl would not match the clean cost. Since event probabilities
+        // are summed together for the case of drawing a max_insertion_length.
+        let max_insertion_length = 100;
         let simulator = TKFIndelMSASimulator::new(
             tkf_model,
             tree.clone(),
             DefaultGenerator::default(),
-            12, // max insertion length
+            max_insertion_length,
         );
         let result: TKFMSASimulationResult<MASA> = simulator.simulate_msa();
         let alignment = result.msa();
