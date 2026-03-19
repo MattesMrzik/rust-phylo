@@ -552,9 +552,9 @@ where
         tree_stack: &mut Vec<&'a TKFLink>,
         insertions: &mut Vec<&'a TKFLink>,
     ) {
-        msa.get_mut(&link.node)
-            .unwrap()
-            .extend_from_slice(&vec![AMB_CHAR; link.length]);
+        let seq = msa.get_mut(&link.node).unwrap();
+        let new_len = seq.len() + link.length;
+        seq.resize(new_len, AMB_CHAR);
         if link.node == self.tree.root || link.is_insertion {
             let fragment_boundary = link.length + fragmentation.last().unwrap_or(&0);
             fragmentation.push(fragment_boundary);
@@ -591,9 +591,9 @@ where
             LinkFate::Deletion => {
                 let child_node = self.tree.children(&link.node)[branch_id];
                 for descendant_node in self.tree.preorder_subroot(&child_node) {
-                    msa.get_mut(&descendant_node)
-                        .unwrap()
-                        .extend_from_slice(&vec![GAP; link.length]);
+                    let seq = msa.get_mut(&descendant_node).unwrap();
+                    let new_len = seq.len() + link.length;
+                    seq.resize(new_len, GAP);
                 }
             }
             LinkFate::NonHomolog(_) => {
@@ -602,9 +602,9 @@ where
                 }
                 let child_node = self.tree.children(&link.node)[branch_id];
                 for descendant_node in self.tree.preorder_subroot(&child_node) {
-                    msa.get_mut(&descendant_node)
-                        .unwrap()
-                        .extend_from_slice(&vec![GAP; link.length]);
+                    let seq = msa.get_mut(&descendant_node).unwrap();
+                    let new_len = seq.len() + link.length;
+                    seq.resize(new_len, GAP);
                 }
             }
         }

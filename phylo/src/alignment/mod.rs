@@ -707,9 +707,13 @@ impl MASA {
         let new_record = record!(id, old_record.desc(), &new_seq);
         self.ancestral_seqs
             .update_record(id, new_record)
-            .expect("updating ancestral record failed. Please report this at https://github.com/acg-team/rust-phylo/issues");
-        // TODO: check capitilization of the first char in the string when used with .expect, see also other occurences
-        // TODO: also use the URL if update blocks is merged
+            .unwrap_or_else(|e| {
+                panic!(
+                    "Updating ancestral record failed. \
+                    Please report this at {REPORT_ISSUES_URL}. \
+                    Error: {e}"
+                )
+            });
     }
 }
 
