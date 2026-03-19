@@ -11,7 +11,7 @@ use crate::phylo_info::{
     set_missing_tree_node_ids, validate_ids_with_ancestors, validate_taxa_ids,
 };
 use crate::tree::{NodeIdx, NodeIdx::Internal, NodeIdx::Leaf, Tree};
-use crate::{align, aligned_seq, bail, record, Result};
+use crate::{align, aligned_seq, bail, record, Result, REPORT_ISSUES_URL};
 
 pub mod sequences;
 pub use sequences::*;
@@ -664,8 +664,13 @@ impl AncestralAlignment for MASA {
                 Internal(_) => self.ancestral_seqs.update_record(node_id, new_record),
                 Leaf(_) => self.leaf_seqs.update_record(node_id, new_record),
             }
-            .expect("updating ancestral record failed. Please report this at ");
-            // TODO add the url
+            .unwrap_or_else(|e| {
+                panic!(
+                    "updating ancestral record failed. \
+                    Please report this at {REPORT_ISSUES_URL}. \
+                    Error: {e}"
+                )
+            });
         }
     }
 }

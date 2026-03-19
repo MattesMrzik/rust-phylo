@@ -759,11 +759,6 @@ mod private_tests {
         let result: TKFMSASimulationResult<MASA> = simulator.simulate_msa();
         let alignment = result.msa();
         assert_eq!(alignment.seq_count() + alignment.ancestral_seqs().len(), 7);
-        println!("Alignment:\n{}", alignment);
-        println!(
-            "Fragmentation points in the root sequence: {:?}",
-            result.fragmentation()
-        );
         let phylo = PhyloInfo {
             msa: alignment.clone(),
             tree,

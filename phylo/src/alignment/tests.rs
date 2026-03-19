@@ -617,11 +617,13 @@ fn into_alignment_masa_to_msa() {
     let seqs = Sequences::new(records);
     let masa = MASA::from_aligned_with_ancestral(seqs, &tree).unwrap();
 
+    // columns 2 and 5 are only gaps, so they are removed during the creation
     assert_eq!(masa.len(), 5);
 
     let msa: MSA = masa.into_alignment(&tree);
 
     assert_eq!(msa.seq_count(), 3);
+    // column 3 is only gaps in the leaf sequences, so it is removed during the transformation
     assert_eq!(msa.len(), 4);
 
     assert_eq!(msa.seqs().record_by_id("A").seq(), b"ACT");
