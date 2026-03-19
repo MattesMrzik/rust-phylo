@@ -72,14 +72,13 @@ where
     /// positions deleted by the indel process are gaps and surviving positions
     /// have characters sampled by the substitution model.
     pub fn simulate_msa<AA: AncestralAlignment>(&self) -> TKFMSASimulationResult<AA> {
-        // First simulate indels
+        // First, simulate indels
         let indel_result: TKFMSASimulationResult<AA> = self.indel_sim.simulate_msa();
         let indel_msa = indel_result.msa();
 
-        // Alignment length for substitution simulation
+        // Second, substitution simulation
         let aln_len = indel_msa.len();
 
-        // Build substitution simulator using a clone of the indel RNG at its current state
         let rng_clone = self.indel_sim.rng.borrow().clone();
         let subst_builder = SubstitutionSimulatorBuilder::new(
             self.subst_model.clone(),
@@ -88,16 +87,14 @@ where
         )
         .alignment_length(aln_len)
         .build()
-        .unwrap();
-
+        .unwrap(); // will not fail since we set the alignment_length
         let subst_msa: AA = subst_builder.simulate_ancestral_alignment();
 
-        // Now mask the substitution msa with deletions from the indel msa
+        // Third, mask the substitution msa with gaps from the indel msa
         // Construct a combined sequences vector (including ancestral records)
         let mut combined_records: Vec<Record> = Vec::new();
         for node in self.indel_sim.tree.preorder() {
             let id = self.indel_sim.tree.node(node).id.clone();
-
             // get mask seq (from indel msa) and subst seq (from substitution msa)
             let mask_mapping = indel_msa.ancestral_map(node);
             let subst_seq = match node {
@@ -109,7 +106,7 @@ where
                 mask_mapping.len() == subst_seq.len(),
                 "Mask and substitution sequences must be the same length"
             );
-            // apply mask: if mask is a gap, put a gap; otherwise keep the subst charactera
+            // apply mask: if mask is a gap, put a gap; otherwise keep the subst character
             let final_seq: Vec<u8> = mask_mapping
                 .iter()
                 .zip(subst_seq.iter())
@@ -457,9 +454,9 @@ where
         if subtree_node == insertion_node {
             return;
         }
-        msa.get_mut(subtree_node)
-            .unwrap()
-            .extend_from_slice(&vec![GAP; length]);
+        let seq = msa.get_mut(subtree_node).unwrap();
+        let new_len = seq.len() + length;
+        seq.resize(new_len, GAP);
         for child_node in self.tree.children(subtree_node) {
             self.insertion_gaps_subtree(length, msa, child_node, insertion_node);
         }
