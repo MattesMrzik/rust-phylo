@@ -148,6 +148,20 @@ pub trait AncestralAlignment: Alignment {
     /// Removes columns from the alignment where the ancestral character goes extinct, i.e. columns
     /// where all leaf sequences have a gap.
     fn remove_extinct_columns(&mut self);
+    /// Transforms self into a regular alignment, i.e., without ancestral sequences.
+    fn into_alignment<A: Alignment>(self, tree: &Tree) -> A {
+        let mut leaf_records = Vec::with_capacity(self.leaf_maps().len());
+        for (node_idx, map) in self.leaf_maps() {
+            let id = tree.node_id(node_idx);
+            let unaligned_record = self.seqs().record_by_id(id);
+            let desc = unaligned_record.desc();
+            let aligned_seq = aligned_seq!(map, unaligned_record.seq());
+            let new_record = record!(id, desc, &aligned_seq);
+            leaf_records.push(new_record);
+        }
+        let seqs = Sequences::new(leaf_records);
+        A::from_aligned_unchecked(seqs, tree)
+    }
 }
 
 /// Returns a boolean mask over alignment columns indicating which do not go extinct,

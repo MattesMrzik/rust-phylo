@@ -243,6 +243,7 @@ impl Tree {
         }
     }
 
+    /// Returns the ID of the node with the given index.
     pub fn node_id(&self, node_idx: &NodeIdx) -> &str {
         &self.nodes[usize::from(node_idx)].id
     }
