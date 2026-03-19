@@ -564,3 +564,42 @@ fn update_ancestral_map_leaf() {
         Err(Error::AncestralAlignment(msg)) if msg.contains("ancestral map cannot be set for a leaf node")
     );
 }
+
+#[test]
+fn remove_extinct_columns_masa() {
+    let tree = tree!("((A:1.0,B:1.0)I:1.0,C:1.0)R:1.0;");
+
+    let records = vec![
+        record_wo_desc!("A", b"A---T--"),
+        record_wo_desc!("B", b"C--CT--"),
+        record_wo_desc!("C", b"G--CT-G"),
+        record_wo_desc!("I", b"T--CTAG"),
+        record_wo_desc!("R", b"A-AATGG"),
+    ];
+
+    let seqs = Sequences::new(records);
+    let mut masa = MASA::from_aligned_with_ancestral(seqs, &tree).unwrap();
+
+    // sanity checks before removal (the second column is removed when the MASA is created)
+    assert_eq!(masa.len(), 6, "lens differ for initial length");
+    // after removing the two extinct columns the length should be 4
+    masa.remove_extinct_columns();
+    assert_eq!(masa.len(), 4, "lens differ after removal");
+
+    let a = &tree.idx("A");
+    assert_eq!(masa.leaf_maps().get(a).unwrap(), &align!(b"N-N-"), "A");
+    let b = &tree.idx("B");
+    assert_eq!(masa.leaf_maps().get(b).unwrap(), &align!(b"NNN-"), "B");
+    let c = &tree.idx("C");
+    assert_eq!(masa.leaf_maps().get(c).unwrap(), &align!(b"NNNN"), "C");
+    let i = &tree.idx("I");
+    assert_eq!(masa.ancestral_maps().get(i).unwrap(), &align!(b"NNNN"), "I");
+    let r = &tree.idx("R");
+    assert_eq!(masa.ancestral_maps().get(r).unwrap(), &align!(b"NNNN"), "R");
+
+    assert_eq!(masa.seqs().record_by_id("A").seq(), b"AT");
+    assert_eq!(masa.seqs().record_by_id("B").seq(), b"CCT");
+    assert_eq!(masa.seqs().record_by_id("C").seq(), b"GCTG");
+    assert_eq!(masa.ancestral_seqs().record_by_id("I").seq(), b"TCTG");
+    assert_eq!(masa.ancestral_seqs().record_by_id("R").seq(), b"AATG");
+}

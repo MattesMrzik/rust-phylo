@@ -2,6 +2,7 @@ use std::fmt::{Debug, Display};
 
 use hashbrown::HashMap;
 use itertools::Itertools;
+use log::warn;
 
 use crate::alphabets::{Alphabet, AMB_CHAR, GAP};
 use crate::asr::AncestralSequenceReconstruction;
@@ -128,13 +129,39 @@ pub trait AncestralAlignment: Alignment {
         all_seqs.ids_are_unique()?;
         validate_ids_with_ancestors(tree, &all_seqs)?;
         all_seqs.remove_gap_cols();
-        Ok(Self::from_aligned_with_ancestral_unchecked(all_seqs, tree))
+        let ancestral_alignment = Self::from_aligned_with_ancestral_unchecked(all_seqs, tree);
+        let surviving_cols = surviving_columns_mask(&ancestral_alignment);
+        for (col_idx, survives) in surviving_cols.iter().enumerate() {
+            if !survives {
+                warn!(
+                    "Column {} goes extinct in all leaf sequences. \
+                    Consider calling `remove_extinct_columns` on the alignment.",
+                    col_idx
+                );
+            }
+        }
+        Ok(ancestral_alignment)
     }
     /// Constructs an ancestral alignment instance from aligned sequences and a phylogenetic tree. Is called
     /// by the default implementation of [`Self::from_aligned_with_ancestral`].
     fn from_aligned_with_ancestral_unchecked(all_seqs: Sequences, tree: &Tree) -> Self;
-
+    /// Removes columns from the alignment where the ancestral character goes extinct, i.e. columns
+    /// where all leaf sequences have a gap.
     fn remove_extinct_columns(&mut self);
+}
+
+/// Returns a boolean mask over alignment columns indicating which do not go extinct,
+/// i.e. have at least one non-`None` site across all leaf sequences.
+fn surviving_columns_mask(ancestral_alignment: &impl AncestralAlignment) -> Vec<bool> {
+    let mut surviving = vec![false; ancestral_alignment.len()];
+    for map in ancestral_alignment.leaf_maps().values() {
+        for (col_idx, site) in map.iter().enumerate() {
+            if site.is_some() {
+                surviving[col_idx] = true;
+            }
+        }
+    }
+    surviving
 }
 
 #[derive(Debug, Clone)]
@@ -380,6 +407,7 @@ impl Alignment for MASA {
         &self.leaf_seqs
     }
 
+    /// Returns the length of the MSA, i.e. the number of sites/columns.
     #[allow(clippy::len_without_is_empty)]
     fn len(&self) -> usize {
         self.leaf_maps
@@ -581,29 +609,30 @@ impl AncestralAlignment for MASA {
     }
 
     fn remove_extinct_columns(&mut self) {
-        // determine columns for which all leave mappings are None
-        let mut keep_cols = vec![false; self.len()];
-        for map in self.leaf_maps().values() {
-            for (col_idx, site) in map.iter().enumerate() {
-                if site.is_some() {
-                    keep_cols[col_idx] = true;
-                }
-            }
-        }
-
+        // Determine columns where the ancestral character did not go extinct
+        let keep_cols = surviving_columns_mask(self);
+        // If no character goes extinct, we don't have to update the alignment
         if keep_cols.iter().all(|b| *b) {
             return;
         }
+
+        // Remove the columns that go extinct from all mappings and all sequences
         for (node_idx, map) in self
             .leaf_maps
             .iter_mut()
             .chain(self.ancestral_maps.iter_mut())
         {
             let node_id = &self.idx_to_id[usize::from(*node_idx)];
-            let aligned_seq = match node_idx {
+            // Getting the aligned sequence, i.e., including gaps
+            let mut aligned_seq = match node_idx {
                 Internal(_) => aligned_seq!(map, self.ancestral_seqs.record_by_id(node_id).seq()),
                 Leaf(_) => aligned_seq!(map, self.leaf_seqs.record_by_id(node_id).seq()),
             };
+            // removing the columns that are not in keep_cols
+            let mut mask_iter = keep_cols.iter();
+            aligned_seq.retain(|_| *mask_iter.next().unwrap_or(&false));
+
+            // get the updated map and sequence from the new aligned sequence
             let new_map = align!(aligned_seq);
             let new_seq = aligned_seq
                 .iter()

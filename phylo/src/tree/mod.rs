@@ -330,6 +330,7 @@ impl Tree {
         bail!(Tree, "no node with id {id} found in the tree");
     }
 
+    /// Returns the index of the node with the given ID. Panics if no such node exists.
     #[cfg(test)]
     pub(crate) fn idx(&self, id: &str) -> NodeIdx {
         debug_assert!(self.complete);

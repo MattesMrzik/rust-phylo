@@ -152,6 +152,7 @@ struct BackTrackingResult {
 /// ```rust
 /// # use phylo::Result;
 /// # fn main() -> Result<()> {
+/// use phylo::alignment::AncestralAlignment;
 /// use phylo::phylo_info::PhyloInfoBuilder;
 /// use phylo::random::DefaultGenerator;
 /// use phylo::tkf_model::{EdgeSeqsReestimator, TKF92IndelCostBuilder};
@@ -161,7 +162,8 @@ struct BackTrackingResult {
 /// // will be refined.
 /// let tree = "data/tkf/reestimate/tree.newick";
 /// let msa = "data/tkf/reestimate/masa.fasta";
-/// let phylo = PhyloInfoBuilder::with_attrs(msa, tree).build_with_ancestors()?;
+/// let mut phylo = PhyloInfoBuilder::with_attrs(msa, tree).build_with_ancestors()?;
+/// phylo.msa.remove_extinct_columns();
 /// let lambda = 0.9;
 /// let mu = 1.0;
 /// let r = 0.5;
