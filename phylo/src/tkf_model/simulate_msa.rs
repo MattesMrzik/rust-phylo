@@ -12,7 +12,7 @@ use crate::random::RandomGenerator;
 use crate::record_wo_desc as record;
 use crate::substitution_models::{QMatrix, SubstModel, SubstitutionSimulatorBuilder};
 use crate::tkf_model::{beta, h1, n0, TKFModel};
-use crate::tree::{NodeIdx, Tree};
+use crate::tree::{NodeIdx, NodeIdx::Internal, NodeIdx::Leaf, Tree};
 
 impl<T, R> AlignmentSimulation for TKFIndelMSASimulator<T, R>
 where
@@ -65,15 +65,22 @@ where
             subst_model,
         }
     }
+}
 
+impl<Q, T, R> AlignmentSimulation for TKFMSASimulator<Q, T, R>
+where
+    Q: QMatrix,
+    T: TKFModel + FragmentSampler,
+    R: Rng + SeedableRng + RngCore + Clone,
+{
     /// Simulate an ancestral alignment with indels and substitutions.
     ///
     /// The returned `TKFMSASimulationResult` contains the final alignment where
     /// positions deleted by the indel process are gaps and surviving positions
     /// have characters sampled by the substitution model.
-    pub fn simulate_msa<AA: AncestralAlignment>(&self) -> TKFMSASimulationResult<AA> {
+    fn simulate_ancestral_alignment<AA: AncestralAlignment>(&self) -> AA {
         // First, simulate indels
-        let indel_result: TKFMSASimulationResult<AA> = self.indel_sim.simulate_msa();
+        let indel_result = self.indel_sim.simulate_msa::<AA>();
         let indel_msa = indel_result.msa();
 
         // Second, substitution simulation
@@ -89,17 +96,19 @@ where
         .build()
         .unwrap(); // will not fail since we set the alignment_length
         let subst_msa: AA = subst_builder.simulate_ancestral_alignment();
-
         // Third, mask the substitution msa with gaps from the indel msa
         // Construct a combined sequences vector (including ancestral records)
         let mut combined_records: Vec<Record> = Vec::new();
         for node in self.indel_sim.tree.preorder() {
             let id = self.indel_sim.tree.node(node).id.clone();
             // get mask seq (from indel msa) and subst seq (from substitution msa)
-            let mask_mapping = indel_msa.ancestral_map(node);
+            let mask_mapping = match node {
+                Internal(_) => indel_msa.ancestral_map(node),
+                Leaf(_) => indel_msa.leaf_map(node),
+            };
             let subst_seq = match node {
-                NodeIdx::Leaf(_) => subst_msa.seqs().record_by_id(&id).seq(),
-                NodeIdx::Internal(_) => subst_msa.ancestral_seqs().record_by_id(&id).seq(),
+                Leaf(_) => subst_msa.seqs().record_by_id(&id).seq(),
+                Internal(_) => subst_msa.ancestral_seqs().record_by_id(&id).seq(),
             };
 
             debug_assert!(
@@ -125,13 +134,7 @@ where
         }
 
         let seqs = Sequences::new(combined_records);
-        let final_msa: AA = AA::from_aligned_with_ancestral(seqs, &self.indel_sim.tree).unwrap();
-
-        TKFMSASimulationResult {
-            msa: final_msa,
-            fragmentation: indel_result.fragmentation().clone(),
-            logl: indel_result.logl(),
-        }
+        AA::from_aligned_with_ancestral(seqs, &self.indel_sim.tree).unwrap()
     }
 }
 
@@ -647,6 +650,7 @@ mod private_tests {
     use crate::alignment::{Alignment, AncestralAlignment, MASA};
     use crate::phylo_info::PhyloInfo;
     use crate::random::DefaultGenerator;
+    use crate::substitution_models::GTR;
     use crate::tkf_model::{
         beta, n0, TKF91IndelCostBuilder, TKF91IndelModel, TKF92FixedIndelCostBuilder,
         TKF92IndelModel,
@@ -736,7 +740,7 @@ mod private_tests {
     }
 
     #[test]
-    fn tkf92_simulate() {
+    fn tkf92_indel_simulate() {
         let lambda = 1.1;
         let mu = 1.2;
         let r = 0.6;
@@ -750,7 +754,7 @@ mod private_tests {
         let simulator = TKFIndelMSASimulator::new(
             tkf_model,
             tree.clone(),
-            DefaultGenerator::default(),
+            DefaultGenerator::new(41),
             max_insertion_length,
         );
         let result: TKFMSASimulationResult<MASA> = simulator.simulate_msa();
@@ -769,7 +773,7 @@ mod private_tests {
     }
 
     #[test]
-    fn tkf91_simulate() {
+    fn tkf91_indel_simulate() {
         let tkf_model = TKF91IndelModel::default();
         let lambda = tkf_model.lambda();
         let mu = tkf_model.mu();
@@ -782,7 +786,7 @@ mod private_tests {
         let simulator = TKFIndelMSASimulator::new(
             tkf_model,
             tree.clone(),
-            DefaultGenerator::default(),
+            DefaultGenerator::new(41),
             max_insertion_length,
         );
         let result: TKFMSASimulationResult<MASA> = simulator.simulate_msa();
@@ -809,5 +813,23 @@ mod private_tests {
             .unwrap()
             .logl();
         assert_relative_eq!(result.logl(), cost, epsilon = 1e-10);
+    }
+
+    #[test]
+    fn tkf92_simulate() {
+        let tkf_model = TKF92IndelModel::default();
+        let subst_model = SubstModel::<GTR>::new(&[0.3, 0.2, 0.2, 0.3], &[0.8, 1.2, 0.9, 1.1, 0.7]);
+        let tree = tree!("((A:0.5,B:0.5)AB:0.7,(C:0.6,D:0.6)CD:0.6)R;");
+
+        let max_insertion_length = 10;
+        let simulator = TKFMSASimulator::new(
+            tkf_model,
+            subst_model,
+            tree.clone(),
+            DefaultGenerator::new(41),
+            max_insertion_length,
+        );
+        let result = simulator.simulate_ancestral_alignment::<MASA>();
+        assert_eq!(result.seq_count() + result.ancestral_seqs().len(), 7);
     }
 }

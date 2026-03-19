@@ -666,7 +666,7 @@ impl AncestralAlignment for MASA {
             }
             .unwrap_or_else(|e| {
                 panic!(
-                    "updating ancestral record failed. \
+                    "Updating ancestral record failed. \
                     Please report this at {REPORT_ISSUES_URL}. \
                     Error: {e}"
                 )

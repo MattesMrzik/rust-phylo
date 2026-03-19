@@ -67,7 +67,7 @@ where
                 let blen = self.tree.node(idx).blen;
                 // Reimplement p(time) without requiring the EvoModel trait here.
                 // Because otherwise passing the PIP model would be fine, but it isn't
-                let qmat = self.model.qmatrix.q().clone();
+                let qmat = self.model.qmatrix.q();
                 let p = if blen > MAX_BLEN {
                     (qmat * MAX_BLEN).exp()
                 } else {
