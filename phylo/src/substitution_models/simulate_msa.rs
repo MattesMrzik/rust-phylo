@@ -5,8 +5,9 @@ use log::warn;
 use rand::{distr::weighted::WeightedIndex, Rng, RngCore, SeedableRng};
 
 use crate::alignment::{AlignmentSimulation, AncestralAlignment, Sequences};
+use crate::alphabets::Alphabet;
 use crate::random::RandomGenerator;
-use crate::substitution_models::{QMatrix, SubstMatrix, SubstModel};
+use crate::substitution_models::{QMatrix, SubstModel};
 use crate::tree::{NodeIdx, Tree};
 use crate::{bail, record_wo_desc as record};
 use crate::{Result, MAX_BLEN};
@@ -48,7 +49,7 @@ where
         self
     }
 
-    pub fn build(self) -> Result<SubstitutionSimulator<Q, R>> {
+    pub fn build(self) -> Result<SubstitutionSimulator<R>> {
         let alignment_length = match self.alignment_length {
             Some(x) => x,
             None => {
@@ -58,29 +59,34 @@ where
                 )
             }
         };
-        let p_matrices: HashMap<NodeIdx, SubstMatrix> = self
-            .tree
-            .preorder()
-            .iter()
-            .skip(1) // skip root
-            .map(|idx| {
-                let blen = self.tree.node(idx).blen;
-                // Reimplement p(time) without requiring the EvoModel trait here.
-                // Because otherwise passing the PIP model would be fine, but it isn't
-                let qmat = self.model.qmatrix.q();
-                let p = if blen > MAX_BLEN {
-                    (qmat * MAX_BLEN).exp()
-                } else {
-                    (qmat * blen).exp()
-                };
-                (*idx, p)
-            })
-            .collect();
+
+        let root_dist = WeightedIndex::new(self.model.qmatrix.freqs().as_slice()).unwrap();
+
+        let mut p_weighted = HashMap::with_capacity(self.tree.len());
+        for idx in self.tree.preorder().iter().skip(1) {
+            let blen = self.tree.node(idx).blen;
+            let qmat = self.model.qmatrix.q();
+            let p = if blen > MAX_BLEN {
+                (qmat * MAX_BLEN).exp()
+            } else {
+                (qmat * blen).exp()
+            };
+
+            let mut column_dists = Vec::with_capacity(p.ncols());
+            for col in 0..p.ncols() {
+                let column = p.column(col);
+                column_dists.push(WeightedIndex::new(column.as_slice()).unwrap());
+            }
+            p_weighted.insert(*idx, column_dists);
+        }
+
+        let alphabet = *Q::alphabet();
 
         Ok(SubstitutionSimulator {
-            model: self.model,
             tree: self.tree,
-            p_matrices,
+            alphabet,
+            root_dist,
+            p_weighted,
             rng: RefCell::new(self.rng),
             alignment_length,
         })
@@ -88,62 +94,42 @@ where
 }
 
 #[derive(Debug)]
-pub struct SubstitutionSimulator<Q, R>
+pub struct SubstitutionSimulator<R>
 where
-    Q: QMatrix,
     R: Rng + SeedableRng + RngCore,
 {
-    model: SubstModel<Q>,
     tree: Tree,
-    p_matrices: HashMap<NodeIdx, SubstMatrix>,
+    alphabet: Alphabet,
+    root_dist: WeightedIndex<f64>,
+    /// Probability distributions for each branch (NodeIdx) and each parent character (index in the Vec).
+    p_weighted: HashMap<NodeIdx, Vec<WeightedIndex<f64>>>,
     rng: RefCell<RandomGenerator<R>>,
     alignment_length: usize,
 }
 
-impl<Q, R> SubstitutionSimulator<Q, R>
+impl<R> AlignmentSimulation for SubstitutionSimulator<R>
 where
-    Q: QMatrix,
-    R: Rng + SeedableRng + RngCore,
-{
-    fn sample_from_freqs(&self) -> usize {
-        let freqs = self.model.qmatrix.freqs();
-        let dist = WeightedIndex::new(freqs.as_slice()).unwrap();
-        self.rng.borrow_mut().sample(&dist)
-    }
-
-    fn sample_child(&self, parent_state: usize, p_matrix: &SubstMatrix) -> usize {
-        let column = p_matrix.column(parent_state);
-        let probs: Vec<f64> = column.iter().cloned().collect();
-        let dist = WeightedIndex::new(&probs).unwrap();
-        self.rng.borrow_mut().sample(&dist)
-    }
-
-    fn state_to_char(&self, state: usize) -> u8 {
-        Q::alphabet().symbols()[state]
-    }
-}
-
-impl<Q, R> AlignmentSimulation for SubstitutionSimulator<Q, R>
-where
-    Q: QMatrix,
     R: Rng + SeedableRng + RngCore,
 {
     fn simulate_ancestral_alignment<AA: AncestralAlignment>(&self) -> AA {
         let mut sequences: HashMap<NodeIdx, Vec<usize>> = HashMap::with_capacity(self.tree.len());
 
+        let mut rng = self.rng.borrow_mut();
         let root_seq: Vec<usize> = (0..self.alignment_length)
-            .map(|_| self.sample_from_freqs())
+            .map(|_| rng.sample(&self.root_dist))
             .collect();
+        drop(rng);
         sequences.insert(self.tree.root, root_seq);
 
         for node_idx in self.tree.preorder().iter().skip(1) {
             let parent_idx = self.tree.parent(node_idx).unwrap();
             let parent_seq = sequences.get(&parent_idx).unwrap();
-            let p_matrix = self.p_matrices.get(node_idx).unwrap();
+            let column_dists = self.p_weighted.get(node_idx).unwrap();
 
+            let mut rng = self.rng.borrow_mut();
             let child_seq: Vec<usize> = parent_seq
                 .iter()
-                .map(|&parent_state| self.sample_child(parent_state, p_matrix))
+                .map(|&parent_state| rng.sample(&column_dists[parent_state]))
                 .collect();
 
             sequences.insert(*node_idx, child_seq);
@@ -153,7 +139,7 @@ where
             .iter()
             .map(|(node_idx, seq)| {
                 let id = self.tree.node_id(node_idx);
-                let char_seq: Vec<u8> = seq.iter().map(|&s| self.state_to_char(s)).collect();
+                let char_seq: Vec<u8> = seq.iter().map(|&s| self.alphabet.symbols()[s]).collect();
                 record!(id, &char_seq)
             })
             .collect();
