@@ -924,9 +924,9 @@ mod private_tests {
 
     #[test]
     fn tkf92_indel_trait_consistency() {
-        let lambda = 0.2;
+        let lambda = 0.29;
         let mu = 0.3;
-        let r = 0.99;
+        let r = 0.9;
         let tkf_model = TKF92IndelModel::new(lambda, mu, r);
         let tree = tree!("(A:1.0,B:1.0)R:1.0;");
         let max_len = 2;
