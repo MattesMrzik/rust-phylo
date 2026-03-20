@@ -4,7 +4,7 @@ use hashbrown::HashMap;
 use itertools::Itertools;
 use log::warn;
 
-use crate::alphabets::{Alphabet, AMB_CHAR, GAP};
+use crate::alphabets::{Alphabet, AMB_CHAR};
 use crate::asr::AncestralSequenceReconstruction;
 use crate::parsimony_presence_absence::ParsimonyPresenceAbsence;
 use crate::phylo_info::{
@@ -638,28 +638,30 @@ impl AncestralAlignment for MASA {
             .chain(self.ancestral_maps.iter_mut())
         {
             let node_id = &self.idx_to_id[usize::from(*node_idx)];
-            // Getting the aligned sequence, i.e., including gaps
-            let mut aligned_seq = match node_idx {
-                Internal(_) => aligned_seq!(map, self.ancestral_seqs.record_by_id(node_id).seq()),
-                Leaf(_) => aligned_seq!(map, self.leaf_seqs.record_by_id(node_id).seq()),
+            let original_record = match node_idx {
+                Internal(_) => self.ancestral_seqs.record_by_id(node_id),
+                Leaf(_) => self.leaf_seqs.record_by_id(node_id),
             };
-            // removing the columns that are not in keep_cols
-            let mut mask_iter = keep_cols.iter();
-            aligned_seq.retain(|_| *mask_iter.next().unwrap_or(&false));
+            let original_seq = original_record.seq();
 
-            // get the updated map and sequence from the new aligned sequence
-            let new_map = align!(aligned_seq);
-            let new_seq = aligned_seq
-                .iter()
-                .filter(|c| **c != GAP)
-                .cloned()
-                .collect::<Vec<u8>>();
-            *map = new_map;
-            let desc = match node_idx {
-                Internal(_) => self.ancestral_seqs.record_by_id(node_id).desc(),
-                Leaf(_) => self.leaf_seqs.record_by_id(node_id).desc(),
-            };
-            let new_record = record!(node_id, desc, &new_seq);
+            let mut new_seq = Vec::with_capacity(original_seq.len());
+            let mut new_map_vec = Vec::with_capacity(keep_cols.len());
+
+            for (col_idx, &keep) in keep_cols.iter().enumerate() {
+                if !keep {
+                    continue;
+                }
+
+                if let Some(pos) = map[col_idx] {
+                    new_map_vec.push(Some(new_seq.len()));
+                    new_seq.push(original_seq[pos]);
+                } else {
+                    new_map_vec.push(None);
+                }
+            }
+
+            *map = new_map_vec;
+            let new_record = record!(node_id, original_record.desc(), &new_seq);
             match node_idx {
                 Internal(_) => self.ancestral_seqs.update_record(node_id, new_record),
                 Leaf(_) => self.leaf_seqs.update_record(node_id, new_record),

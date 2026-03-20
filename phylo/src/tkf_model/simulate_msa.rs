@@ -951,7 +951,7 @@ mod private_tests {
         let result = simulator.simulate_msa::<MASA>();
         let msa = result.msa();
         // With max_len = 0, no insertions can happen on branches.
-        // Thus, every column in the MSA must be have a char at the root.
+        // Thus, every column in the MSA must have a char at the root.
         let root_map = msa.ancestral_map(&tree.root);
         for (col_idx, site) in root_map.iter().enumerate() {
             assert!(
