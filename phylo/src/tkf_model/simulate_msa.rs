@@ -52,6 +52,8 @@ where
     T: TKFModel + FragmentSampler,
     R: Rng + SeedableRng + RngCore + Clone,
 {
+    /// Create a new TKFMSASimulator with the given indel model, substitution model, tree, RNG and
+    /// max insertion length (i.e., the max number of inserted links (=fragments) in a single event).
     pub fn new(
         indel_model: T,
         subst_model: SubstModel<Q>,
@@ -154,6 +156,8 @@ type Seqs = HashMap<NodeIdx, Vec<u8>>;
 
 /// Simulates the indel process under a [TKFModel](crate::tkf_model::TKFModel) to produce an MSA
 /// containing only [`GAP`]s and [`AMB_CHAR`]s, representing the indel history.
+/// The `max_insertion_length` parameter controls the maximum number of inserted links (=fragments)
+/// that can be produced in a single insertion event.
 pub struct TKFIndelMSASimulator<T: TKFModel + FragmentSampler, R: Rng + SeedableRng + RngCore> {
     indel_model: T,
     tree: Tree,
@@ -910,5 +914,51 @@ mod private_tests {
             phylo.check_dollos_constraint().is_ok(),
             "Simulated alignment must satisfy Dollo's constraint (no re-gain of characters)"
         );
+    }
+
+    #[test]
+    fn tkf92_indel_trait_consistency() {
+        let lambda = 0.2;
+        let mu = 0.3;
+        let r = 0.99;
+        let tkf_model = TKF92IndelModel::new(lambda, mu, r);
+        let tree = tree!("(A:1.0,B:1.0)R:1.0;");
+        let max_len = 2;
+        let seed = 123;
+        let simulator1 = TKFIndelMSASimulator::new(
+            tkf_model.clone(),
+            tree.clone(),
+            DefaultGenerator::new(seed),
+            max_len,
+        );
+        let simulator2 =
+            TKFIndelMSASimulator::new(tkf_model, tree, DefaultGenerator::new(seed), max_len);
+        let result1 = simulator1.simulate_msa::<MASA>();
+        let msa2: MASA = simulator2.simulate_ancestral_alignment();
+        assert_eq!(result1.msa().to_string(), msa2.to_string());
+    }
+
+    #[test]
+    fn tkf92_indel_capping() {
+        let lambda = 0.19;
+        let mu = 0.2;
+        let r = 0.5;
+        let tkf_model = TKF92IndelModel::new(lambda, mu, r);
+        let tree = tree!("(A:100.0,B:100.0)R:1.0;");
+        let max_len = 0; // Cap at 0 insertions on branches
+        let simulator =
+            TKFIndelMSASimulator::new(tkf_model, tree.clone(), DefaultGenerator::new(123), max_len);
+        let result = simulator.simulate_msa::<MASA>();
+        let msa = result.msa();
+        // With max_len = 0, no insertions can happen on branches.
+        // Thus, every column in the MSA must be have a char at the root.
+        let root_map = msa.ancestral_map(&tree.root);
+        for (col_idx, site) in root_map.iter().enumerate() {
+            assert!(
+                site.is_some(),
+                "Column {} should have a character at the root",
+                col_idx
+            );
+        }
     }
 }
