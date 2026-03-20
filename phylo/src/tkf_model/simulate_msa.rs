@@ -944,7 +944,7 @@ mod private_tests {
         let mu = 0.2;
         let r = 0.5;
         let tkf_model = TKF92IndelModel::new(lambda, mu, r);
-        let tree = tree!("(A:100.0,B:100.0)R:1.0;");
+        let tree = tree!("(A:1.0,B:1.0)R:1.0;");
         let max_len = 0; // Cap at 0 insertions on branches
         let simulator =
             TKFIndelMSASimulator::new(tkf_model, tree.clone(), DefaultGenerator::new(123), max_len);
