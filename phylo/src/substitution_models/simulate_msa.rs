@@ -28,11 +28,7 @@ where
     Q: QMatrix,
     R: Rng + SeedableRng + RngCore,
 {
-    pub fn new(
-        model: crate::substitution_models::SubstModel<Q>,
-        tree: Tree,
-        rng: RandomGenerator<R>,
-    ) -> Self {
+    pub fn new(model: SubstModel<Q>, tree: Tree, rng: RandomGenerator<R>) -> Self {
         Self {
             model,
             tree,
@@ -59,7 +55,9 @@ where
                 )
             }
         };
-
+        if !self.model.qmatrix.q().is_square() {
+            bail!(AlignmentSimulation, "the Q matrix is not square");
+        }
         let root_dist = WeightedIndex::new(self.model.qmatrix.freqs().as_slice()).unwrap();
 
         let mut p_weighted = HashMap::with_capacity(self.tree.len());
