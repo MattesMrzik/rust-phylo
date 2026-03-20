@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use std::collections::VecDeque;
 
 use bio::io::fasta::Record;
 use hashbrown::HashMap;
@@ -77,7 +78,7 @@ where
 {
     /// Simulate an ancestral alignment with indels and substitutions.
     ///
-    /// The returned `TKFMSASimulationResult` contains the final alignment where
+    /// The returned [`TKFMSASimulationResult`] contains the final alignment where
     /// positions deleted by the indel process are gaps and surviving positions
     /// have characters sampled by the substitution model.
     fn simulate_ancestral_alignment<AA: AncestralAlignment>(&self) -> AA {
@@ -504,11 +505,16 @@ where
     }
 
     fn append_link_to_msa(&self, link: &TKFLink, msa: &mut Seqs, fragmentation: &mut Vec<usize>) {
-        let mut insertions = vec![link];
-        while !insertions.is_empty() {
-            let mut tree_stack = vec![insertions.remove(0)];
-            while !tree_stack.is_empty() {
-                let current_link = tree_stack.remove(0);
+        // Insertions are pushed to the front of the queue so that they the lower insertions on the
+        // tree are processed before the higher ones, which ensures that gaps are correctly
+        // inserted since lower insertions don't mess with the events higher up in the tree.
+        // Which is especially important for the case of non-homologous insertions and the use of eta.
+        let mut insertions = VecDeque::from([link]);
+        while let Some(insertion_link) = insertions.pop_front() {
+            // For every insertion event do a BFS traversal, preorder would not work since we need
+            // to maintain the priorities of the insertion events, see the comment above.
+            let mut tree_stack = VecDeque::from([insertion_link]);
+            while let Some(current_link) = tree_stack.pop_front() {
                 if current_link.is_immortal {
                     self.dispatch_immortal_children(current_link, &mut tree_stack, &mut insertions);
                 } else {
@@ -531,15 +537,15 @@ where
     fn dispatch_immortal_children<'a>(
         &self,
         link: &'a TKFLink,
-        tree_stack: &mut Vec<&'a TKFLink>,
-        insertions: &mut Vec<&'a TKFLink>,
+        tree_stack: &mut VecDeque<&'a TKFLink>,
+        insertions: &mut VecDeque<&'a TKFLink>,
     ) {
         for branch_child in &link.children {
             for (child_id, child_link) in branch_child.iter().enumerate() {
                 if child_id == 0 {
-                    tree_stack.push(child_link);
+                    tree_stack.push_back(child_link);
                 } else {
-                    insertions.insert(0, child_link);
+                    insertions.push_front(child_link);
                 }
             }
         }
@@ -556,8 +562,8 @@ where
         link: &'a TKFLink,
         msa: &mut Seqs,
         fragmentation: &mut Vec<usize>,
-        tree_stack: &mut Vec<&'a TKFLink>,
-        insertions: &mut Vec<&'a TKFLink>,
+        tree_stack: &mut VecDeque<&'a TKFLink>,
+        insertions: &mut VecDeque<&'a TKFLink>,
     ) {
         let seq = msa.get_mut(&link.node).unwrap();
         let new_len = seq.len() + link.length;
@@ -585,14 +591,14 @@ where
         branch_id: usize,
         child_links: &'a [TKFLink],
         msa: &mut Seqs,
-        tree_stack: &mut Vec<&'a TKFLink>,
-        insertions: &mut Vec<&'a TKFLink>,
+        tree_stack: &mut VecDeque<&'a TKFLink>,
+        insertions: &mut VecDeque<&'a TKFLink>,
     ) {
         match &link.fates[branch_id] {
             LinkFate::Homolog(_) => {
-                tree_stack.push(&child_links[0]);
+                tree_stack.push_back(&child_links[0]);
                 for l in child_links.iter().skip(1) {
-                    insertions.insert(0, l);
+                    insertions.push_front(l);
                 }
             }
             LinkFate::Deletion => {
@@ -605,7 +611,7 @@ where
             }
             LinkFate::NonHomolog(_) => {
                 for l in child_links {
-                    insertions.insert(0, l);
+                    insertions.push_front(l);
                 }
                 let child_node = self.tree.children(&link.node)[branch_id];
                 for descendant_node in self.tree.preorder_subroot(&child_node) {
