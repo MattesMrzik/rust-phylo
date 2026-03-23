@@ -721,6 +721,12 @@ impl MASA {
 
 pub trait AlignmentSimulation {
     fn simulate_ancestral_alignment<AA: AncestralAlignment>(&self) -> AA;
+    /// TODO: We either define this in every struct that impls this trait or add a tree() to this
+    /// trait, then we could impl a default here that just calls simulate_ancestral_alignment and
+    /// then calls into_alignment on the result. If we use this default method then we might always
+    /// need to call simulate_ancestral_alignment::<MASA> first because we need a specific type.
+    /// perhaps this is not so clean and therefore we should just keep it like it is.
+    fn simulate_alignment<A: Alignment>(&self) -> A;
 }
 
 #[cfg(test)]

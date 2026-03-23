@@ -7,7 +7,7 @@ use log::warn;
 use rand::{Rng, RngCore, SeedableRng};
 use rand_distr::{Distribution, Geometric};
 
-use crate::alignment::{AlignmentSimulation, AncestralAlignment, Sequences};
+use crate::alignment::{AlignmentSimulation, AncestralAlignment, Sequences, MASA};
 use crate::alphabets::{AMB_CHAR, GAP};
 use crate::random::RandomGenerator;
 use crate::record_wo_desc as record;
@@ -28,6 +28,11 @@ where
             logl: _,
         } = result;
         msa
+    }
+
+    fn simulate_alignment<A: crate::alignment::Alignment>(&self) -> A {
+        self.simulate_ancestral_alignment::<MASA>()
+            .into_alignment(&self.tree)
     }
 }
 
@@ -138,6 +143,11 @@ where
 
         let seqs = Sequences::new(combined_records);
         AA::from_aligned_with_ancestral(seqs, &self.indel_sim.tree).unwrap()
+    }
+
+    fn simulate_alignment<A: crate::alignment::Alignment>(&self) -> A {
+        self.simulate_ancestral_alignment::<MASA>()
+            .into_alignment(&self.indel_sim.tree)
     }
 }
 
@@ -470,7 +480,7 @@ where
         }
     }
 
-    pub fn simulate_msa<AA: AncestralAlignment>(&self) -> TKFMSASimulationResult<AA> {
+    fn simulate_msa<AA: AncestralAlignment>(&self) -> TKFMSASimulationResult<AA> {
         *self.cumulative_logl.borrow_mut() = 0.0;
         let links = self.build_msa_links();
         let (raw_msa, fragmentation) = self.links_to_msa(&links);

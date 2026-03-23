@@ -4,7 +4,7 @@ use hashbrown::HashMap;
 use log::warn;
 use rand::{distr::weighted::WeightedIndex, Rng, RngCore, SeedableRng};
 
-use crate::alignment::{AlignmentSimulation, AncestralAlignment, Sequences};
+use crate::alignment::{Alignment, AlignmentSimulation, AncestralAlignment, Sequences, MASA};
 use crate::alphabets::Alphabet;
 use crate::random::RandomGenerator;
 use crate::substitution_models::{QMatrix, SubstModel};
@@ -144,6 +144,11 @@ where
 
         let seqs = Sequences::new(records);
         AA::from_aligned_with_ancestral(seqs, &self.tree).unwrap()
+    }
+
+    fn simulate_alignment<A: Alignment>(&self) -> A {
+        self.simulate_ancestral_alignment::<MASA>()
+            .into_alignment::<A>(&self.tree)
     }
 }
 
