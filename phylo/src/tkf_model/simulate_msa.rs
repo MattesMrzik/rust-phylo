@@ -11,7 +11,7 @@ use crate::alignment::{AlignmentSimulation, AncestralAlignment, Sequences, MASA}
 use crate::alphabets::{AMB_CHAR, GAP};
 use crate::random::RandomGenerator;
 use crate::record_wo_desc as record;
-use crate::substitution_models::{QMatrix, SubstModel, SubstitutionSimulatorBuilder};
+use crate::substitution_models::{QMatrix, SubstModel, SubstitutionSimulator};
 use crate::tkf_model::{beta, h1, n0, TKFModel};
 use crate::tree::{NodeIdx, NodeIdx::Internal, NodeIdx::Leaf, Tree};
 
@@ -42,42 +42,42 @@ where
 /// simulates substitutions along the same tree for the number of columns
 /// produced by the indel simulation and finally uses the indel MSA as a mask
 /// to replace characters with gaps where the indel process produced deletions.
-pub struct TKFMSASimulator<Q, T, R>
+pub struct TKFMSASimulator<T, R>
 where
-    Q: QMatrix,
     T: TKFModel + FragmentSampler,
     R: Rng + SeedableRng + RngCore,
 {
     indel_sim: TKFIndelMSASimulator<T, R>,
-    subst_model: SubstModel<Q>,
+    subst_sim: SubstitutionSimulator<R>,
 }
 
-impl<Q, T, R> TKFMSASimulator<Q, T, R>
+impl<T, R> TKFMSASimulator<T, R>
 where
-    Q: QMatrix,
     T: TKFModel + FragmentSampler,
     R: Rng + SeedableRng + RngCore + Clone,
 {
     /// Create a new TKFMSASimulator with the given indel model, substitution model, tree, RNG and
     /// max insertion length (i.e., the max number of inserted links (=fragments) in a single event).
-    pub fn new(
+    pub fn new<Q: QMatrix>(
         indel_model: T,
         subst_model: SubstModel<Q>,
         tree: Tree,
         rng: RandomGenerator<R>,
         max_insertion_length: usize,
     ) -> Self {
-        let indel_sim = TKFIndelMSASimulator::new(indel_model, tree, rng, max_insertion_length);
+        let indel_sim =
+            TKFIndelMSASimulator::new(indel_model, tree.clone(), rng.clone(), max_insertion_length);
+        let dummy_len = 1;
+        let subst_sim = SubstitutionSimulator::new(subst_model, tree, rng, dummy_len).unwrap();
         Self {
             indel_sim,
-            subst_model,
+            subst_sim,
         }
     }
 }
 
-impl<Q, T, R> AlignmentSimulation for TKFMSASimulator<Q, T, R>
+impl<T, R> AlignmentSimulation for TKFMSASimulator<T, R>
 where
-    Q: QMatrix,
     T: TKFModel + FragmentSampler,
     R: Rng + SeedableRng + RngCore + Clone,
 {
@@ -94,16 +94,9 @@ where
         // Second, substitution simulation
         let aln_len = indel_msa.len();
 
-        let rng_clone = self.indel_sim.rng.borrow().clone();
-        let subst_builder = SubstitutionSimulatorBuilder::new(
-            self.subst_model.clone(),
-            self.indel_sim.tree.clone(),
-            rng_clone,
-        )
-        .alignment_length(aln_len)
-        .build()
-        .unwrap(); // will not fail since we set the alignment_length
-        let subst_msa: AA = subst_builder.simulate_ancestral_alignment();
+        let subst_msa: AA = self
+            .subst_sim
+            .simulate_ancestral_alignment_with_length(aln_len);
         // Third, mask the substitution msa with gaps from the indel msa
         // Construct a combined sequences vector (including ancestral records)
         let mut combined_records: Vec<Record> = Vec::new();

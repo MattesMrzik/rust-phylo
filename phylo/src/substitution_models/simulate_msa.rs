@@ -12,58 +12,46 @@ use crate::tree::{NodeIdx, Tree};
 use crate::{bail, record_wo_desc as record};
 use crate::{Result, MAX_BLEN};
 
-pub struct SubstitutionSimulatorBuilder<Q, R>
+#[derive(Debug, Clone)]
+pub struct SubstitutionSimulator<R>
 where
-    Q: QMatrix,
     R: Rng + SeedableRng + RngCore,
 {
-    model: SubstModel<Q>,
     tree: Tree,
-    rng: RandomGenerator<R>,
-    alignment_length: Option<usize>,
+    alphabet: Alphabet,
+    root_dist: WeightedIndex<f64>,
+    /// Probability distributions for each branch (NodeIdx) and each parent character (index in the Vec).
+    p_weighted: HashMap<NodeIdx, Vec<WeightedIndex<f64>>>,
+    rng: RefCell<RandomGenerator<R>>,
+    alignment_length: usize,
 }
 
-impl<Q, R> SubstitutionSimulatorBuilder<Q, R>
+impl<R> SubstitutionSimulator<R>
 where
-    Q: QMatrix,
     R: Rng + SeedableRng + RngCore,
 {
-    pub fn new(model: SubstModel<Q>, tree: Tree, rng: RandomGenerator<R>) -> Self {
-        Self {
-            model,
-            tree,
-            rng,
-            alignment_length: None,
-        }
-    }
-
-    pub fn alignment_length(mut self, length: usize) -> Self {
-        if length == 0 {
-            warn!("Setting alignment_length to 0 will produce an empty alignment");
-        }
-        self.alignment_length = Some(length);
-        self
-    }
-
-    pub fn build(self) -> Result<SubstitutionSimulator<R>> {
-        let alignment_length = match self.alignment_length {
-            Some(x) => x,
-            None => {
-                bail!(
-                    AlignmentSimulation,
-                    "alignment_length must be set before building the substitution simulator"
-                )
-            }
-        };
-        if !self.model.qmatrix.q().is_square() {
+    pub fn new<Q: QMatrix>(
+        model: SubstModel<Q>,
+        tree: Tree,
+        rng: RandomGenerator<R>,
+        alignment_length: usize,
+    ) -> Result<Self> {
+        if !model.qmatrix.q().is_square() {
             bail!(AlignmentSimulation, "the Q matrix is not square");
         }
-        let root_dist = WeightedIndex::new(self.model.qmatrix.freqs().as_slice()).unwrap();
+        if alignment_length == 0 {
+            bail!(
+                AlignmentSimulation,
+                "alignment_length must be greater than 0 to produce a non-empty alignment"
+            );
+        }
 
-        let mut p_weighted = HashMap::with_capacity(self.tree.len());
-        for idx in self.tree.preorder().iter().skip(1) {
-            let blen = self.tree.node(idx).blen;
-            let qmat = self.model.qmatrix.q();
+        let root_dist = WeightedIndex::new(model.qmatrix.freqs().as_slice()).unwrap();
+
+        let mut p_weighted = HashMap::with_capacity(tree.len());
+        for idx in tree.preorder().iter().skip(1) {
+            let blen = tree.node(idx).blen;
+            let qmat = model.qmatrix.q();
             let p = if blen > MAX_BLEN {
                 (qmat * MAX_BLEN).exp()
             } else {
@@ -80,40 +68,31 @@ where
 
         let alphabet = *Q::alphabet();
 
-        Ok(SubstitutionSimulator {
-            tree: self.tree,
+        Ok(Self {
+            tree,
             alphabet,
             root_dist,
             p_weighted,
-            rng: RefCell::new(self.rng),
+            rng: RefCell::new(rng),
             alignment_length,
         })
     }
-}
 
-#[derive(Debug)]
-pub struct SubstitutionSimulator<R>
-where
-    R: Rng + SeedableRng + RngCore,
-{
-    tree: Tree,
-    alphabet: Alphabet,
-    root_dist: WeightedIndex<f64>,
-    /// Probability distributions for each branch (NodeIdx) and each parent character (index in the Vec).
-    p_weighted: HashMap<NodeIdx, Vec<WeightedIndex<f64>>>,
-    rng: RefCell<RandomGenerator<R>>,
-    alignment_length: usize,
-}
+    pub fn alignment_length(&mut self, length: usize) {
+        if length == 0 {
+            warn!("Setting alignment_length to 0 will produce an empty alignment");
+        }
+        self.alignment_length = length;
+    }
 
-impl<R> AlignmentSimulation for SubstitutionSimulator<R>
-where
-    R: Rng + SeedableRng + RngCore,
-{
-    fn simulate_ancestral_alignment<AA: AncestralAlignment>(&self) -> AA {
+    pub(crate) fn simulate_ancestral_alignment_with_length<AA: AncestralAlignment>(
+        &self,
+        alignment_length: usize,
+    ) -> AA {
         let mut sequences: HashMap<NodeIdx, Vec<usize>> = HashMap::with_capacity(self.tree.len());
 
         let mut rng = self.rng.borrow_mut();
-        let root_seq: Vec<usize> = (0..self.alignment_length)
+        let root_seq: Vec<usize> = (0..alignment_length)
             .map(|_| rng.sample(&self.root_dist))
             .collect();
         drop(rng);
@@ -145,6 +124,15 @@ where
         let seqs = Sequences::new(records);
         AA::from_aligned_with_ancestral(seqs, &self.tree).unwrap()
     }
+}
+
+impl<R> AlignmentSimulation for SubstitutionSimulator<R>
+where
+    R: Rng + SeedableRng + RngCore,
+{
+    fn simulate_ancestral_alignment<AA: AncestralAlignment>(&self) -> AA {
+        self.simulate_ancestral_alignment_with_length(self.alignment_length)
+    }
 
     fn simulate_alignment<A: Alignment>(&self) -> A {
         self.simulate_ancestral_alignment::<MASA>()
@@ -155,12 +143,10 @@ where
 #[cfg(test)]
 #[cfg_attr(coverage, coverage(off))]
 mod private_tests {
-    use assert_matches::assert_matches;
-
     use crate::alignment::{Alignment, MASA};
     use crate::random::DefaultGenerator;
     use crate::substitution_models::{dna_models::GTR, SubstModel};
-    use crate::{tree, Error};
+    use crate::tree;
 
     use super::*;
 
@@ -171,10 +157,7 @@ mod private_tests {
         let tree = tree!("((A:2.0,B:2.0)AB:2.0,(C:2.0,D:2.0)CD:2.0)R;");
         let rng = DefaultGenerator::new(123);
 
-        let simulator = SubstitutionSimulatorBuilder::new(model, tree.clone(), rng)
-            .alignment_length(50)
-            .build()
-            .unwrap();
+        let simulator = SubstitutionSimulator::new(model, tree.clone(), rng, 50).unwrap();
 
         let alignment: MASA = simulator.simulate_ancestral_alignment();
 
@@ -198,15 +181,9 @@ mod private_tests {
         let rng1 = DefaultGenerator::new(42);
         let rng2 = DefaultGenerator::new(42);
 
-        let simulator1 = SubstitutionSimulatorBuilder::new(model.clone(), tree.clone(), rng1)
-            .alignment_length(100)
-            .build()
-            .unwrap();
-
-        let simulator2 = SubstitutionSimulatorBuilder::new(model, tree.clone(), rng2)
-            .alignment_length(100)
-            .build()
-            .unwrap();
+        let simulator1 =
+            SubstitutionSimulator::new(model.clone(), tree.clone(), rng1, 100).unwrap();
+        let simulator2 = SubstitutionSimulator::new(model, tree.clone(), rng2, 100).unwrap();
 
         let alignment1: MASA = simulator1.simulate_ancestral_alignment();
         let alignment2: MASA = simulator2.simulate_ancestral_alignment();
@@ -224,22 +201,10 @@ mod private_tests {
         let tree = tree!("((A:0.5,B:0.5)AB:0.7);");
         let rng = DefaultGenerator::new(42);
 
-        let masa = SubstitutionSimulatorBuilder::new(model, tree, rng)
-            .alignment_length(0)
-            .build()
+        let masa = SubstitutionSimulator::new(model, tree, rng, 0)
             .unwrap()
             .simulate_ancestral_alignment::<MASA>();
 
         assert_eq!(masa.len(), 0);
-    }
-
-    #[test]
-    fn test_builder_requires_alignment_length() {
-        let model = SubstModel::<GTR>::new(&[0.3, 0.2, 0.2, 0.3], &[0.8, 1.2, 0.9, 1.1, 0.7]);
-        let tree = tree!("((A:0.5,B:0.5)AB:0.7);");
-        let rng = DefaultGenerator::new(42);
-
-        let result = SubstitutionSimulatorBuilder::new(model, tree, rng).build();
-        assert_matches!(result, Err(Error::AlignmentSimulation(msg)) if msg.contains("alignment_length must be set"));
     }
 }
