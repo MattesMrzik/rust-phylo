@@ -65,7 +65,7 @@ where
 type BranchLinkChildren = Vec<TKFLink>;
 
 struct TKFLink {
-    /// The in the tree the link is associated with.
+    /// The node in the tree the link is associated with.
     node: NodeIdx,
     /// True if the link is immortal. It's the link to the very left of the sequence.
     is_immortal: bool,
@@ -75,6 +75,7 @@ struct TKFLink {
     children: Vec<BranchLinkChildren>,
     /// For every child node/branch of this link's node, the [`LinkFate`] of this link.
     fates: Vec<LinkFate>,
+    /// Whether this link was produced by an insertion event.
     is_insertion: bool,
 }
 
@@ -165,6 +166,7 @@ where
         &self.tree
     }
 
+    /// Simulates the indel process and produces the corresponding ancestral alignment and fragmentation.
     fn simulate_with_fragments<AA: AncestralAlignment>(&self) -> TKFIndelMSASimulationResult<AA> {
         *self.cumulative_logl.borrow_mut() = 0.0;
         let links = self.build_msa_links();
@@ -176,6 +178,7 @@ where
         }
     }
 
+    /// Samples the number of root links from a geometric distribution.
     fn sample_num_root_links(&self) -> usize {
         let prob_of_success = 1.0 - self.indel_model.lambda() / self.indel_model.mu(); // ie stopping the links
         let geom = Geometric::new(prob_of_success).unwrap();
@@ -185,6 +188,8 @@ where
         choice as usize
     }
 
+    /// Samples the length of a fragment from the indel model's fragment length distribution, and
+    /// accumulates the log-probability of that length into the cumulative log-likelihood of the simulation.
     fn sample_fragment_length(&self) -> usize {
         let (length, log_prob) = self
             .indel_model
@@ -269,6 +274,8 @@ where
         }
     }
 
+    /// Samples the fate of a mortal link on a branch, which includes whether it survives or is
+    /// deleted, and how many insertions it produces in either case.
     fn sample_tkf_link_fate(&self, time: f64) -> LinkFate {
         let uniform_sample = self.rng.borrow_mut().random::<f64>();
         let lambda = self.indel_model.lambda();
@@ -296,6 +303,7 @@ where
         }
     }
 
+    /// Samples the number of homologous insertions on a branch, given that the original link survives.
     fn sample_homolog_fate(&self, time: f64, uniform_sample: f64) -> LinkFate {
         let lambda = self.indel_model.lambda();
         let mu = self.indel_model.mu();
@@ -320,6 +328,7 @@ where
         LinkFate::Homolog(self.max_insertion_length)
     }
 
+    /// Samples the number of non-homologous insertions on a branch, given that the original link is deleted.
     fn sample_non_homolog_fate(&self, time: f64, uniform_sample: f64) -> LinkFate {
         let lambda = self.indel_model.lambda();
         let mu = self.indel_model.mu();
@@ -344,6 +353,8 @@ where
         LinkFate::NonHomolog(self.max_insertion_length)
     }
 
+    /// Since immortal links always survive, we only need to sample how many insertions they
+    /// produce, which is what this function does.
     fn sample_tkf_immortal_link_fate(&self, time: f64) -> usize {
         let uniform_sample = self.rng.borrow_mut().random::<f64>();
         let lambda = self.indel_model.lambda();
@@ -363,8 +374,7 @@ where
     }
 
     /// After [simulation of the links](`Self::build_msa_links`) is complete, this function
-    /// traverses the link structure and writes the corresponding sequences for each node, which
-    /// are then used to build the final MSA.
+    /// calls [`Self::append_link_to_msa`] for every root link to build the final MSA and fragmentation.
     fn links_to_msa<AA: AncestralAlignment>(&self, links: &Vec<TKFLink>) -> (AA, Vec<usize>) {
         let mut msa: Seqs = HashMap::new();
         for node in self.tree.preorder() {
@@ -384,6 +394,7 @@ where
         (msa, fragmentation)
     }
 
+    /// Traverses the link structure on the tree for every root link and progressively builds the alignment.
     fn append_link_to_msa(&self, link: &TKFLink, msa: &mut Seqs, fragmentation: &mut Vec<usize>) {
         // Insertions are pushed to the front of the queue so that they the lower insertions on the
         // tree are processed before the higher ones, which ensures that gaps are correctly
@@ -506,12 +517,14 @@ where
         }
     }
 
-    /// Used for the conversion of the link structure to an MSA.
-    /// Inserts gaps in the MSA
+    /// Appends gaps to the progressively build alignment for every node in the tree that is not in
+    /// the subtree of the insertion node.
     fn insertion_gaps(&self, length: usize, msa: &mut Seqs, insertion_node: &NodeIdx) {
         self.insertion_gaps_subtree(length, msa, &self.tree.root, insertion_node);
     }
 
+    /// A helper for [insertion_gaps](`Self::insertion_gaps`) that recursively traverses the tree
+    /// and appends gaps to the appropriate nodes.
     fn insertion_gaps_subtree(
         &self,
         length: usize,
@@ -531,21 +544,25 @@ where
     }
 }
 
+/// Returns the sum [`homolog_prob`] over all `n` (number of insertions) which is the probability
+/// that a link survives on a branch of length `time` regardless of how many insertions it produces.   
 fn homolog_prob_integrated(mu: f64, time: f64) -> f64 {
     (-mu * time).exp()
 }
 
+/// Returns the sum of [`non_homolog_prob`] over all `n` (number of insertions) which is the
+/// probability that a link is deleted on a branch of length `time` but produces at least one insertion.
 fn non_homolog_prob_integrated(mu: f64, beta: f64, time: f64) -> f64 {
     1.0 - (-mu * time).exp() - mu * beta
 }
 
-/// In the TKF model n is at least 1 (the original link)
+/// In the TKF model `n` is at least 1 (the original link)
 fn homolog_prob(n: usize, lambda: f64, mu: f64, beta: f64, time: f64) -> f64 {
     let h1_val = h1(lambda, mu, beta, time);
     h1_val * (lambda * beta).powi((n - 1) as i32)
 }
 
-/// In the TKF model n is at least 1 because otherwise we should have used n0
+/// In the TKF model `n` is at least 1 because otherwise we should have used [`crate::tkf_model::n0`].
 fn non_homolog_prob(n: usize, lambda: f64, mu: f64, beta: f64, time: f64) -> f64 {
     let t1 = 1.0 - (-mu * time).exp() - mu * beta;
     let t2 = 1.0 - lambda * beta;
@@ -553,7 +570,7 @@ fn non_homolog_prob(n: usize, lambda: f64, mu: f64, beta: f64, time: f64) -> f64
     t1 * t2 * t3
 }
 
-/// In the TKF model n is at least 1 because the immortal link cannot die
+/// In the TKF model `n` is at least 1 because the immortal link cannot die
 fn immortal_prob(n: usize, lambda: f64, beta: f64) -> f64 {
     (1.0 - lambda * beta) * (lambda * beta).powi((n - 1) as i32)
 }

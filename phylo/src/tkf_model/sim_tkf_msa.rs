@@ -1,7 +1,7 @@
 use bio::io::fasta::Record;
 use rand::{Rng, RngCore, SeedableRng};
 
-use crate::alignment::{AlignmentSimulation, AncestralAlignment, Sequences, MASA};
+use crate::alignment::{Alignment, AlignmentSimulation, AncestralAlignment, Sequences, MASA};
 use crate::alphabets::GAP;
 use crate::random::RandomGenerator;
 use crate::record_wo_desc as record;
@@ -10,12 +10,12 @@ use crate::tkf_model::sim_tkf_indel_msa::{FragmentSampler, TKFIndelMSASimulator}
 use crate::tkf_model::TKFModel;
 use crate::tree::{NodeIdx::Internal, NodeIdx::Leaf, Tree};
 
-/// Simulates a full TKF process: first indels (TKF) then substitutions.
+/// Simulates a full TKF process: first indels then substitutions.
 ///
-/// The simulator runs the [indel simulator](TKFIndelMSASimulator) to obtain an MSA that represents
-/// homology paths of character presence, then simulates substitutions along the same tree for the
-/// number of columns produced by the indel simulation and finally uses the indel MSA as a mask to
-/// place gaps.
+/// The simulator runs the [indel simulator](TKFIndelMSASimulator) to obtain an ancestral alignment
+/// that represents homology paths of character presence, then simulates substitutions along the same
+/// tree for the number of columns produced by the indel simulation and finally uses the indel MSA
+/// as a mask to place gaps.
 pub struct TKFMSASimulator<T, R>
 where
     T: TKFModel + FragmentSampler,
@@ -61,10 +61,10 @@ where
 
         // Second, substitution simulation
         let aln_len = indel_msa.len();
-
         let subst_msa: AA = self
             .subst_sim
             .simulate_ancestral_alignment_with_length(aln_len);
+
         // Third, mask the substitution msa with gaps from the indel msa
         // Construct a combined sequences vector (including ancestral records)
         let mut combined_records: Vec<Record> = Vec::new();
@@ -106,7 +106,7 @@ where
         AA::from_aligned_with_ancestral(seqs, self.indel_sim.tree()).unwrap()
     }
 
-    fn simulate_alignment<A: crate::alignment::Alignment>(&self) -> A {
+    fn simulate_alignment<A: Alignment>(&self) -> A {
         self.simulate_ancestral_alignment::<MASA>()
             .into_alignment(self.indel_sim.tree())
     }
