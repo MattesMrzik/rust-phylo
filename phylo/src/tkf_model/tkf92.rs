@@ -4,6 +4,7 @@ use std::fmt::Display;
 use hashbrown::HashSet;
 use log::warn;
 use num_enum::{FromPrimitive, IntoPrimitive};
+use rand_distr::{Distribution, Geometric};
 
 use crate::alignment::AncestralAlignment;
 use crate::likelihood::{ParamRange, PARAM_RANGE_UNIT_INTERVAL_EXCLUSIVE};
@@ -140,7 +141,6 @@ impl FragmentSampler for TKF92IndelModel {
     /// so `1 - r` is the stopping (success) probability of the geometric draw.
     /// Returns `(length, log_probability)`.
     fn sample_fragment_length<R: rand::Rng>(&self, rng: &mut R) -> (usize, f64) {
-        use rand_distr::{Distribution, Geometric};
         let prob_of_success = 1.0 - self.r();
         let geom = Geometric::new(prob_of_success).unwrap();
         let choice = geom.sample(rng);

@@ -36,9 +36,6 @@ where
         rng: RandomGenerator<R>,
         alignment_length: usize,
     ) -> Result<Self> {
-        if !model.qmatrix.q().is_square() {
-            bail!(AlignmentSimulation, "the Q matrix is not square");
-        }
         if alignment_length == 0 {
             bail!(
                 AlignmentSimulation,
@@ -143,10 +140,12 @@ where
 #[cfg(test)]
 #[cfg_attr(coverage, coverage(off))]
 mod private_tests {
+
     use crate::alignment::{Alignment, MASA};
     use crate::random::DefaultGenerator;
-    use crate::substitution_models::{dna_models::GTR, SubstModel};
-    use crate::tree;
+    use crate::substitution_models::{dna_models::GTR, dna_models::JC69, SubstModel};
+    use crate::{tree, Error};
+    use assert_matches::assert_matches;
 
     use super::*;
 
@@ -197,14 +196,12 @@ mod private_tests {
 
     #[test]
     fn test_builder_alignment_length_zero() {
-        let model = SubstModel::<GTR>::new(&[0.3, 0.2, 0.2, 0.3], &[0.8, 1.2, 0.9, 1.1, 0.7]);
+        let model = SubstModel::<JC69>::new(&[], &[]);
         let tree = tree!("((A:0.5,B:0.5)AB:0.7);");
         let rng = DefaultGenerator::new(42);
 
-        let masa = SubstitutionSimulator::new(model, tree, rng, 0)
-            .unwrap()
-            .simulate_ancestral_alignment::<MASA>();
+        let error = SubstitutionSimulator::new(model, tree, rng, 0);
 
-        assert_eq!(masa.len(), 0);
+        assert_matches!(error, Err(Error::AlignmentSimulation(msg)) if msg.contains("alignment_length must be greater than 0"));
     }
 }

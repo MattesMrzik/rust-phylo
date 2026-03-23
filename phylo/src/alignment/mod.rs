@@ -630,6 +630,12 @@ impl AncestralAlignment for MASA {
         if keep_cols.iter().all(|b| *b) {
             return;
         }
+        if keep_cols.iter().all(|b| !*b) {
+            warn!(
+                "All columns go extinct in all leaf sequences. \
+                The resulting alignment after this call to remove_extinct_columns() will be empty."
+            );
+        }
 
         // Remove the columns that go extinct from all mappings and all sequences
         for (node_idx, map) in self
