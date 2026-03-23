@@ -8,7 +8,7 @@ use crate::alignment::AncestralAlignment;
 use crate::likelihood::ParamRange;
 use crate::phylo_info::PhyloInfo;
 use crate::substitution_models::{QMatrix, SubstModel, SubstitutionCostBuilder as SCB};
-use crate::tkf_model::simulate_msa::FragmentSampler;
+use crate::tkf_model::sim_tkf_indel_msa::FragmentSampler;
 use crate::tkf_model::{
     TKFCost, TKFIndelCost, TKFIndelModelInfo, TKFModel, DEFAULT_LAMBDA, DEFAULT_LAMBDA_MU_RATIO,
     DEFAULT_MU,
