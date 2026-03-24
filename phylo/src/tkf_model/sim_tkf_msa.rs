@@ -31,7 +31,9 @@ where
     R: Rng + SeedableRng + RngCore + Clone,
 {
     /// Create a new TKFMSASimulator with the given indel model, substitution model, tree, RNG and
-    /// max insertion length (i.e., the max number of inserted links (=fragments) in a single event).
+    /// max insertion length (i.e., the max number of inserted links (=fragments) in a single event;
+    /// since fragments can consist of multiple characters the number of inserted characters can be
+    /// longer than this max length).
     pub fn new<Q: QMatrix>(
         indel_model: T,
         subst_model: SubstModel<Q>,
@@ -66,11 +68,11 @@ where
             .simulate_ancestral_alignment_with_length(aln_len);
 
         // Third, mask the substitution msa with gaps from the indel msa
-        // Construct a combined sequences vector (including ancestral records)
+        // Construct a sequences vector including ancestral and leaf records
         let mut combined_records: Vec<Record> = Vec::new();
         for node in self.indel_sim.tree().preorder() {
             let id = self.indel_sim.tree().node(node).id.clone();
-            // get mask seq (from indel msa) and subst seq (from substitution msa)
+            // get mask_seq (from indel msa) and subst_seq (from substitution msa)
             let mask_mapping = match node {
                 Internal(_) => indel_msa.ancestral_map(node),
                 Leaf(_) => indel_msa.leaf_map(node),
@@ -79,7 +81,6 @@ where
                 Leaf(_) => subst_msa.seqs().record_by_id(&id).seq(),
                 Internal(_) => subst_msa.ancestral_seqs().record_by_id(&id).seq(),
             };
-
             debug_assert!(
                 mask_mapping.len() == subst_seq.len(),
                 "Mask and substitution sequences must be the same length"
@@ -102,6 +103,7 @@ where
             combined_records.push(record!(&id, &final_seq));
         }
 
+        // Lastly, construct the final ancestral MSA from the combined records
         let seqs = Sequences::new(combined_records);
         AA::from_aligned_with_ancestral(seqs, self.indel_sim.tree()).unwrap()
     }

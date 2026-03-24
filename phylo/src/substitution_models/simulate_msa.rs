@@ -1,7 +1,6 @@
 use std::cell::RefCell;
 
 use hashbrown::HashMap;
-use log::warn;
 use rand::{distr::weighted::WeightedIndex, Rng, RngCore, SeedableRng};
 
 use crate::alignment::{Alignment, AlignmentSimulation, AncestralAlignment, Sequences, MASA};
@@ -30,6 +29,11 @@ impl<R> SubstitutionSimulator<R>
 where
     R: Rng + SeedableRng + RngCore,
 {
+    /// Create a new SubstitutionSimulator with the given substitution model, tree, RNG and
+    /// alignment length.
+    ///
+    /// # Errors
+    /// * If `alignment_length` is 0, since this would produce an empty alignment.
     pub fn new<Q: QMatrix>(
         model: SubstModel<Q>,
         tree: Tree,
@@ -75,11 +79,19 @@ where
         })
     }
 
-    pub fn alignment_length(&mut self, length: usize) {
+    /// Sets the alignment length for the simulation.
+    ///
+    /// # Errors
+    /// * If `length` is 0, since this would produce an empty alignment.
+    pub fn alignment_length(&mut self, length: usize) -> Result<()> {
         if length == 0 {
-            warn!("Setting alignment_length to 0 will produce an empty alignment");
+            bail!(
+                AlignmentSimulation,
+                "setting alignment_length to 0 will produce an empty alignment"
+            );
         }
         self.alignment_length = length;
+        Ok(())
     }
 
     pub(crate) fn simulate_ancestral_alignment_with_length<AA: AncestralAlignment>(
