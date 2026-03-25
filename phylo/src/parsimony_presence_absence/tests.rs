@@ -6,7 +6,7 @@ use crate::{align, record_wo_desc as record, tree};
 
 #[cfg(test)]
 fn aligned_seqs_with_ancestors() -> Sequences {
-    aligned_seqs_with_ancestors_subset(&["A0", "B1", "C2", "D3", "E4", "I5", "I9", "I7", "I8"])
+    aligned_seqs_with_ancestors_subset(&["A0", "B1", "C2", "D3", "E4", "I5", "I6", "I7", "R8"])
 }
 
 #[cfg(test)]
