@@ -582,7 +582,7 @@ mod private_tests {
     use rstest::rstest;
 
     use crate::alignment::{Alignment, AncestralAlignment, MASA};
-    use crate::phylo_info::PhyloInfo;
+    use crate::phylo_info::{set_missing_tree_node_ids, PhyloInfo};
     use crate::random::DefaultGenerator;
     use crate::tkf_model::{
         beta, n0, TKF91IndelCostBuilder, TKF91IndelModel, TKF92FixedIndelCostBuilder,
@@ -674,86 +674,97 @@ mod private_tests {
 
     #[test]
     fn tkf92_indel_simulate() {
-        let lambda = 1.1;
-        let mu = 1.2;
-        let r = 0.6;
-        let tkf_model = TKF92IndelModel::new(lambda, mu, r);
-        let tree = tree!("((A:0.5,B:0.5)AB:0.7,(C:0.6,D:0.6)CD:0.6)R;");
+        for seed in 0..100 {
+            let lambda = 1.1;
+            let mu = 1.2;
+            let r = 0.6;
+            let tkf_model = TKF92IndelModel::new(lambda, mu, r);
+            let tree = tree!("(((9: 0.220067, (10: 0.150408, 6: 0.150408): 0.069660): 0.054476, (5: 0.033214, 8: 0.033214): 0.241329): 0.725457, ((((3: 0.033362, 1: 0.033362): 0.000893, 7: 0.034255): 0.379610, 4: 0.413865): 0.310280, 2: 0.724145): 0.275855);");
+            let tree = set_missing_tree_node_ids(&tree).unwrap();
 
-        // Should be so large that it doesn't kick in. Because otherwise the
-        // accumulated logl would not match the clean cost. Since event probabilities
-        // are summed together for the case of drawing a max_insertion_length.
-        let max_insertion_length = 100;
-        let simulator = TKFIndelMSASimulator::new(
-            tkf_model,
-            tree.clone(),
-            DefaultGenerator::new(41),
-            max_insertion_length,
-        );
-        let result: TKFIndelMSASimulationResult<MASA> = simulator.simulate_with_fragments();
-        let alignment = result.msa();
-        assert_eq!(alignment.seq_count() + alignment.ancestral_seqs().len(), 7);
-        let phylo = PhyloInfo {
-            msa: alignment.clone(),
-            tree,
-        };
-        assert!(
-            phylo.check_dollos_constraint().is_ok(),
-            "Simulated alignment must satisfy Dollo's constraint (no re-gain of characters)"
-        );
-        let cost =
-            TKF92FixedIndelCostBuilder::new(lambda, mu, r, result.fragmentation().clone(), phylo)
-                .build()
-                .unwrap()
-                .logl();
-        assert_relative_eq!(result._logl, cost, epsilon = 1e-10);
+            // Should be so large that it doesn't kick in. Because otherwise the
+            // accumulated logl would not match the clean cost. Since event probabilities
+            // are summed together for the case of drawing a max_insertion_length.
+            let max_insertion_length = 100;
+            let simulator = TKFIndelMSASimulator::new(
+                tkf_model,
+                tree.clone(),
+                DefaultGenerator::new(seed),
+                max_insertion_length,
+            );
+            let result: TKFIndelMSASimulationResult<MASA> = simulator.simulate_with_fragments();
+            let alignment = result.msa();
+            assert_eq!(alignment.seq_count() + alignment.ancestral_seqs().len(), 19);
+            let phylo = PhyloInfo {
+                msa: alignment.clone(),
+                tree,
+            };
+            assert!(
+                phylo.check_dollos_constraint().is_ok(),
+                "Simulated alignment must satisfy Dollo's constraint (no re-gain of characters)"
+            );
+            let cost = TKF92FixedIndelCostBuilder::new(
+                lambda,
+                mu,
+                r,
+                result.fragmentation().clone(),
+                phylo,
+            )
+            .build()
+            .unwrap()
+            .logl();
+            assert_relative_eq!(result._logl, cost, epsilon = 1e-10);
+        }
     }
 
     #[test]
     fn tkf91_indel_simulate() {
-        let tkf_model = TKF91IndelModel::default();
-        let lambda = tkf_model.lambda();
-        let mu = tkf_model.mu();
-        let tree = tree!("((A:0.5,B:0.5)AB:0.7,(C:0.6,D:0.6)CD:0.6)R;");
+        for seed in 0..100 {
+            let tkf_model = TKF91IndelModel::default();
+            let lambda = tkf_model.lambda();
+            let mu = tkf_model.mu();
+            let tree = tree!("(((9: 0.220067, (10: 0.150408, 6: 0.150408): 0.069660): 0.054476, (5: 0.033214, 8: 0.033214): 0.241329): 0.725457, ((((3: 0.033362, 1: 0.033362): 0.000893, 7: 0.034255): 0.379610, 4: 0.413865): 0.310280, 2: 0.724145): 0.275855);");
+            let tree = set_missing_tree_node_ids(&tree).unwrap();
 
-        // Should be so large that it doesn't kick in. Because otherwise the
-        // accumulated logl would not match the clean cost. Since event probabilities
-        // are summed together for the case of drawing a max_insertion_length.
-        let max_insertion_length = 100;
-        let simulator = TKFIndelMSASimulator::new(
-            tkf_model,
-            tree.clone(),
-            DefaultGenerator::new(41),
-            max_insertion_length,
-        );
-        let result: TKFIndelMSASimulationResult<MASA> = simulator.simulate_with_fragments();
-        let alignment = result.msa();
-        assert_eq!(alignment.seq_count() + alignment.ancestral_seqs().len(), 7);
+            // Should be so large that it doesn't kick in. Because otherwise the
+            // accumulated logl would not match the clean cost. Since event probabilities
+            // are summed together for the case of drawing a max_insertion_length.
+            let max_insertion_length = 100;
+            let simulator = TKFIndelMSASimulator::new(
+                tkf_model,
+                tree.clone(),
+                DefaultGenerator::new(seed),
+                max_insertion_length,
+            );
+            let result: TKFIndelMSASimulationResult<MASA> = simulator.simulate_with_fragments();
+            let alignment = result.msa();
+            assert_eq!(alignment.seq_count() + alignment.ancestral_seqs().len(), 19);
 
-        // In TKF91 every residue is its own independent link (fragment length == 1), so the
-        // fragmentation must be exactly [1, 2, 3, ..., n_cols].
-        let n_cols = result.fragmentation().len();
-        let expected_fragmentation: Vec<usize> = (1..=n_cols).collect();
-        assert_eq!(
-            result.fragmentation(),
-            &expected_fragmentation,
-            "TKF91 fragmentation must have every column as its own block"
-        );
+            // In TKF91 every residue is its own independent link (fragment length == 1), so the
+            // fragmentation must be exactly [1, 2, 3, ..., n_cols].
+            let n_cols = result.fragmentation().len();
+            let expected_fragmentation: Vec<usize> = (1..=n_cols).collect();
+            assert_eq!(
+                result.fragmentation(),
+                &expected_fragmentation,
+                "TKF91 fragmentation must have every column as its own block"
+            );
 
-        // The simulation logl must equal the TKF91 indel cost for the same alignment.
-        let phylo = PhyloInfo {
-            msa: alignment.clone(),
-            tree,
-        };
-        assert!(
-            phylo.check_dollos_constraint().is_ok(),
-            "Simulated alignment must satisfy Dollo's constraint (no re-gain of characters)"
-        );
-        let cost = TKF91IndelCostBuilder::new(lambda, mu, phylo)
-            .build()
-            .unwrap()
-            .logl();
-        assert_relative_eq!(result._logl, cost, epsilon = 1e-10);
+            // The simulation logl must equal the TKF91 indel cost for the same alignment.
+            let phylo = PhyloInfo {
+                msa: alignment.clone(),
+                tree,
+            };
+            assert!(
+                phylo.check_dollos_constraint().is_ok(),
+                "Simulated alignment must satisfy Dollo's constraint (no re-gain of characters)"
+            );
+            let cost = TKF91IndelCostBuilder::new(lambda, mu, phylo)
+                .build()
+                .unwrap()
+                .logl();
+            assert_relative_eq!(result._logl, cost, epsilon = 1e-10);
+        }
     }
 
     #[test]
