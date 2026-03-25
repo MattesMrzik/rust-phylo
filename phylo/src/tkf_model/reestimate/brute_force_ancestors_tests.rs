@@ -427,7 +427,7 @@ fn tkf92_reestimate_large_tree_for_file_iterative() {
     load_precalculated_brute_force_maxes(&precalculated_file, &mut iteration_info);
 
     // the cost to be used for repeated reestimation
-    let mut reestimator_cost = TKF92IndelCostBuilder::new(lambda, mu, r, phylo.clone())
+    let mut reestimator_cost = TKF92IndelCostBuilder::new(&[lambda, mu, r], phylo.clone())
         .build()
         .unwrap();
     // cloning here to leave the cost in a clean state before reestimation

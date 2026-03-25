@@ -123,18 +123,26 @@ pub(super) fn validate_lambda_and_mu(lambda: f64, mu: f64) -> (f64, f64) {
 
 /// Builder for the cost using the [`TKF91IndelModel`], i.e., without a substitution model.
 pub struct TKF91IndelCostBuilder<AA: AncestralAlignment> {
-    lambda: f64,
-    mu: f64,
+    params: Vec<f64>,
     phylo: PhyloInfo<AA>,
 }
 
 impl<AA: AncestralAlignment> TKF91IndelCostBuilder<AA> {
-    pub fn new(lambda: f64, mu: f64, phylo: PhyloInfo<AA>) -> Self {
-        Self { lambda, mu, phylo }
+    pub fn new(params: &[f64], phylo: PhyloInfo<AA>) -> Self {
+        Self {
+            params: params.to_vec(),
+            phylo,
+        }
     }
 
     pub fn build(self) -> Result<TKFIndelCost<TKF91IndelModel, AA>> {
-        let (lambda, mu) = validate_lambda_and_mu(self.lambda, self.mu);
+        let mut params = self.params.clone();
+        if params.len() < 2 {
+            warn!("Too few values provided for TKF91, 2 values required, lambda and mu");
+            warn!("Falling back to default values");
+            params = vec![DEFAULT_LAMBDA, DEFAULT_MU];
+        }
+        let (lambda, mu) = validate_lambda_and_mu(params[0], params[1]);
         let model = TKF91IndelModel {
             params: vec![lambda, mu],
         };
@@ -149,17 +157,15 @@ impl<AA: AncestralAlignment> TKF91IndelCostBuilder<AA> {
 
 /// Builder for the TKF91 cost, i.e., with a substitution model.
 pub struct TKF91CostBuilder<Q: QMatrix, AA: AncestralAlignment> {
-    lambda: f64,
-    mu: f64,
+    params: Vec<f64>,
     subst_model: SubstModel<Q>,
     phylo: PhyloInfo<AA>,
 }
 
 impl<Q: QMatrix, AA: AncestralAlignment> TKF91CostBuilder<Q, AA> {
-    pub fn new(lambda: f64, mu: f64, subst_model: SubstModel<Q>, phylo: PhyloInfo<AA>) -> Self {
+    pub fn new(params: &[f64], subst_model: SubstModel<Q>, phylo: PhyloInfo<AA>) -> Self {
         Self {
-            lambda,
-            mu,
+            params: params.to_vec(),
             subst_model,
             phylo,
         }
@@ -170,19 +176,27 @@ impl<Q: QMatrix, AA: AncestralAlignment> TKF91CostBuilder<Q, AA> {
             bail!(Alphabet, "alphabet mismatch between model and alignment");
         }
 
-        let (lambda, mu) = validate_lambda_and_mu(self.lambda, self.mu);
+        let mut params = self.params.clone();
+        if params.len() < 2 {
+            warn!("Too few values provided for TKF91, 2 values required, lambda and mu");
+            warn!("Falling back to default values");
+            params = vec![DEFAULT_LAMBDA, DEFAULT_MU];
+        }
+        let (lambda, mu) = validate_lambda_and_mu(params[0], params[1]);
         let model = TKF91IndelModel {
             params: vec![lambda, mu],
         };
         let info = TKFIndelModelInfo::new(&model, &self.phylo);
-        let tkf_cost = TKFIndelCost {
+        let indel_cost = TKFIndelCost {
             model,
             phylo: self.phylo.clone(),
             model_info: RefCell::new(info),
         };
+
+        let subst_cost = SCB::new(self.subst_model, self.phylo.clone()).build()?;
         Ok(TKFCost {
-            indel_cost: tkf_cost,
-            subst_cost: SCB::new(self.subst_model, self.phylo).build().unwrap(),
+            indel_cost,
+            subst_cost,
         })
     }
 }

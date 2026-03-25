@@ -278,7 +278,7 @@ mod private_tests {
         let mu = 1.1;
         let r = 0.5;
 
-        let tkf92_cost = TKF92IndelCostBuilder::new(lambda, mu, r, phylo_info.clone())
+        let tkf92_cost = TKF92IndelCostBuilder::new(&[lambda, mu, r], phylo_info.clone())
             .build()
             .unwrap();
         let cost = tkf92_cost.logl();
@@ -322,7 +322,7 @@ mod private_tests {
         let mu = 1.1;
         let r = 0.5;
 
-        let tkf92_cost = TKF92IndelCostBuilder::new(lambda, mu, r, phylo_info.clone())
+        let tkf92_cost = TKF92IndelCostBuilder::new(&[lambda, mu, r], phylo_info.clone())
             .build()
             .unwrap();
         let cost = tkf92_cost.logl();
