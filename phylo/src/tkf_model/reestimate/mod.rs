@@ -447,7 +447,12 @@ where
             // See issue #153 https://github.com/acg-team/rust-phylo/issues/153
             assert!(
                 found_at_least_one,
-                "No valid assignments found for block_id = {block_id}, due to -inf logl"
+                "No valid assignments found for block_id = {block_id}, due to -inf logl, \
+                or no possible assignments or possible del_or_not or no max over previous. \
+                Current alignemnt = \n{}, current tree = \n{}, current v2 = {}",
+                self.cost.phylo.msa,
+                self.cost.phylo.tree,
+                self.quartet_edges.v2()
             );
         }
     }
