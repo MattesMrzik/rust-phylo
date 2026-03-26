@@ -220,7 +220,7 @@ where
             // TODO: this can be parallelized. Also, the conversion to to alignment, i.e., the
             // progressive appending to it can be done after a root link is done evolving down the
             // tree, which would allow for more efficient memory usage since we won't have to keep
-            // the whole link structure in memory at once. 
+            // the whole link structure in memory at once.
             // See issue #163 https://github.com/acg-team/rust-phylo/issues/163
             self.evolve_link_down_tree(link);
         }
