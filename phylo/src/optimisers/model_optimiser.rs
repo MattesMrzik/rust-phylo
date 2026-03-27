@@ -263,4 +263,46 @@ mod tests {
             "initial cost: {init_cost}, after freq opt cost: {freq_cost}"
         );
     }
+
+    #[test]
+    fn gtr_cost_calculation_balanced_tree_test() {
+        let sequences = Sequences::new(vec![
+            record_wo_desc!("A", b"AGGG"),
+            record_wo_desc!("B", b"A---"),
+            record_wo_desc!("C", b"A---"),
+            record_wo_desc!("D", b"A---"),
+            record_wo_desc!("E", b"A---"),
+            record_wo_desc!("F", b"A---"),
+            record_wo_desc!("G", b"A---"),
+            record_wo_desc!("H", b"A---"),
+            record_wo_desc!("I", b"A---"),
+            record_wo_desc!("J", b"A---"),
+            record_wo_desc!("K", b"A---"),
+            record_wo_desc!("L", b"A---"),
+            record_wo_desc!("M", b"A---"),
+            record_wo_desc!("N", b"A---"),
+            record_wo_desc!("O", b"A---"),
+            record_wo_desc!("P", b"A---"),
+        ]);
+        let tree = tree!("((((A:0.1,B:0.1):0.1,(C:0.1,D:0.1):0.1):0.1,((E:0.1,F:0.1):0.1,(G:0.1,H:0.1):0.1):0.1):0.1,(((I:0.1,J:0.1):0.1,(K:0.1,L:0.1):0.1):0.1,((M:0.1,N:0.1):0.1,(O:0.1,P:0.1):0.1):0.1):0.1);");
+        let info = PhyloInfo {
+            msa: MSA::from_aligned(sequences, &tree).unwrap(),
+            tree,
+        };
+        let point = 0.9;
+        let rest_third = (1.0 - point) / 3.0;
+        let model = SubstModel::<GTR>::new(&[rest_third, rest_third, rest_third, point], &[]);
+
+        let cost = SCB::new(model, info).build().unwrap();
+        let init_logl = cost.cost();
+
+        let mut opt = ModelOptimiser::new(cost, FrequencyOptimisation::Empirical);
+        let freq_logl = opt.optimise_frequencies();
+        let new_logl = opt.c.cost();
+        assert_relative_eq!(new_logl, freq_logl, epsilon = 1e-6);
+        assert!(
+            init_logl > freq_logl,
+            "initial: {init_logl}, after freq opt: {freq_logl}"
+        );
+    }
 }
