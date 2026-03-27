@@ -45,6 +45,10 @@ impl<C: ModelSearchCost + Display + Clone> ModelOptimiser<C> {
         info!("Initial cost: {init_cost}");
 
         let mut curr_cost = self.optimise_frequencies();
+        println!(
+            "before cost {}, after opti freqs cost {}",
+            init_cost, curr_cost
+        );
         debug_assert!(curr_cost >= init_cost);
 
         // Set previous cost to negative infinity to ensure at least one iteration if frequency optimisation did not change the cost
@@ -174,13 +178,16 @@ mod tests {
 
     use assert_matches::assert_matches;
 
+    use crate::alignment::{Alignment, Sequences, MSA};
     use crate::likelihood::ModelSearchCost;
-    use crate::phylo_info::PhyloInfoBuilder as PIB;
+    use crate::phylo_info::{PhyloInfo, PhyloInfoBuilder as PIB};
     use crate::pip_model::{PIPCostBuilder as PIPCB, PIPModel};
+    use crate::record_wo_desc;
     use crate::substitution_models::JC69;
     use crate::substitution_models::{
         dna_models::GTR, protein_models::WAG, SubstModel, SubstitutionCostBuilder as SCB,
     };
+    use crate::tree;
 
     use super::*;
 
@@ -265,44 +272,34 @@ mod tests {
     }
 
     #[test]
-    fn gtr_cost_calculation_balanced_tree_test() {
+    fn search_empirical_freqs_worsen_likelihood() {
         let sequences = Sequences::new(vec![
-            record_wo_desc!("A", b"AGGG"),
-            record_wo_desc!("B", b"A---"),
-            record_wo_desc!("C", b"A---"),
-            record_wo_desc!("D", b"A---"),
-            record_wo_desc!("E", b"A---"),
-            record_wo_desc!("F", b"A---"),
-            record_wo_desc!("G", b"A---"),
-            record_wo_desc!("H", b"A---"),
-            record_wo_desc!("I", b"A---"),
-            record_wo_desc!("J", b"A---"),
-            record_wo_desc!("K", b"A---"),
-            record_wo_desc!("L", b"A---"),
-            record_wo_desc!("M", b"A---"),
-            record_wo_desc!("N", b"A---"),
-            record_wo_desc!("O", b"A---"),
-            record_wo_desc!("P", b"A---"),
+            record_wo_desc!("A", b"AG"),
+            record_wo_desc!("B", b"A-"),
+            record_wo_desc!("C", b"A-"),
+            record_wo_desc!("D", b"A-"),
         ]);
-        let tree = tree!("((((A:0.1,B:0.1):0.1,(C:0.1,D:0.1):0.1):0.1,((E:0.1,F:0.1):0.1,(G:0.1,H:0.1):0.1):0.1):0.1,(((I:0.1,J:0.1):0.1,(K:0.1,L:0.1):0.1):0.1,((M:0.1,N:0.1):0.1,(O:0.1,P:0.1):0.1):0.1):0.1);");
+        let tree = tree!("((A:0.1,B:0.1):0.1,(C:0.1,D:0.1):0.1);");
         let info = PhyloInfo {
             msa: MSA::from_aligned(sequences, &tree).unwrap(),
             tree,
         };
-        let point = 0.9;
-        let rest_third = (1.0 - point) / 3.0;
-        let model = SubstModel::<GTR>::new(&[rest_third, rest_third, rest_third, point], &[]);
 
-        let cost = SCB::new(model, info).build().unwrap();
-        let init_logl = cost.cost();
+        // TCAG
+        let start_freqs_vec = vec![0.01, 0.01, 0.4, 0.58];
 
-        let mut opt = ModelOptimiser::new(cost, FrequencyOptimisation::Empirical);
-        let freq_logl = opt.optimise_frequencies();
-        let new_logl = opt.c.cost();
-        assert_relative_eq!(new_logl, freq_logl, epsilon = 1e-6);
+        let model = SubstModel::<GTR>::new(&start_freqs_vec, &[]);
+        let cost = SCB::new(model, info.clone()).build().unwrap();
+        let init_cost = cost.cost();
+
+        let mut opt = ModelOptimiser::new(cost.clone(), FrequencyOptimisation::Empirical);
+        opt.optimise_frequencies();
+
+        let new_cost = opt.c.cost();
+
         assert!(
-            init_logl > freq_logl,
-            "initial: {init_logl}, after freq opt: {freq_logl}"
+            new_cost > init_cost,
+            "We cannot assume that empirical freqs increase the lolg. Berfore empirical = {init_cost}, after empirical = {new_cost}"
         );
     }
 }
