@@ -249,11 +249,9 @@ mod tests {
     }
 
     #[test]
-    fn empirical_does_not_improve() {
+    fn empirical_does_not_improve_no_starting_tree() {
         let fldr = Path::new("./data/empirical_does_not_improve_logl");
-        let phylo = PIB::with_attrs(fldr.join("msa.fasta"), fldr.join("tree.nwk"))
-            .build()
-            .unwrap();
+        let phylo = PIB::new(fldr.join("msa.fasta")).build().unwrap();
 
         let pip_model = PIPModel::<JC69>::new(&[], &[]);
         let cost = PIPCB::new(pip_model, phylo).build().unwrap();
