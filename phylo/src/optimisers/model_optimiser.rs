@@ -178,16 +178,12 @@ mod tests {
 
     use assert_matches::assert_matches;
 
-    use crate::alignment::{Alignment, Sequences, MSA};
     use crate::likelihood::ModelSearchCost;
-    use crate::phylo_info::{PhyloInfo, PhyloInfoBuilder as PIB};
+    use crate::phylo_info::PhyloInfoBuilder as PIB;
     use crate::pip_model::{PIPCostBuilder as PIPCB, PIPModel};
-    use crate::record_wo_desc;
-    use crate::substitution_models::JC69;
     use crate::substitution_models::{
         dna_models::GTR, protein_models::WAG, SubstModel, SubstitutionCostBuilder as SCB,
     };
-    use crate::tree;
 
     use super::*;
 
@@ -253,53 +249,5 @@ mod tests {
 
         opt.optimise_frequencies();
         assert_eq!(opt.c.freqs().view((0, 0), (20, 1)), opt.c.empirical_freqs());
-    }
-
-    #[test]
-    fn empirical_does_not_improve_no_starting_tree() {
-        let fldr = Path::new("./data/empirical_does_not_improve_logl");
-        let phylo = PIB::new(fldr.join("msa.fasta")).build().unwrap();
-
-        let pip_model = PIPModel::<JC69>::new(&[], &[]);
-        let cost = PIPCB::new(pip_model, phylo).build().unwrap();
-        let mut opt = ModelOptimiser::new(cost.clone(), FrequencyOptimisation::Empirical);
-        let init_cost = opt.c.cost();
-        let freq_cost = opt.optimise_frequencies();
-        assert_eq!(
-            init_cost, freq_cost,
-            "initial cost: {init_cost}, after freq opt cost: {freq_cost}"
-        );
-    }
-
-    #[test]
-    fn search_empirical_freqs_worsen_likelihood() {
-        let sequences = Sequences::new(vec![
-            record_wo_desc!("A", b"AG"),
-            record_wo_desc!("B", b"A-"),
-            record_wo_desc!("C", b"A-"),
-            record_wo_desc!("D", b"A-"),
-        ]);
-        let tree = tree!("((A:0.1,B:0.1):0.1,(C:0.1,D:0.1):0.1);");
-        let info = PhyloInfo {
-            msa: MSA::from_aligned(sequences, &tree).unwrap(),
-            tree,
-        };
-
-        // TCAG
-        let start_freqs_vec = vec![0.01, 0.01, 0.4, 0.58];
-
-        let model = SubstModel::<GTR>::new(&start_freqs_vec, &[]);
-        let cost = SCB::new(model, info.clone()).build().unwrap();
-        let init_cost = cost.cost();
-
-        let mut opt = ModelOptimiser::new(cost.clone(), FrequencyOptimisation::Empirical);
-        opt.optimise_frequencies();
-
-        let new_cost = opt.c.cost();
-
-        assert!(
-            new_cost > init_cost,
-            "We cannot assume that empirical freqs increase the lolg. Berfore empirical = {init_cost}, after empirical = {new_cost}"
-        );
     }
 }

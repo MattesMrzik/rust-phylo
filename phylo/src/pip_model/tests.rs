@@ -1025,3 +1025,33 @@ fn modify_model_freqs_costs_match() {
     modify_model_freqs_costs_match_template::<BLOSUM>(new_aa_freqs.clone());
     modify_model_freqs_costs_match_template::<HIVB>(new_aa_freqs);
 }
+
+#[cfg(test)]
+fn modify_model_freqs_costs_match_template_for_model_wo_freqs<Q: QMatrix + QMatrixMaker>(
+    freqs: FreqVector,
+) {
+    let info = setup_test_info(Q::alphabet());
+
+    let model = PIPModel::<Q>::new(&[], &[]);
+    let mut c = PIPB::new(model.clone(), info.clone()).build().unwrap();
+    let logl = c.cost();
+
+    c.set_freqs(freqs.clone());
+
+    let logl2 = c.cost();
+    assert_eq!(logl, logl2);
+
+    // The likelihood should be the same if we rebuild from scratch with the same modification
+    let new_model = PIPModel::<Q>::new(freqs.as_slice(), &[]);
+    let c = PIPB::new(new_model, info).build().unwrap();
+    let new_logl = c.cost();
+    assert_eq!(new_logl, c.cost());
+    assert_eq!(logl2, new_logl);
+}
+
+#[test]
+fn modify_model_freqs_costs_match_for_model_wo_freqs() {
+    let new_dna_freqs = frequencies!(&[0.1, 0.1, 0.1, 0.7]);
+    modify_model_freqs_costs_match_template_for_model_wo_freqs::<JC69>(new_dna_freqs.clone());
+    modify_model_freqs_costs_match_template_for_model_wo_freqs::<K80>(new_dna_freqs);
+}

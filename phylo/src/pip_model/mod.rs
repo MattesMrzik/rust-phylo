@@ -120,9 +120,12 @@ impl<Q: QMatrix> EvoModel for PIPModel<Q> {
     // This assumes correct dimensions to minimise runtime checks
     fn set_freqs(&mut self, pi: FreqVector) {
         debug_assert!(self.freqs.nrows() - 1 == pi.nrows() || self.freqs.nrows() == pi.nrows());
-        self.freqs = pi.clone().insert_row(pi.nrows(), 0.0);
+        let old_subst_freqs = self.subst_q.freqs().clone();
         self.subst_q.set_freqs(pi.clone());
-        pip_q(&mut self.q, self.subst_q.q(), self.params[1]);
+        if self.subst_q.freqs() != &old_subst_freqs {
+            self.freqs = pi.clone().insert_row(pi.nrows(), 0.0);
+            pip_q(&mut self.q, self.subst_q.q(), self.params[1]);
+        }
     }
 
     fn params(&self) -> &[f64] {
