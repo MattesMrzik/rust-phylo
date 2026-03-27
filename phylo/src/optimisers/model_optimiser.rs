@@ -177,6 +177,7 @@ mod tests {
     use crate::likelihood::ModelSearchCost;
     use crate::phylo_info::PhyloInfoBuilder as PIB;
     use crate::pip_model::{PIPCostBuilder as PIPCB, PIPModel};
+    use crate::substitution_models::JC69;
     use crate::substitution_models::{
         dna_models::GTR, protein_models::WAG, SubstModel, SubstitutionCostBuilder as SCB,
     };
@@ -245,5 +246,23 @@ mod tests {
 
         opt.optimise_frequencies();
         assert_eq!(opt.c.freqs().view((0, 0), (20, 1)), opt.c.empirical_freqs());
+    }
+
+    #[test]
+    fn empirical_does_not_improve() {
+        let fldr = Path::new("./data/empirical_does_not_improve_logl");
+        let phylo = PIB::with_attrs(fldr.join("msa.fasta"), fldr.join("tree.nwk"))
+            .build()
+            .unwrap();
+
+        let pip_model = PIPModel::<JC69>::new(&[], &[]);
+        let cost = PIPCB::new(pip_model, phylo).build().unwrap();
+        let mut opt = ModelOptimiser::new(cost.clone(), FrequencyOptimisation::Empirical);
+        let init_cost = opt.c.cost();
+        let freq_cost = opt.optimise_frequencies();
+        assert_eq!(
+            init_cost, freq_cost,
+            "initial cost: {init_cost}, after freq opt cost: {freq_cost}"
+        );
     }
 }
