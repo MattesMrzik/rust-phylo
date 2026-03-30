@@ -232,7 +232,7 @@ impl<T: TKFModel, AA: AncestralAlignment> TKFIndelCost<T, AA> {
         let n_blocks = self.model_info.borrow().blocks.len();
         for block_id in 0..n_blocks {
             let event = self.determine_event(root_idx, block_id);
-            let node_event_factor = self.event_factor(root_idx, event);
+            let node_event_factor = self.ln_event_factor(root_idx, event);
             let node_eta = 0.0;
             self.set_node_values(root_idx, block_id, node_event_factor, node_eta);
         }
@@ -256,7 +256,7 @@ impl<T: TKFModel, AA: AncestralAlignment> TKFIndelCost<T, AA> {
                     .set(usize::from(node_idx), false);
             }
             let event = self.determine_event(node_idx, block_id);
-            let node_event_factor = self.event_factor(node_idx, event);
+            let node_event_factor = self.ln_event_factor(node_idx, event);
             let node_eta = self.eta_for_non_root(node_idx, event);
             self.set_node_values(node_idx, block_id, node_event_factor, node_eta);
             if let Some(val) = self.updated_previous_is_deletion(event) {
@@ -356,7 +356,7 @@ impl<T: TKFModel, AA: AncestralAlignment> TKFIndelCost<T, AA> {
         }
     }
 
-    pub(super) fn event_factor(&self, node_idx: &NodeIdx, event: Event) -> f64 {
+    pub(super) fn ln_event_factor(&self, node_idx: &NodeIdx, event: Event) -> f64 {
         let node_id = usize::from(node_idx);
         match event {
             Event::Deletion => self.model_info.borrow().ln_n0[node_id],

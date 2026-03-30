@@ -935,7 +935,7 @@ fn tkf_modify_indel_model_params_costs_match() {
 }
 
 #[test]
-fn tkf_udpate_tree() {
+fn tkf_update_tree() {
     let tree = tree!("(((A1:2.0,B2:2.0)I3:0.3,C4:2.0)R5:1.0);");
     let msa = MASA::from_aligned_with_ancestral(
         Sequences::new(vec![
