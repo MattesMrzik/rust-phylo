@@ -321,8 +321,8 @@ where
         let root_id = usize::from(self.cost.phylo.tree.root);
         let mut model_info = self.cost.model_info.borrow_mut();
         for node in self.quartet_edges.edges() {
-            let x = model_info.node_event_factor[(usize::from(*node), block_id)];
-            model_info.subtree_event_factor[(root_id, block_id)] /= x;
+            let x = model_info.ln_node_event_factor[(usize::from(*node), block_id)];
+            model_info.ln_subtree_event_factor[(root_id, block_id)] -= x;
         }
     }
 
@@ -383,9 +383,9 @@ where
                         .previous_event_deletion
                         .set(usize::from(*edge), val);
                 }
-                model_info.node_event_factor[(usize::from(edge), block_id)] = node_event_factor;
+                model_info.ln_node_event_factor[(usize::from(edge), block_id)] = node_event_factor;
                 model_info.node_eta[(usize::from(edge), block_id)] = node_eta;
-                model_info.subtree_event_factor[(root_id, block_id)] *= node_event_factor;
+                model_info.ln_subtree_event_factor[(root_id, block_id)] += node_event_factor;
                 model_info.subtree_eta[(root_id, block_id)] += node_eta;
             }
         }
@@ -523,8 +523,8 @@ where
         let root_id = usize::from(self.cost.phylo.tree.root);
         let model_info = self.cost.model_info.borrow();
         let block_len = model_info.block_lengths[block_id];
-        let mut x = model_info.subtree_event_factor[(root_id, block_id)];
-        x *= self.quartet_event_factor(events);
+        let mut x = model_info.ln_subtree_event_factor[(root_id, block_id)];
+        x += self.quartet_event_factor(events);
         self.cost.model.block_prob(x, block_len)
     }
 
@@ -532,17 +532,17 @@ where
     /// which correspond to an assignment of characters at `v1` and `v2` that is currently considered
     /// in the dynamic programming.
     fn quartet_event_factor(&self, events: &QuartetEvents) -> f64 {
-        let mut quartet_event_factor = 1.0;
+        let mut quartet_event_factor = 0.0;
         let model_info = self.cost.model_info.borrow();
         // Here it is assumed that the cache is already updated for all nodes in the quartet,
         // see `EdgeSeqsReestimator::prepare_for_dp`.
         for (i, node) in self.quartet_edges.edges().iter().enumerate() {
             let node_id = usize::from(*node);
-            quartet_event_factor *= match events[i] {
-                Event::Insertion => model_info.insertion[node_id],
-                Event::Deletion => model_info.n0[node_id],
-                Event::Homolog => model_info.h1[node_id],
-                Event::Nothing => 1.0,
+            quartet_event_factor += match events[i] {
+                Event::Insertion => model_info.ln_insertion[node_id],
+                Event::Deletion => model_info.ln_n0[node_id],
+                Event::Homolog => model_info.ln_h1[node_id],
+                Event::Nothing => 0.0,
             };
         }
         quartet_event_factor
@@ -640,7 +640,7 @@ where
         let nodes = self.cost.phylo.tree.preorder().iter().skip(1); // skip root
         let model_info = self.cost.model_info.borrow();
         for node in nodes {
-            const_per_alignment += log_i1(l, model_info.beta[usize::from(node)]);
+            const_per_alignment += log_i1(l, model_info.ln_beta[usize::from(node)]);
         }
         const_per_alignment
     }

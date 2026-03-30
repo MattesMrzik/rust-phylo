@@ -31,7 +31,7 @@ pub struct TKF92IndelModel {
     /// precomputed r.ln()
     log_r: f64,
     /// precomputed (1 - r)/r
-    one_minus_r_over_r: f64,
+    ln_one_minus_r_over_r: f64,
 }
 
 impl TKF92IndelModel {
@@ -46,7 +46,7 @@ impl Default for TKF92IndelModel {
         Self {
             params: vec![DEFAULT_LAMBDA, DEFAULT_MU, r],
             log_r: r.ln(),
-            one_minus_r_over_r: (1.0 - r) / r,
+            ln_one_minus_r_over_r: ((1.0 - r) / r).ln(),
         }
     }
 }
@@ -70,7 +70,7 @@ impl TKFModel for TKF92IndelModel {
             TKF92Parameters::R => {
                 self.params[usize::from(TKF92Parameters::R)] = value;
                 self.log_r = value.ln();
-                self.one_minus_r_over_r = (1.0 - value) / value;
+                self.ln_one_minus_r_over_r = ((1.0 - value) / value).ln();
             }
             _ => {
                 self.params[idx] = value;
@@ -88,22 +88,25 @@ impl TKFModel for TKF92IndelModel {
         }
     }
 
-    fn insertion_factor_at_root(&self) -> f64 {
-        self.lambda() / self.mu() * self.one_minus_r_over_r
+    fn ln_insertion_factor_at_root(&self) -> f64 {
+        self.lambda().ln() - self.mu().ln() + self.ln_one_minus_r_over_r
     }
 
-    fn insertion_factor_at_non_root(&self, beta: f64) -> f64 {
-        self.lambda() * beta * self.one_minus_r_over_r
+    fn ln_insertion_factor_at_non_root(&self, ln_beta: f64) -> f64 {
+        self.lambda().ln() + ln_beta + self.ln_one_minus_r_over_r
     }
 
-    fn block_prob(&self, tree_event_factor: f64, block_len: usize) -> f64 {
-        if tree_event_factor == 1.0 {
-            0.0
-        } else {
-            tree_event_factor.ln()
-                + (block_len as f64 - 1.0) * (1.0 + tree_event_factor).ln()
-                + (block_len as f64) * self.log_r
-        }
+    fn block_prob(&self, ln_tree_event_factor: f64, block_len: usize) -> f64 {
+        // For the underflow of exp(ln_tree_event_factor):
+        // - True underflow (< -745): not a concern, f64 lacks precision at that scale anyway.
+        //   (when adding to the other terms)
+        // - Near machine epsilon (< -36): the approximation
+        //     m * ln(1 + x) ~~ ln((1 + x)^m) ~~ ln(1 + m*x) ~~ m*x
+        //   recovers log(m)  bits of precision, at the cost of two linearization
+        //   errors. Whether the net gain is positive requires further investigation.
+        ln_tree_event_factor
+            + (block_len as f64 - 1.0) * (ln_tree_event_factor.exp()).ln_1p()
+            + (block_len as f64) * self.log_r
     }
 
     fn get_blocks<AA: AncestralAlignment>(&self, msa: &AA) -> Vec<usize> {
@@ -164,7 +167,7 @@ impl<AA: AncestralAlignment> TKF92IndelCostBuilder<AA> {
         let model = TKF92IndelModel {
             params: vec![lambda, mu, r],
             log_r: r.ln(),
-            one_minus_r_over_r: (1.0 - r) / r,
+            ln_one_minus_r_over_r: ((1.0 - r) / r).ln(),
         };
         let info = TKFIndelModelInfo::new(&model, &self.phylo);
         Ok(TKFIndelCost {
@@ -211,7 +214,7 @@ impl<Q: QMatrix, AA: AncestralAlignment> TKF92CostBuilder<Q, AA> {
         let model = TKF92IndelModel {
             params: vec![lambda, mu, r],
             log_r: r.ln(),
-            one_minus_r_over_r: (1.0 - r) / r,
+            ln_one_minus_r_over_r: ((1.0 - r) / r).ln(),
         };
         let info = TKFIndelModelInfo::new(&model, &self.phylo);
         let tkf_cost = TKFIndelCost {
@@ -265,8 +268,8 @@ mod private_tests {
     fn tkf92_param_range_invalid_index() {
         let model = TKF92IndelModel {
             params: vec![0.5, 1.0, 0.3],
-            log_r: 0.0,              // cache filled with dummy since it is not needed here
-            one_minus_r_over_r: 0.0, // cache filled with dummy since it is not needed here
+            log_r: 0.0, // cache filled with dummy since it is not needed here
+            ln_one_minus_r_over_r: 0.0, // cache filled with dummy since it is not needed here
         };
         // Use an invalid index
         model.param_range(3);
@@ -276,8 +279,8 @@ mod private_tests {
     fn tkf92_model_fmt() {
         let tkf_indel_model = TKF92IndelModel {
             params: vec![1.1, 2.0, 0.3],
-            log_r: 0.0,              // cache filled with dummy since it is not printed
-            one_minus_r_over_r: 0.0, // cache filled with dummy since it is not printed
+            log_r: 0.0,                 // cache filled with dummy since it is not printed
+            ln_one_minus_r_over_r: 0.0, // cache filled with dummy since it is not printed
         };
 
         let fmt = format!("{}", tkf_indel_model);
@@ -289,8 +292,8 @@ mod private_tests {
     fn tkf92_indel_set_param() {
         let mut model = TKF92IndelModel {
             params: vec![1.0, 2.0, 0.3],
-            log_r: 0.0,              // dummy
-            one_minus_r_over_r: 0.0, // dummy
+            log_r: 0.0,                 // dummy
+            ln_one_minus_r_over_r: 0.0, // dummy
         };
         model.set_param(usize::from(TKF92Parameters::Lambda), 1.1);
         assert_eq!(model.lambda(), 1.1);
@@ -299,6 +302,6 @@ mod private_tests {
         model.set_param(usize::from(TKF92Parameters::R), 0.4);
         assert_eq!(model.r(), 0.4);
         assert_eq!(model.log_r, 0.4f64.ln());
-        assert_eq!(model.one_minus_r_over_r, (1.0 - 0.4) / 0.4);
+        assert_eq!(model.ln_one_minus_r_over_r, ((1.0f64 - 0.4) / 0.4).ln());
     }
 }
