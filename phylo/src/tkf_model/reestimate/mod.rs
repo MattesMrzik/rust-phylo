@@ -1,5 +1,5 @@
 use fixedbitset::FixedBitSet;
-use log::info;
+use log::{info, warn};
 use rand::{Rng, SeedableRng};
 
 use crate::alignment::{AncestralAlignment, Mapping};
@@ -331,8 +331,8 @@ where
         let root_id = usize::from(self.cost.phylo.tree.root);
         let mut model_info = self.cost.model_info.borrow_mut();
         for node in self.quartet_edges.edges() {
-            let x = model_info.node_event_factor[(usize::from(*node), block_id)];
-            model_info.subtree_event_factor[(root_id, block_id)] /= x;
+            let x = model_info.ln_node_event_factor[(usize::from(*node), block_id)];
+            model_info.ln_subtree_event_factor[(root_id, block_id)] -= x;
         }
     }
 
@@ -385,7 +385,7 @@ where
         for block_id in 0..num_blocks {
             for edge in self.quartet_edges.edges() {
                 let event = self.cost.determine_event(edge, block_id);
-                let node_event_factor = self.cost.event_factor(edge, event);
+                let ln_node_event_factor = self.cost.ln_event_factor(edge, event);
                 let node_eta = self.cost.eta_for_non_root(edge, event);
                 let mut model_info = self.cost.model_info.borrow_mut();
                 if let Some(val) = self.cost.updated_previous_is_deletion(event) {
@@ -393,9 +393,10 @@ where
                         .previous_event_deletion
                         .set(usize::from(*edge), val);
                 }
-                model_info.node_event_factor[(usize::from(edge), block_id)] = node_event_factor;
+                model_info.ln_node_event_factor[(usize::from(edge), block_id)] =
+                    ln_node_event_factor;
                 model_info.node_eta[(usize::from(edge), block_id)] = node_eta;
-                model_info.subtree_event_factor[(root_id, block_id)] *= node_event_factor;
+                model_info.ln_subtree_event_factor[(root_id, block_id)] += ln_node_event_factor;
                 model_info.subtree_eta[(root_id, block_id)] += node_eta;
             }
         }
@@ -414,7 +415,7 @@ where
             let site = self.cost.model_info.borrow().blocks[block_id] - 1;
             for assignment in self.possible_assignments(site) {
                 let events = self.event_for_assignment(assignment, block_id);
-                let event_prob = self.integrated_root_event_prob(&events, block_id);
+                let ln_event_prob = self.ln_integrated_root_event_prob(&events, block_id);
                 let is_first_block = block_id == 0;
 
                 for q_del_or_not in possible_del_or_not(
@@ -425,7 +426,7 @@ where
                 ) {
                     let dp_index = bools_to_index(assignment, q_del_or_not);
                     if block_id == 0 {
-                        self.dp_table[block_id][dp_index] = event_prob;
+                        self.dp_table[block_id][dp_index] = ln_event_prob;
                         found_at_least_one = true;
                         // Since we are at the first position, the `del_or_not` does not have a
                         // meaning, so we can just skip all other `del_or_not` combinations.
@@ -442,7 +443,7 @@ where
                     // collect eta that corresponds to nodes outside of the quartet
                     let eta_for_block =
                         self.cost.model_info.borrow().subtree_eta[(root_id, block_id)];
-                    self.dp_table[block_id][dp_index] = max_prev + eta_for_block + event_prob;
+                    self.dp_table[block_id][dp_index] = max_prev + eta_for_block + ln_event_prob;
                     found_at_least_one = true;
                 }
             }
@@ -545,30 +546,30 @@ where
     }
 
     /// Computes the integrated event probability for the quartet given the events
-    fn integrated_root_event_prob(&self, events: &QuartetEvents, block_id: usize) -> f64 {
+    fn ln_integrated_root_event_prob(&self, events: &QuartetEvents, block_id: usize) -> f64 {
         let root_id = usize::from(self.cost.phylo.tree.root);
         let model_info = self.cost.model_info.borrow();
         let block_len = model_info.block_lengths[block_id];
-        let mut x = model_info.subtree_event_factor[(root_id, block_id)];
-        x *= self.quartet_event_factor(events);
+        let mut x = model_info.ln_subtree_event_factor[(root_id, block_id)];
+        x += self.ln_quartet_event_factor(events);
         self.cost.model.block_prob(x, block_len)
     }
 
-    /// Computes the product of event factor values for the nodes in the quartet for the provided events
+    /// Computes the sum of log event factor values for the nodes in the quartet for the provided events
     /// which correspond to an assignment of characters at `v1` and `v2` that is currently considered
     /// in the dynamic programming.
-    fn quartet_event_factor(&self, events: &QuartetEvents) -> f64 {
-        let mut quartet_event_factor = 1.0;
+    fn ln_quartet_event_factor(&self, events: &QuartetEvents) -> f64 {
+        let mut quartet_event_factor = 0.0;
         let model_info = self.cost.model_info.borrow();
         // Here it is assumed that the cache is already updated for all nodes in the quartet,
         // see `EdgeSeqsReestimator::prepare_for_dp`.
         for (i, node) in self.quartet_edges.edges().iter().enumerate() {
             let node_id = usize::from(*node);
-            quartet_event_factor *= match events[i] {
-                Event::Insertion => model_info.insertion[node_id],
-                Event::Deletion => model_info.n0[node_id],
-                Event::Homolog => model_info.h1[node_id],
-                Event::Nothing => 1.0,
+            quartet_event_factor += match events[i] {
+                Event::Insertion => model_info.ln_insertion[node_id],
+                Event::Deletion => model_info.ln_n0[node_id],
+                Event::Homolog => model_info.ln_h1[node_id],
+                Event::Nothing => 0.0,
             };
         }
         quartet_event_factor
@@ -658,7 +659,7 @@ where
     }
 
     /// Computes the constant part of the log likelihood that is independent of the alignment and
-    /// only depends on the tree and model parameters.
+    /// only depends on the tree and model parameters (in log space).
     fn const_per_alignment(&self) -> f64 {
         let l = self.cost.model.lambda();
         let m = self.cost.model.mu();
@@ -666,7 +667,7 @@ where
         let nodes = self.cost.phylo.tree.preorder().iter().skip(1); // skip root
         let model_info = self.cost.model_info.borrow();
         for node in nodes {
-            const_per_alignment += log_i1(l, model_info.beta[usize::from(node)]);
+            const_per_alignment += log_i1(l, model_info.ln_beta[usize::from(node)]);
         }
         const_per_alignment
     }

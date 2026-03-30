@@ -73,7 +73,7 @@ fn tkf91_indel_logl_without_aggregation<AA: AncestralAlignment>(
 
             let beta = beta(lambda, mu, time);
             if i == 0 {
-                prob += log_i1(lambda, beta);
+                prob += log_i1(lambda, beta.ln());
             }
             if parent_is_gap && current_is_gap {
                 continue;
@@ -88,7 +88,7 @@ fn tkf91_indel_logl_without_aggregation<AA: AncestralAlignment>(
             } else if parent_is_gap && !current_is_gap {
                 // insertion
                 if last_event_deletion[node_id_value] {
-                    prob += log_n1(lambda, mu, beta, time);
+                    prob += log_n1(lambda, mu, beta.ln(), time);
                     prob -= (lambda * beta).ln();
                     prob -= n0(mu, beta).ln();
                 }
@@ -149,7 +149,7 @@ fn tkf92_indel_logl_without_aggregation<AA: AncestralAlignment>(
 
             let beta = beta(lambda, mu, time);
             if i == 0 {
-                prob += log_i1(lambda, beta);
+                prob += log_i1(lambda, beta.ln());
             }
             if parent_is_gap && current_is_gap {
                 continue;
@@ -164,7 +164,7 @@ fn tkf92_indel_logl_without_aggregation<AA: AncestralAlignment>(
             } else if parent_is_gap && !current_is_gap {
                 // insertion
                 if last_event_deletion[node_id_value] {
-                    prob += log_n1(lambda, mu, beta, time);
+                    prob += log_n1(lambda, mu, beta.ln(), time);
                     prob -= (lambda * beta).ln();
                     prob -= n0(mu, beta).ln();
                 }
@@ -179,9 +179,16 @@ fn tkf92_indel_logl_without_aggregation<AA: AncestralAlignment>(
     prob
 }
 
+#[cfg(test)]
+fn beta(lambda: f64, mu: f64, time: f64) -> f64 {
+    let exp_term = ((lambda - mu) * time).exp();
+    (1.0 - exp_term) / (mu - lambda * exp_term)
+}
+
 #[test]
 fn tkf_beta() {
     assert_relative_eq!(beta(0.3, 0.5, 0.7), 0.5461782813185221);
+    assert_relative_eq!(ln_beta(0.3, 0.5, 0.7), 0.5461782813185221f64.ln());
 }
 
 #[test]
@@ -191,7 +198,7 @@ fn tkf_log_i1() {
     let time = 1.0;
     let b = beta(l, m, time);
     // log((1-2(1-e^(-1))/(3-2*e^(-1)))
-    assert_relative_eq!(log_i1(l, b), -0.8172396554020775);
+    assert_relative_eq!(log_i1(l, b.ln()), -0.8172396554020775);
 }
 
 #[test]
@@ -201,7 +208,16 @@ fn tkf_log_n1() {
     let time = 0.5;
     let b = beta(l, m, time);
     // log((1-e^(-1.5) - 3(1-e^(-.5))/(3-2*e^(-.5)) )* (1-2(1-e^(-.5))/(3-2*e^(-.5)))   (2(1-e^(-1))/(3-2*e^(-1)))^0)
-    assert_relative_eq!(log_n1(l, m, b, time), -2.732135332549935);
+    assert_relative_eq!(
+        log_n1(l, m, b.ln(), time),
+        -2.732135332549935,
+        epsilon = 1e-14
+    );
+}
+
+#[cfg(test)]
+fn n0(mu: f64, beta: f64) -> f64 {
+    mu * beta
 }
 
 #[test]
@@ -212,6 +228,12 @@ fn tkf_n0() {
     let b = beta(l, m, time);
     // (3(1-e^(-.5))/(3-2*e^(-.5)))
     assert_relative_eq!(n0(m, b), 0.6605755607027574);
+    assert_relative_eq!(ln_n0(m, b.ln()), 0.6605755607027574f64.ln());
+}
+
+#[cfg(test)]
+fn h1(lambda: f64, mu: f64, beta: f64, time: f64) -> f64 {
+    (-mu * time).exp() * (1.0 - lambda * beta)
 }
 
 #[test]
@@ -222,6 +244,7 @@ fn tkf_h1() {
     let b = beta(l, m, time);
     // e^(-4.5) * (1-2(1-e^(-1.5))/(3-2*e^(-1.5)))
     assert_relative_eq!(h1(l, m, b, time), 0.004350089645603061);
+    assert_relative_eq!(ln_h1(l, m, b.ln(), time), 0.004350089645603061f64.ln());
 }
 
 #[test]
@@ -235,7 +258,7 @@ fn tkf_eta() {
     // * (1 - 2*((1 - math.exp((2-3)*1.5))/(3 - 2*math.exp((2-3)*1.5)))))
     // - math.log(2*((1 - math.exp((2-3)*1.5))/(3 - 2*math.exp((2-3)*1.5))))
     // - math.log(3*((1 - math.exp((2-3)*1.5))/(3 - 2*math.exp((2-3)*1.5))))
-    assert_relative_eq!(eta(l, m, b, n0, time), -2.922778333826742);
+    assert_relative_eq!(eta(l, m, b.ln(), n0.ln(), time), -2.922778333826742);
 }
 
 #[test]
@@ -566,10 +589,10 @@ fn tkf91_indel_logl() {
     let mut manual_calculation = 0.0;
     manual_calculation += (1.0 - lambda / mu).ln();
     // immortal links
-    manual_calculation += log_i1(lambda, beta(lambda, mu, tree.by_id("A1").blen));
-    manual_calculation += log_i1(lambda, beta(lambda, mu, tree.by_id("B2").blen));
-    manual_calculation += log_i1(lambda, beta(lambda, mu, tree.by_id("I3").blen));
-    manual_calculation += log_i1(lambda, beta(lambda, mu, tree.by_id("C4").blen));
+    manual_calculation += log_i1(lambda, ln_beta(lambda, mu, tree.by_id("A1").blen));
+    manual_calculation += log_i1(lambda, ln_beta(lambda, mu, tree.by_id("B2").blen));
+    manual_calculation += log_i1(lambda, ln_beta(lambda, mu, tree.by_id("I3").blen));
+    manual_calculation += log_i1(lambda, ln_beta(lambda, mu, tree.by_id("C4").blen));
     // first block ([0:2], insertion at C4)
     let x = lambda * beta(lambda, mu, tree.by_id("C4").blen);
     manual_calculation += x.ln() * 2.0;
@@ -604,14 +627,14 @@ fn tkf91_indel_logl() {
     manual_calculation += log_n1(
         lambda,
         mu,
-        beta(lambda, mu, tree.by_id("B2").blen),
+        ln_beta(lambda, mu, tree.by_id("B2").blen),
         tree.by_id("B2").blen,
     );
     manual_calculation -= n0(mu, beta(lambda, mu, tree.by_id("B2").blen)).ln();
     manual_calculation -= (lambda * beta(lambda, mu, tree.by_id("B2").blen)).ln();
 
     // assert
-    assert_relative_eq!(logl, manual_calculation);
+    assert_relative_eq!(logl, manual_calculation, epsilon = 1e-14);
     assert_relative_eq!(logl, half_manual);
 }
 
@@ -646,10 +669,10 @@ fn tkf92_indel_logl() {
     manual_calculation += (1.0 - lambda / mu).ln();
     manual_calculation += m * r.ln();
     // immortal links
-    manual_calculation += log_i1(lambda, beta(lambda, mu, tree.by_id("A1").blen));
-    manual_calculation += log_i1(lambda, beta(lambda, mu, tree.by_id("B2").blen));
-    manual_calculation += log_i1(lambda, beta(lambda, mu, tree.by_id("I3").blen));
-    manual_calculation += log_i1(lambda, beta(lambda, mu, tree.by_id("C4").blen));
+    manual_calculation += log_i1(lambda, ln_beta(lambda, mu, tree.by_id("A1").blen));
+    manual_calculation += log_i1(lambda, ln_beta(lambda, mu, tree.by_id("B2").blen));
+    manual_calculation += log_i1(lambda, ln_beta(lambda, mu, tree.by_id("I3").blen));
+    manual_calculation += log_i1(lambda, ln_beta(lambda, mu, tree.by_id("C4").blen));
     // first block ([0:2], insertion at C4)
     let x = lambda * beta(lambda, mu, tree.by_id("C4").blen) * (1.0 - r) / r;
     manual_calculation += x.ln() + 1.0 * (1.0 + x).ln();
@@ -684,7 +707,7 @@ fn tkf92_indel_logl() {
     manual_calculation += log_n1(
         lambda,
         mu,
-        beta(lambda, mu, tree.by_id("B2").blen),
+        ln_beta(lambda, mu, tree.by_id("B2").blen),
         tree.by_id("B2").blen,
     );
     manual_calculation -= n0(mu, beta(lambda, mu, tree.by_id("B2").blen)).ln();
@@ -912,7 +935,7 @@ fn tkf_modify_indel_model_params_costs_match() {
 }
 
 #[test]
-fn tkf_udpate_tree() {
+fn tkf_update_tree() {
     let tree = tree!("(((A1:2.0,B2:2.0)I3:0.3,C4:2.0)R5:1.0);");
     let msa = MASA::from_aligned_with_ancestral(
         Sequences::new(vec![
@@ -955,4 +978,32 @@ fn tkf_udpate_tree() {
     let clean_logl = TreeSearchCost::cost(&clean_cost);
     assert_ne!(original_logl, new_logl);
     assert_eq!(new_logl, clean_logl);
+}
+
+#[test]
+fn tkf92_underflow_short_branches() {
+    let tree = tree!("(((A1:1e-20,B2:2.0)I3:1e-20,C4:2.0)R5:1.0);");
+
+    let msa = MASA::from_aligned_with_ancestral(
+        // Testing all events on short branches
+        Sequences::new(vec![
+            record!("A1", b"-AA-A"),
+            record!("B2", b"A-A--"),
+            record!("I3", b"AAAA-"),
+            record!("C4", b"-----"),
+            record!("R5", b"-----"),
+        ]),
+        &tree,
+    )
+    .unwrap();
+    let phylo = PhyloInfo { msa, tree };
+    let lambda = 1.0;
+    let mu = 1.01;
+    let r = 0.8;
+    let tkf92_cost = TKF92IndelCostBuilder::new(lambda, mu, r, phylo)
+        .build()
+        .unwrap();
+    let logl = tkf92_cost.logl();
+    assert!(!logl.is_nan());
+    assert!(logl.is_finite());
 }
