@@ -5,6 +5,7 @@ use approx::assert_relative_eq;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use lazy_static::lazy_static;
+use log::warn;
 use nalgebra::{DMatrix, DVector};
 
 use crate::alignment::AncestralAlignment;
@@ -478,6 +479,10 @@ impl<T: TKFModel, AA: AncestralAlignment> TreeSearchCost for TKFIndelCost<T, AA>
 /// * `x` - A log-probability value, must be non-positive (`x <= 0.0`).
 pub(crate) fn log1mexp(x: f64) -> f64 {
     debug_assert!(x <= 0.0, "log1mexp is only defined for x <= 0");
+    warn!(
+        "log1mexp is used, make sure that the input x is indeed a log-probability \
+        (i.e., non-positive) to avoid incorrect results."
+    );
     println!("x = {}", x);
     if x < -std::f64::consts::LN_2 {
         // Safe: exp(x) is small
@@ -537,7 +542,13 @@ pub(super) fn log_n1(lambda: f64, mu: f64, ln_beta: f64, time: f64) -> f64 {
     let log_sum_exp_max = log_sum_exp1.max(log_sum_exp2);
     let log_sum_exp = log_sum_exp_max
         + ((log_sum_exp1 - log_sum_exp_max).exp() + (log_sum_exp2 - log_sum_exp_max).exp()).ln();
-    let term1 = log1mexp(log_sum_exp);
+    let term1 = if log_sum_exp > 0.0 {
+        // This can happen if mu is large or time is large, making n0 + p1 > 1.0 due to
+        // numerical errors. In this case, log_n1 is small, but p1 + p0' is actually 1.0.
+        f64::NEG_INFINITY
+    } else {
+        log1mexp(log_sum_exp)
+    };
 
     let term2_x = ln_beta + lambda.ln(); // ln(lambda * beta)
     let term2 = log1mexp(term2_x);
