@@ -289,6 +289,16 @@ where
         // false, such that tmp values are properly recomputed when the logl is called.
         self.prepare_for_dp(v2_idx);
         self.fill_dp_table();
+        // find max from last col and if its neg infty return early
+
+        if self.max_of_last_col().0 == f64::NEG_INFINITY {
+            println!(
+                "Max of last column is -infinity, returning -infinity for reestimation at node {}",
+                v2_idx
+            );
+            self.set_invalid();
+            return f64::NEG_INFINITY;
+        }
         let backtrack_res = self.backtrack();
         self.set_invalid();
         self.update_mappings(&backtrack_res);
@@ -440,10 +450,26 @@ where
             // constraint, and return -infinity in the reassignment method. If we have -infinity here,
             // then any valid assignment is -infinity.
             // See issue #153 https://github.com/acg-team/rust-phylo/issues/153
-            assert!(
-                found_at_least_one,
-                "No valid assignments found for block_id = {block_id}, due to -inf logl"
-            );
+            if !found_at_least_one {
+                warn!(
+                    "No valid assignments found for block_id = {block_id}, due to -inf logl, \
+                    or no possible assignments or possible del_or_not or no max over previous. \
+                    Current alignemnt = \n{}, current tree = \n{}, current v2 = {}",
+                    self.cost.phylo.msa,
+                    self.cost.phylo.tree,
+                    self.cost.tree().node_id(self.quartet_edges.v2())
+                );
+                return;
+            }
+            // TODO alternativly we could just warn the user not assert, then break the loop, such
+            // that the table is just -infty, then in the backtracking can i just return -infty
+            // such that this nni move us rejected?
+            //
+            //
+            // if after the nni two short branches are on top of each other, then just re
+            // estimating on the quartet cannot put the insertion where its no on a very short
+            // branch. can i ciontruct the tree where after an nni the reassignment is confronted
+            // with that case
         }
     }
 

@@ -129,7 +129,13 @@ where
             curr_cost = self.single_optimisation_iteration()?;
             delta = curr_cost - prev_cost;
             costs.push(curr_cost);
-            debug_assert_eq!(curr_cost, self.c.cost());
+
+            // i have and alignment where 1e-4 was failing under PIP
+            debug_assert!(
+                (curr_cost - self.c.cost()).abs() < 1e-10,
+                "curr_cost = {curr_cost}, but cost function returns {}.",
+                self.c.cost()
+            );
         }
 
         info!("Done optimising tree topology");

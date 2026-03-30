@@ -302,7 +302,7 @@ fn rooted_spr_unchecked(tree: &Tree, prune_idx: &NodeIdx, regraft_idx: &NodeIdx)
 
     {
         new_tree.dirty.set(usize::from(prune_sib.idx), true);
-        new_tree.dirty.set(usize::from(prune_par.idx), true);
+        new_tree.dirty.set(usize::from(regraft.idx), true);
     }
 
     {
@@ -343,11 +343,17 @@ fn rooted_spr_unchecked(tree: &Tree, prune_idx: &NodeIdx, regraft_idx: &NodeIdx)
     }
 
     // Tree height should not have changed
-    debug_assert!(relative_eq!(
+    debug_assert!(
+        relative_eq!(
+            new_tree.length,
+            new_tree.nodes.iter().map(|node| node.blen).sum(),
+            epsilon = 1e-10
+        ),
+        "new tree len = {} is not almost equal to sum of branch lengths = {}",
         new_tree.length,
-        new_tree.nodes.iter().map(|node| node.blen).sum(),
-        epsilon = 1e-10
-    ));
+        new_tree.nodes.iter().map(|node| node.blen).sum::<f64>()
+    );
+    // i had a pip tree and msa where with 1e-8 would fail
 
     new_tree.compute_postorder();
     new_tree.compute_preorder();

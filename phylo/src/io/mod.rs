@@ -112,7 +112,7 @@ pub fn read_sequences(path: impl AsRef<Path> + Debug) -> Result<Vec<Record>> {
 pub fn write_sequences_to_file(sequences: &[Record], path: impl AsRef<Path>) -> Result<()> {
     info!("Writing sequences/MSA to file {}", path.as_ref().display());
     if path.as_ref().exists() {
-        bail!(Io, "file already exists")
+         bail!(Io, "file ({}) already exists", path.as_ref().display())
     }
     let mut writer = Writer::to_file(path)?;
     for rec in sequences {
@@ -178,7 +178,7 @@ pub fn read_newick_from_file(path: impl AsRef<Path>) -> Result<Vec<Tree>> {
 pub fn write_newick_to_file(trees: &[Tree], path: impl AsRef<Path>) -> Result<()> {
     info!("Writing newick trees to file {}", path.as_ref().display());
     if path.as_ref().exists() {
-        bail!(Io, "file already exists")
+        bail!(Io, "file ({}) already exists", path.as_ref().display())
     }
     let mut writer = File::create(path)?;
     for tree in trees {
