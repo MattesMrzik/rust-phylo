@@ -982,16 +982,16 @@ fn tkf_update_tree() {
 
 #[test]
 fn tkf92_underflow_short_branches() {
-    let tree = tree!("(((A1:1e-20,B2:2.0)I3:1e-20,C4:2.0)R5:1.0);");
+    let tree = tree!("(((A1:1e-20,B2:2.0)I3:1e-20,C4:2.0)R5:0.0);");
 
     let msa = MASA::from_aligned_with_ancestral(
         // Testing all events on short branches
         Sequences::new(vec![
-            record!("A1", b"-AA-A"),
-            record!("B2", b"A-A--"),
-            record!("I3", b"AAAA-"),
-            record!("C4", b"-----"),
-            record!("R5", b"-----"),
+            record!("A1", b"-AA-AA"),
+            record!("B2", b"A-A--A"),
+            record!("I3", b"AAAA-A"),
+            record!("C4", b"-----A"),
+            record!("R5", b"-----A"),
         ]),
         &tree,
     )

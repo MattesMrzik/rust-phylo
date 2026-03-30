@@ -289,16 +289,18 @@ impl<T: TKFModel, AA: AncestralAlignment> TKFIndelCost<T, AA> {
         let blen = self.phylo.tree.node(node_idx).blen;
         let ln_beta = ln_beta(lambda, mu, blen);
         let mut model_info = self.model_info.borrow_mut();
-        model_info.ln_beta[node_id] = ln_beta;
-        model_info.ln_n0[node_id] = ln_n0(mu, ln_beta);
-        model_info.ln_h1[node_id] = ln_h1(lambda, mu, ln_beta, blen);
         model_info.ln_insertion[node_id] = if node_idx == &self.phylo.tree.root {
             self.model.ln_insertion_factor_at_root()
         } else {
+            // these four don't need to be set for the root, since these events cannot happen at the root
+            model_info.ln_beta[node_id] = ln_beta;
+            model_info.ln_n0[node_id] = ln_n0(mu, ln_beta);
+            model_info.ln_h1[node_id] = ln_h1(lambda, mu, ln_beta, blen);
+            model_info.eta[node_id] = eta(lambda, mu, ln_beta, model_info.ln_n0[node_id], blen);
+            // returning the actual value
             self.model.ln_insertion_factor_at_non_root(ln_beta)
         };
         model_info.previous_event_deletion.set(node_id, false);
-        model_info.eta[node_id] = eta(lambda, mu, ln_beta, model_info.ln_n0[node_id], blen);
         model_info.valid.set(node_id, false);
     }
 
@@ -476,7 +478,7 @@ impl<T: TKFModel, AA: AncestralAlignment> TreeSearchCost for TKFIndelCost<T, AA>
 /// * `x` - A log-probability value, must be non-positive (`x <= 0.0`).
 pub(crate) fn log1mexp(x: f64) -> f64 {
     debug_assert!(x <= 0.0, "log1mexp is only defined for x <= 0");
-
+    println!("x = {}", x);
     if x < -std::f64::consts::LN_2 {
         // Safe: exp(x) is small
         (-x.exp()).ln_1p()
