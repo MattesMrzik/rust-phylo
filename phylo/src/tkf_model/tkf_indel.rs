@@ -478,7 +478,6 @@ impl<T: TKFModel, AA: AncestralAlignment> TreeSearchCost for TKFIndelCost<T, AA>
 /// # Arguments
 /// * `x` - A log-probability value, must be non-positive (`x <= 0.0`).
 pub(crate) fn log1mexp(x: f64) -> f64 {
-    // println!("log1mexp x = {}", x);
     debug_assert!(x <= 0.0, "log1mexp is only defined for x <= 0 but is {}", x);
     warn!(
         "log1mexp is used, make sure that the input x is indeed a log-probability \
@@ -545,69 +544,11 @@ pub(super) fn ln_n0(mu: f64, ln_beta: f64) -> f64 {
     }
 }
 
-fn log_numerator(diff_lm: f64, l: f64, m: f64, t: f64) -> f64 {
-    let lt = l * t;
-    let mt = m * t;
-    let lm_t = (l + m) * t;
-
-    // log(|denom|) safely using log-sub-exp trick, knowing m > l
-    let mx = mt; // mt > lt
-    let log_denom = (m * (mt - mx).exp() - l * (lt - mx).exp()).ln() + mx; // > 0
-
-    // log(e_lm_t * diff_lm)
-    let log_e_lm_diff = lm_t + diff_lm.ln();
-
-    // log-sum-exp for (-denom + e_lm_t*diff_lm)
-    let log_sum = if log_denom > log_e_lm_diff {
-        log_denom + ((-((log_e_lm_diff - log_denom).exp())).ln_1p())
-    } else {
-        log_e_lm_diff + ((-((log_denom - log_e_lm_diff).exp())).ln_1p())
-    };
-
-    // multiply by diff_lm in log-space
-    diff_lm.ln() + log_sum
-}
-
 /// Returns the log of the `n1 / (n0 * lambda * beta)`.
 /// This is used in the case where an insertion follows a deletion,
 /// since the event factors included `n0` for the deletion and `lambda * beta` for the insertion
 /// but under the TKF model they are not independent and instead `n1` should be used.
 /// `Eta` corrects for that.
-#[inline]
-pub(super) fn eta_experiment(l: f64, m: f64, _ln_beta: f64, t: f64) -> f64 {
-    if (l + m) * t > 700.0 {
-        return (l - m) * t;
-    }
-
-    // let elt = (l * t).exp();
-    // let emt = (m * t).exp();
-    // let e_lm_t = ((l + m) * t).exp();
-
-    // let denom = elt * l - emt * m;
-    // let diff_exp = elt - emt; // e^{lt} - e^{mt}
-    let diff_lm = m - l; // (m - l)
-    let lt = l * t;
-    let mt = m * t;
-    let mx = mt;
-    let ln_diff_exp = (-((lt - mx).exp() - (mt - mx).exp())).ln() + mx;
-    let ln_denom = (-(l * (lt - mx).exp() - m * (mt - mx).exp())).ln() + mx;
-
-    // let term1 = -2.0 * (diff_exp / denom).ln();
-    let term1 = -2.0 * (ln_diff_exp - ln_denom);
-
-    // let numerator = diff_lm * (denom + e_lm_t * diff_lm);
-    let ln_numerator = log_numerator(diff_lm, l, m, t);
-
-    // let denominator = (l * m * denom * denom).ln();
-    let denominator = l.ln() + m.ln() + 2.0 * ln_denom;
-
-    let term2 = ln_numerator - denominator;
-
-    let return_eta = term1 + term2;
-    println!("return_eta = {}", return_eta);
-    return_eta
-}
-
 pub(super) fn eta(l: f64, m: f64, _ln_beta: f64, t: f64) -> f64 {
     ugly(l, m, _ln_beta, t) + ln_i1(l, _ln_beta) - ln_n0(m, _ln_beta) - l.ln() - _ln_beta
 }
