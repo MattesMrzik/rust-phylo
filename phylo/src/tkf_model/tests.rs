@@ -1,6 +1,7 @@
 use approx::assert_relative_eq;
 use assert_matches::assert_matches;
 use nalgebra::DVector;
+use rstest::rstest;
 
 use crate::alignment::{Alignment, AncestralAlignment, Mapping, Sequences, MASA};
 use crate::alphabets::Alphabet;
@@ -188,41 +189,35 @@ fn naive_beta(lambda: f64, mu: f64, time: f64) -> f64 {
 }
 
 #[test]
-fn tkf_beta() {
+fn tkf_beta_calculated_by_hand() {
     assert_relative_eq!(naive_beta(0.3, 0.5, 0.7), 0.5461782813185221);
     assert_relative_eq!(ln_beta(0.3, 0.5, 0.7), 0.5461782813185221f64.ln());
 }
 
-#[test]
-fn tkf_beta_short_branch() {
-    // we dont need to test the long branch case because for long branches we get machine precision
-    // anyway (we get 1/m), so no need to recover digits, but for short branches we do
-    let lambda = 0.3;
-    let mu = 0.5;
-    let time = 1e-20;
-    // naive implementation of beta underflows
-    assert_eq!(naive_beta(lambda, mu, time), 0.0);
-    // stable does not, and in the limit as time goes to zero, beta goes to time
-    assert_eq!(ln_beta(lambda, mu, time), time.ln());
-}
-
-#[test]
-fn test_beta() {
-    for &(lambda, mu) in &[
-        (0.01, 0.0100001),
-        (0.01, 5.0),
-        (4.9999, 5.0),
-        (4.999, 100.0),
-        (99.999, 100.0),
-    ] {
-        for time in [1e-16, 1.0, 100.0] {
-            println!(
-                "t = {time}, l = {lambda}, m = {mu} \t naive beta {}, \tln beta {}",
-                naive_beta(lambda, mu, time).ln(),
-                ln_beta(lambda, mu, time)
-            );
-        }
-    }
+#[rstest]
+#[case::short_t_small_l_close_m(1.0e-16, 0.0100000, 0.0100001, -36.84136148790473)]
+#[case::medium_t_small_l_close_m(1.0, 0.0100000, 0.0100001, -0.00995038035812)]
+#[case::long_t_small_l_close_m(100.0, 0.0100000, 0.0100001, 3.91202050542710)]
+#[case::short_t_m_gt_l(1.0e-16, 0.0100000, 5.0000000, -36.84136148790473)]
+#[case::medium_t_m_gt_l(1.0, 0.0100000, 5.0000000, -1.61625322965137)]
+#[case::long_t_m_gt_l(100.0, 0.0100000, 5.0000000, -1.60943791243410)]
+#[case::short_t_m_close_l(1.0e-16, 4.9999000, 5.0000000, -36.84136148790473)]
+#[case::medium_t_m_close_l(1.0, 4.9999000, 5.0000000, -1.79175113599889)]
+#[case::long_t_m_close_l(100.0, 4.9999000, 5.0000000, -1.61142595164059)]
+#[case::short_t_large_m_diff_l(1.0e-16, 4.9990000, 100.00000, -36.84136148790474)]
+#[case::medium_t_large_m_diff_l(1.0, 4.9990000, 100.00000, -4.60517018598809)]
+#[case::long_t_large_m_diff_l(100.0, 4.9990000, 100.00000, -4.60517018598809)]
+#[case::short_t_large_l_close_m(1.0e-16, 99.999000, 100.00000, -36.84136148790474)]
+#[case::medium_t_large_l_close_m(1.0, 99.999000, 100.00000, -4.61511556715904)]
+#[case::long_t_large_l_close_m(100.0, 99.999000, 100.00000, -4.60526526478741)]
+// see https://github.com/MattesMrzik/tkf_mathematica
+fn tkf_ln_beta_mathematica(
+    #[case] time: f64,
+    #[case] lambda: f64,
+    #[case] mu: f64,
+    #[case] expected: f64,
+) {
+    assert_relative_eq!(ln_beta(lambda, mu, time), expected, epsilon = 1e-10);
 }
 
 // ====> n0 <====
@@ -233,7 +228,7 @@ fn n0(mu: f64, beta: f64) -> f64 {
 }
 
 #[test]
-fn tkf_n0() {
+fn tkf_ln_n0_calculated_by_hand() {
     let l = 2.0;
     let m = 3.0;
     let time = 0.5;
@@ -243,13 +238,31 @@ fn tkf_n0() {
     assert_relative_eq!(ln_n0(m, b.ln()), 0.6605755607027574f64.ln());
 }
 
-#[test]
-fn tkf_ln_n0_close_does_not_exceed_zero() {
-    let l = 2.0;
-    let m = 100000.0;
-    let time = 1.0;
-    let b = ln_beta(l, m, time);
-    assert_relative_eq!(ln_n0(m, b), 0.0);
+#[rstest]
+#[case::short_t_small_l_close_m(1.0e-16, 0.0100000, 0.0100001, -41.44652167394282)]
+#[case::medium_t_small_l_close_m(1.0, 0.0100000, 0.0100001, -4.61511056639621)]
+#[case::long_t_small_l_close_m(100.0, 0.0100000, 0.0100001, -0.69313968061099)]
+#[case::short_t_m_gt_l(1.0e-16, 0.0100000, 5.0000000, -35.23192357547063)]
+#[case::medium_t_m_gt_l(1.0, 0.0100000, 5.0000000, -0.00681531721727)]
+#[case::long_t_m_gt_l(100.0, 0.0100000, 5.0000000, 0.0)]
+#[case::short_t_m_close_l(1.0e-16, 4.9999000, 5.0000000, -35.23192357547063)]
+#[case::medium_t_m_close_l(1.0, 4.9999000, 5.0000000, -0.18231322356479)]
+#[case::long_t_m_close_l(100.0, 4.9999000, 5.0000000, -0.00198803920649)]
+#[case::short_t_large_m_diff_l(1.0e-16, 4.9990000, 100.00000, -32.23619130191664)]
+#[case::medium_t_large_m_diff_l(1.0, 4.9990000, 100.00000, 0.0)]
+#[case::long_t_large_m_diff_l(100.0, 4.9990000, 100.00000, 0.0)]
+#[case::short_t_large_l_close_m(1.0e-16, 99.999000, 100.00000, -32.23619130191665)]
+#[case::medium_t_large_l_close_m(1.0, 99.999000, 100.00000, -0.00994538117095)]
+#[case::long_t_large_l_close_m(100.0, 99.999000, 100.00000, -9.50787993145852e-5)]
+// see https://github.com/MattesMrzik/tkf_mathematica
+fn tkf_ln_n0_mathematica(
+    #[case] time: f64,
+    #[case] lambda: f64,
+    #[case] mu: f64,
+    #[case] expected: f64,
+) {
+    let ln_beta = ln_beta(lambda, mu, time);
+    assert_relative_eq!(ln_n0(mu, ln_beta), expected, epsilon = 1e-10);
 }
 
 // ====> h1 <====
@@ -260,7 +273,7 @@ fn naive_h1(lambda: f64, mu: f64, beta: f64, time: f64) -> f64 {
 }
 
 #[test]
-fn tkf_h1() {
+fn tkf_ln_h1_calculated_by_hand() {
     let l = 2.0;
     let m = 3.0;
     let time = 1.5;
@@ -270,43 +283,31 @@ fn tkf_h1() {
     assert_relative_eq!(ln_h1(l, m, b.ln(), time), 0.004350089645603061f64.ln());
 }
 
-#[test]
-fn tkf_h1_long_branch() {
-    // for short ones we get machine precision anyway, so no need to recover digits, but for long
-    // branches we do
-    let l = 2.0;
-    let m = 3.0;
-    let time = 1e10;
-    let b = naive_beta(l, m, time);
-    assert_eq!(naive_h1(l, m, b, time), 0.0);
-    let ln_beta = ln_beta(l, m, time);
-    assert!(ln_h1(l, m, ln_beta, time).is_finite());
-}
-
-#[test]
-fn test_h1() {
-    for &(lambda, mu) in &[
-        (0.01, 0.0100001),
-        (0.01, 5.0),
-        (4.9999, 5.0),
-        (4.999, 100.0),
-        (99.999, 100.0),
-    ] {
-        // for time in [1e-16, 1.0, 100.0] {
-        //     let naive_beta = naive_beta(lambda, mu, time);
-        //     let log_beta = ln_beta(lambda, mu, time);
-        //
-        //     println!(
-        //         "t = {time}, l = {lambda}, m = {mu} \t naive h1 {}, \tln h1 {}",
-        //         naive_h1(lambda, mu, naive_beta, time).ln(),
-        //         ln_h1(lambda, mu, log_beta, time)
-        //     );
-        // }
-        for time in [1e-16, 1.0, 100.0] {
-            let log_beta = ln_beta(lambda, mu, time);
-            println!("{}", ln_h1(lambda, mu, log_beta, time));
-        }
-    }
+#[rstest]
+#[case::short_t_small_l_close_m(1.0e-16, 0.0100000, 0.0100001, -2.00001000000000e-18)]
+#[case::medium_t_small_l_close_m(1.0, 0.0100000, 0.0100001, -0.01995043035812)]
+#[case::long_t_small_l_close_m(100.0, 0.0100000, 0.0100001, -1.69315468056515)]
+#[case::short_t_m_gt_l(1.0e-16, 0.0100000, 5.0000000, -5.01000000000000e-16)]
+#[case::medium_t_m_gt_l(1.0, 0.0100000, 5.0000000, -5.00198839124905)]
+#[case::long_t_m_gt_l(100.0, 0.0100000, 5.0000000, -500.0020020026707)]
+#[case::short_t_m_close_l(1.0e-16, 4.9999000, 5.0000000, -9.99990000000000e-16)]
+#[case::medium_t_m_close_l(1.0, 4.9999000, 5.0000000, -6.79170113641556)]
+#[case::long_t_m_close_l(100.0, 4.9999000, 5.0000000, -506.2116003042919)]
+#[case::short_t_large_m_diff_l(1.0e-16, 4.9990000, 100.00000, -1.04999000000000e-14)]
+#[case::medium_t_large_m_diff_l(1.0, 4.9990000, 100.00000, -100.05128276812716)]
+#[case::long_t_large_m_diff_l(100.0, 4.9990000, 100.00000, -10000.051282768127)]
+#[case::short_t_large_l_close_m(1.0e-16, 99.999000, 100.00000, -1.99999000000000e-14)]
+#[case::medium_t_large_l_close_m(1.0, 99.999000, 100.00000, -104.61461560882571)]
+#[case::long_t_large_l_close_m(100.0, 99.999000, 100.00000, -10009.160852082725)]
+// see https://github.com/MattesMrzik/tkf_mathematica
+fn tkf_ln_h1_mathematica(
+    #[case] time: f64,
+    #[case] lambda: f64,
+    #[case] mu: f64,
+    #[case] expected: f64,
+) {
+    let ln_beta = ln_beta(lambda, mu, time);
+    assert_relative_eq!(ln_h1(lambda, mu, ln_beta, time), expected, epsilon = 1e-10);
 }
 
 // ====> i1 <====
@@ -317,7 +318,7 @@ fn naive_log_i1(lambda: f64, beta: f64) -> f64 {
 }
 
 #[test]
-fn tkf_log_i1() {
+fn tkf_ln_i1_calculated_by_hand() {
     let l = 2.0;
     let m = 3.0;
     let time = 1.0;
@@ -327,19 +328,31 @@ fn tkf_log_i1() {
     assert_relative_eq!(ln_i1(l, b.ln()), -0.8172396554020775);
 }
 
-#[test]
-fn tkf_log_i1_short_branch() {
-    // this test should not be necessary since we need to sum logi1 anyway, so we get machine
-    // presicion anyway, no need to recover digits
-    let l = 2.0;
-    let m = 3.0;
-    let time = 1e-20;
-    let ln_b = ln_beta(l, m, time);
-    // naive implementation of log_i1 underflows
-    let beta = naive_beta(l, m, time);
-    assert_eq!(naive_log_i1(l, beta), 0.0);
-    // stable does not underflow
-    assert!(ln_i1(l, ln_b).is_finite());
+#[rstest]
+#[case::short_t_equal_lm(1.0e-16, 0.0100000, 0.0100001, -1.00000000000000e-18)]
+#[case::medium_t_equal_lm(1.0, 0.0100000, 0.0100001, -0.00995033035812)]
+#[case::long_t_equal_lm(100.0, 0.0100000, 0.0100001, -0.69314468056515)]
+#[case::short_t_m_gt_l(1.0e-16, 0.0100000, 5.0000000, -1.00000000000000e-18)]
+#[case::medium_t_m_gt_l(1.0, 0.0100000, 5.0000000, -0.00198839124905)]
+#[case::long_t_m_gt_l(100.0, 0.0100000, 5.0000000, -0.00200200267067)]
+#[case::short_t_m_close_l(1.0e-16, 4.9999000, 5.0000000, -4.99990000000000e-16)]
+#[case::medium_t_m_close_l(1.0, 4.9999000, 5.0000000, -1.79170113641556)]
+#[case::long_t_m_close_l(100.0, 4.9999000, 5.0000000, -6.21160030429188)]
+#[case::short_t_large_m_diff_l(1.0e-16, 4.9990000, 100.00000, -4.99899999999998e-16)]
+#[case::medium_t_large_m_diff_l(1.0, 4.9990000, 100.00000, -0.05128276812716)]
+#[case::long_t_large_m_diff_l(100.0, 4.9990000, 100.00000, -0.05128276812716)]
+#[case::short_t_large_l_close_m(1.0e-16, 99.999000, 100.00000, -9.99989999999995e-15)]
+#[case::medium_t_large_l_close_m(1.0, 99.999000, 100.00000, -4.61461560882571)]
+#[case::long_t_large_l_close_m(100.0, 99.999000, 100.00000, -9.16085208272545)]
+// see https://github.com/MattesMrzik/tkf_mathematica
+fn tkf_ln_i1_mathematica(
+    #[case] time: f64,
+    #[case] lambda: f64,
+    #[case] mu: f64,
+    #[case] expected: f64,
+) {
+    let ln_beta = ln_beta(lambda, mu, time);
+    assert_relative_eq!(ln_i1(lambda, ln_beta), expected, epsilon = 1e-10);
 }
 
 // ====> n1 <====
@@ -352,7 +365,7 @@ fn naive_log_n1(lambda: f64, mu: f64, beta: f64, time: f64) -> f64 {
 }
 
 #[test]
-fn tkf_log_n1() {
+fn tkf_ln_n1_calculated_by_hand() {
     let l = 2.0;
     let m = 3.0;
     let time = 0.5;
@@ -370,14 +383,13 @@ fn tkf_log_n1() {
 #[cfg(test)]
 fn naive_eta(lambda: f64, mu: f64, beta: f64, time: f64) -> f64 {
     let mut e = naive_log_n1(lambda, mu, beta, time);
-    println!("log n1: {}", e);
     e -= lambda.ln() + beta.ln();
     e -= (mu * beta).ln();
     e
 }
 
 #[test]
-fn tkf_eta_simple() {
+fn tkf_eta_calculated_by_hand() {
     let l = 2.0;
     let m = 3.0;
     let time = 1.5;
@@ -394,72 +406,31 @@ fn tkf_eta_simple() {
     assert_relative_eq!(eta(l, m, b.ln(), time), -2.922778333826742, epsilon = 1e-14);
 }
 
-#[test]
-fn tkf_eta_more_slightly_extreme_examples() {
-    for &(l, m, time) in &[(0.1, 0.11, 0.5), (0.1, 5.0, 4.0), (0.1, 0.1000001, 50.0)] {
-        let b = naive_beta(l, m, time);
-        assert_relative_eq!(
-            naive_eta(l, m, b, time),
-            eta(l, m, b.ln(), time),
-            epsilon = 1e-7
-        );
-    }
-}
-
-#[test]
-fn tkf_eta_does_not_underflow_long_time() {
-    let l = 2.0;
-    let m = 5.0;
-    let time = 167.0;
-    let b = naive_beta(l, m, time);
-    let eta_naive = naive_eta(l, m, b, time);
-    // assert_eq!(eta_naive, f64::NEG_INFINITY);
-    let ln_b = ln_beta(l, m, time);
-    let eta = eta(l, m, ln_b, time);
-    println!("naive eta: {}", eta_naive);
-    println!("eta: {}", eta);
-    assert!(eta.is_finite());
-}
-
-#[test]
-fn tkf_eta_does_not_underflow_short_time() {
-    let l = 2.0;
-    let m = 3.0;
-    let time = 1e-16;
-    let b = naive_beta(l, m, time);
-    let eta_naive = naive_eta(l, m, b, time);
-    // assert_eq!(eta_naive, f64::NEG_INFINITY);
-    let ln_b = ln_beta(l, m, time);
-    let eta = eta(l, m, ln_b, time);
-    println!("eta: {}", eta);
-    println!("eta_naive: {}", eta_naive);
-    assert!(eta.is_finite());
-}
-
-#[test]
-fn test_eta() {
-    for &(lambda, mu) in &[
-        (0.01, 0.0100001),
-        (0.01, 5.0),
-        (4.9999, 5.0),
-        (4.999, 100.0),
-        (99.999, 100.0),
-    ] {
-        // for time in [1e-16, 1.0, 100.0] {
-        //     let naive_beta = naive_beta(lambda, mu, time);
-        //     let log_beta = ln_beta(lambda, mu, time);
-        //
-        //     println!(
-        //         "t = {time}, l = {lambda}, m = {mu} \t naive h1 {}, \tln h1 {}",
-        //         naive_h1(lambda, mu, naive_beta, time).ln(),
-        //         ln_h1(lambda, mu, log_beta, time)
-        //     );
-        // }
-        for time in [1e-16, 1.0, 100.0] {
-            let log_beta = ln_beta(lambda, mu, time);
-            println!("{}", ugly(lambda, mu, log_beta, time));
-        }
-    }
+#[rstest]
+#[case::short_t_equal_lm(1.0e-16, 0.0100000, 0.0100001, -std::f64::consts::LN_2)]
+#[case::medium_t_equal_lm(1.0, 0.0100000, 0.0100001, -0.69981110152058)]
+#[case::long_t_equal_lm(100.0, 0.0100000, 0.0100001, -1.33089630715386)]
+#[case::short_t_m_gt_l(1.0e-16, 0.0100000, 5.0000000, -std::f64::consts::LN_2)]
+#[case::medium_t_m_gt_l(1.0, 0.0100000, 5.0000000, -3.59660487486015)]
+#[case::long_t_m_gt_l(100.0, 0.0100000, 5.0000000, -493.2492380189326)]
+#[case::short_t_m_close_l(1.0e-16, 4.9999000, 5.0000000, -0.69314718055993)]
+#[case::medium_t_m_close_l(1.0, 4.9999000, 5.0000000, -3.26012517688075)]
+#[case::long_t_m_close_l(100.0, 4.9999000, 5.0000000, -12.42920452997077)]
+#[case::short_t_large_m_diff_l(1.0e-16, 4.9990000, 100.00000, -std::f64::consts::LN_2)]
+#[case::medium_t_large_m_diff_l(1.0, 4.9990000, 100.00000, -92.114758161939)]
+#[case::long_t_large_m_diff_l(100.0, 4.9990000, 100.00000, -9497.2066332427)]
+#[case::short_t_large_l_close_m(1.0e-16, 99.999000, 100.00000, -std::f64::consts::LN_2)]
+#[case::medium_t_large_l_close_m(1.0, 99.999000, 100.00000, -9.21033045525952)]
+#[case::long_t_large_l_close_m(100.0, 99.999000, 100.00000, -18.42150400780228)]
+// see https://github.com/MattesMrzik/tkf_mathematica
+fn tkf_eta_mathematica(
+    #[case] time: f64,
+    #[case] lambda: f64,
+    #[case] mu: f64,
+    #[case] expected: f64,
+) {
+    let ln_beta = ln_beta(lambda, mu, time);
+    assert_relative_eq!(eta(lambda, mu, ln_beta, time), expected, epsilon = 1e-7);
 }
 
 #[test]
