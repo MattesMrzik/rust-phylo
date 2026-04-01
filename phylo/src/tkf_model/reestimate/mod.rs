@@ -9,7 +9,7 @@ use crate::random::RandomGenerator;
 use crate::tkf_model::reestimate::cache::{
     possible_assignments_of_edge, possible_del_or_not, prev_compatible_del_or_not,
 };
-use crate::tkf_model::{log_i1, Event, TKFIndelCost, TKFIndelModelInfo, TKFModel};
+use crate::tkf_model::{ln_i1, Event, TKFIndelCost, TKFIndelModelInfo, TKFModel};
 use crate::tree::NodeIdx::{self, Internal, Leaf};
 use crate::{bail, Result};
 
@@ -641,7 +641,7 @@ where
         let nodes = self.cost.phylo.tree.preorder().iter().skip(1); // skip root
         let model_info = self.cost.model_info.borrow();
         for node in nodes {
-            const_per_alignment += log_i1(l, model_info.ln_beta[usize::from(node)]);
+            const_per_alignment += ln_i1(l, model_info.ln_beta[usize::from(node)]);
         }
         const_per_alignment
     }

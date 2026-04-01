@@ -5,6 +5,7 @@ use approx::assert_relative_eq;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use lazy_static::lazy_static;
+use log::warn;
 use nalgebra::{DMatrix, DVector};
 
 use crate::alignment::AncestralAlignment;
@@ -211,7 +212,7 @@ impl<T: TKFModel, AA: AncestralAlignment> TKFIndelCost<T, AA> {
         let model_info = self.model_info.borrow();
         // for every node except the root
         for node in self.phylo.tree.preorder().iter().skip(1) {
-            logl += log_i1(lambda, model_info.ln_beta[usize::from(node)]);
+            logl += ln_i1(lambda, model_info.ln_beta[usize::from(node)]);
         }
         for block_id in 0..model_info.blocks.len() {
             let block_len = model_info.block_lengths[block_id];
@@ -296,7 +297,7 @@ impl<T: TKFModel, AA: AncestralAlignment> TKFIndelCost<T, AA> {
             model_info.ln_beta[node_id] = ln_beta;
             model_info.ln_n0[node_id] = ln_n0(mu, ln_beta);
             model_info.ln_h1[node_id] = ln_h1(lambda, mu, ln_beta, blen);
-            model_info.eta[node_id] = eta(lambda, mu, ln_beta, model_info.ln_n0[node_id], blen);
+            model_info.eta[node_id] = eta(lambda, mu, ln_beta, blen);
             // returning the actual value
             self.model.ln_insertion_factor_at_non_root(ln_beta)
         };
@@ -477,13 +478,17 @@ impl<T: TKFModel, AA: AncestralAlignment> TreeSearchCost for TKFIndelCost<T, AA>
 /// # Arguments
 /// * `x` - A log-probability value, must be non-positive (`x <= 0.0`).
 pub(crate) fn log1mexp(x: f64) -> f64 {
-    debug_assert!(x <= 0.0, "log1mexp is only defined for x <= 0");
-    println!("x = {}", x);
+    // println!("log1mexp x = {}", x);
+    debug_assert!(x <= 0.0, "log1mexp is only defined for x <= 0 but is {}", x);
+    warn!(
+        "log1mexp is used, make sure that the input x is indeed a log-probability \
+        (i.e., non-positive) to avoid incorrect results."
+    );
     if x < -std::f64::consts::LN_2 {
-        // Safe: exp(x) is small
+        // x is small, therefore exp(z) is close to 0, so we can use the stable formula for small n
         (-x.exp()).ln_1p()
     } else {
-        // Dangerous region: x approx 0
+        // x is close to 0, therefore
         (-x.exp_m1()).ln()
     }
 }
@@ -491,11 +496,16 @@ pub(crate) fn log1mexp(x: f64) -> f64 {
 /// Returns the value of `ln(beta(t))` for a branch of length/time `t`.
 /// It is called beta(t) in the TKF papers.
 pub(super) fn ln_beta(lambda: f64, mu: f64, time: f64) -> f64 {
-    let exponent = (lambda - mu) * time;
-    let beta = -exponent.exp_m1() / (mu - lambda * exponent.exp());
-    // TODO: alternatively to using the taylor via exp_m1, we could use the taylor of the whole beta
-    // directly (but only call this if exponent is small)
-    beta.ln()
+    let expo = (lambda - mu) * time;
+
+    // log(1 - exp(x))
+    let term1 = log1mexp(expo);
+
+    // log(mu - lambda * exp(expo))
+    let log_ratio = expo + lambda.ln() - mu.ln();
+    let term2 = mu.ln() + log1mexp(log_ratio);
+
+    term1 - term2
 }
 
 /// Returns the log probability factor of a character being inserted to the right of the immortal link
@@ -503,7 +513,7 @@ pub(super) fn ln_beta(lambda: f64, mu: f64, time: f64) -> f64 {
 /// The `time` is also implicitly included in `beta`.
 /// It is called `p''_1` in the TKF papers.
 #[inline]
-pub(super) fn log_i1(lambda: f64, ln_beta: f64) -> f64 {
+pub(super) fn ln_i1(lambda: f64, ln_beta: f64) -> f64 {
     let x = ln_beta + lambda.ln(); // ln(lambda * beta)
     log1mexp(x)
 }
@@ -513,8 +523,7 @@ pub(super) fn log_i1(lambda: f64, ln_beta: f64) -> f64 {
 /// It is called `p_1` in the TKF papers.
 #[inline]
 pub(super) fn ln_h1(lambda: f64, mu: f64, ln_beta: f64, time: f64) -> f64 {
-    let x = ln_beta + lambda.ln(); // ln(lambda * beta)
-    -mu * time + log1mexp(x)
+    -mu * time + ln_i1(lambda, ln_beta)
 }
 
 /// Returns the log probability factor of a character being deleted along a branch of length `time`.
@@ -522,26 +531,41 @@ pub(super) fn ln_h1(lambda: f64, mu: f64, ln_beta: f64, time: f64) -> f64 {
 /// The `time` is implicitly included in `beta`.
 #[inline]
 pub(super) fn ln_n0(mu: f64, ln_beta: f64) -> f64 {
-    mu.ln() + ln_beta
+    let x = mu.ln() + ln_beta;
+    if x > 0.0 {
+        debug_assert!(
+            x < 1e-12,
+            "ln_n0 ({}) is much larger than 0 but should at \
+            most be slightly larger due to numerical issues",
+            x
+        );
+        0.0
+    } else {
+        x
+    }
 }
 
-/// Returns the log probability factor of a new character being inserted right of a character that is
-/// deleted along a branch of length `time`.
-/// The `time` is also implicitly included in beta.
-/// It is called `p'_1` in the TKF papers.
-#[inline]
-pub(super) fn log_n1(lambda: f64, mu: f64, ln_beta: f64, time: f64) -> f64 {
-    // Using some tricks to ensure numerical stability
-    let log_sum_exp1 = -mu * time;
-    let log_sum_exp2 = ln_beta + mu.ln();
-    let log_sum_exp_max = log_sum_exp1.max(log_sum_exp2);
-    let log_sum_exp = log_sum_exp_max
-        + ((log_sum_exp1 - log_sum_exp_max).exp() + (log_sum_exp2 - log_sum_exp_max).exp()).ln();
-    let term1 = log1mexp(log_sum_exp);
+fn log_numerator(diff_lm: f64, l: f64, m: f64, t: f64) -> f64 {
+    let lt = l * t;
+    let mt = m * t;
+    let lm_t = (l + m) * t;
 
-    let term2_x = ln_beta + lambda.ln(); // ln(lambda * beta)
-    let term2 = log1mexp(term2_x);
-    term1 + term2
+    // log(|denom|) safely using log-sub-exp trick, knowing m > l
+    let mx = mt; // mt > lt
+    let log_denom = (m * (mt - mx).exp() - l * (lt - mx).exp()).ln() + mx; // > 0
+
+    // log(e_lm_t * diff_lm)
+    let log_e_lm_diff = lm_t + diff_lm.ln();
+
+    // log-sum-exp for (-denom + e_lm_t*diff_lm)
+    let log_sum = if log_denom > log_e_lm_diff {
+        log_denom + ((-((log_e_lm_diff - log_denom).exp())).ln_1p())
+    } else {
+        log_e_lm_diff + ((-((log_denom - log_e_lm_diff).exp())).ln_1p())
+    };
+
+    // multiply by diff_lm in log-space
+    diff_lm.ln() + log_sum
 }
 
 /// Returns the log of the `n1 / (n0 * lambda * beta)`.
@@ -549,14 +573,129 @@ pub(super) fn log_n1(lambda: f64, mu: f64, ln_beta: f64, time: f64) -> f64 {
 /// since the event factors included `n0` for the deletion and `lambda * beta` for the insertion
 /// but under the TKF model they are not independent and instead `n1` should be used.
 /// `Eta` corrects for that.
-/// The `time` is also implicitly included in `beta` and `n0`.
 #[inline]
-pub(super) fn eta(lambda: f64, mu: f64, ln_beta: f64, ln_n0: f64, time: f64) -> f64 {
-    let mut eta = log_n1(lambda, mu, ln_beta, time);
-    eta -= lambda.ln() + ln_beta;
-    eta -= ln_n0;
-    eta
+pub(super) fn eta_experiment(l: f64, m: f64, _ln_beta: f64, t: f64) -> f64 {
+    if (l + m) * t > 700.0 {
+        return (l - m) * t;
+    }
+
+    // let elt = (l * t).exp();
+    // let emt = (m * t).exp();
+    // let e_lm_t = ((l + m) * t).exp();
+
+    // let denom = elt * l - emt * m;
+    // let diff_exp = elt - emt; // e^{lt} - e^{mt}
+    let diff_lm = m - l; // (m - l)
+    let lt = l * t;
+    let mt = m * t;
+    let mx = mt;
+    let ln_diff_exp = (-((lt - mx).exp() - (mt - mx).exp())).ln() + mx;
+    let ln_denom = (-(l * (lt - mx).exp() - m * (mt - mx).exp())).ln() + mx;
+
+    // let term1 = -2.0 * (diff_exp / denom).ln();
+    let term1 = -2.0 * (ln_diff_exp - ln_denom);
+
+    // let numerator = diff_lm * (denom + e_lm_t * diff_lm);
+    let ln_numerator = log_numerator(diff_lm, l, m, t);
+
+    // let denominator = (l * m * denom * denom).ln();
+    let denominator = l.ln() + m.ln() + 2.0 * ln_denom;
+
+    let term2 = ln_numerator - denominator;
+
+    let return_eta = term1 + term2;
+    println!("return_eta = {}", return_eta);
+    return_eta
 }
+
+pub(super) fn eta(l: f64, m: f64, _ln_beta: f64, t: f64) -> f64 {
+    ugly(l, m, _ln_beta, t) + ln_i1(l, _ln_beta) - ln_n0(m, _ln_beta) - l.ln() - _ln_beta
+}
+
+pub(super) fn ugly(l: f64, m: f64, _ln_beta: f64, t: f64) -> f64 {
+    let critical_condition_1 = (-l * t).exp() == 1.0;
+    let critical_condition_2 = (-m * t).exp() == 1.0;
+    let critical_condition_3 = ((l - m) * t).exp() == 1.0;
+    // println!("t = {}", t);
+    // println!("t is less the constant {}", t < 1e-5);
+    let critical_condition_4 = (m - l) - m * (-l * t).exp() + l * (-m * t).exp() <= 0.0 && t < 1e-5;
+    let critical_condition = critical_condition_1
+        || critical_condition_2
+        || critical_condition_3
+        || critical_condition_4;
+
+    if critical_condition {
+        return l.ln() + m.ln() + 2.0 * t.ln() - 2.0f64.ln() + (-(l + 4.0 * m) * t / 3.0).ln_1p();
+    }
+
+    let term1 = (l - m) * t;
+    let term2 = ((m - l) - m * (-l * t).exp() + l * (-m * t).exp()).ln();
+    // println!(
+    //     " -lt exp = {}, -mt exp = {}",
+    //     (-l * t).exp(),
+    //     (-m * t).exp()
+    // );
+    // println!(
+    //     "innder = {}",
+    //     (m - l) - m * (-l * t).exp() + l * (-m * t).exp()
+    // );
+    let term3 = -(m - l * ((l - m) * t).exp()).ln();
+    // println!("term1 = {}, term2 = {}, term3 = {}", term1, term2, term3);
+    term1 + term2 + term3
+}
+
+pub(super) fn eta_stable(l: f64, m: f64, _ln_beta: f64, t: f64) -> f64 {
+    if (l + m) * t > 700.0 {
+        return (l - m) * t;
+    }
+    let elt = (l * t).exp();
+    let emt = (m * t).exp();
+    let e_lm_t = ((l + m) * t).exp();
+
+    let denom = elt * l - emt * m; // common term
+    let diff_exp = elt - emt; // e^{lt} - e^{mt}
+    let diff_lm = m - l; // (m - l)
+
+    let term1 = -2.0 * (diff_exp / denom).ln();
+
+    let numerator = diff_lm * (denom + e_lm_t * diff_lm);
+    let denominator = l * m * denom * denom;
+
+    let term2 = (numerator / denominator).ln();
+
+    term1 + term2
+
+    // gefühlt hatte ich schonmal dass ich eine version hatte die auch bei kleinen stabil war und das result von
+    // mathematic bekommen hat: -0.69314718055994547608389878812484212363105568991579846399722321937024547382152`50
+}
+// #[inline]
+// pub(super) fn eta(lambda: f64, mu: f64, ln_beta: f64, time: f64) -> f64 {
+//     let log_one_minus_lbeta = log1mexp(ln_beta + lambda.ln());
+//
+//     // log(mu * beta) where beta = (1 - e^{-(mu-lambda)t}) / (mu - lambda*e^{-(mu-lambda)t})
+//     // mu * beta = (1 - u) / (1 - lambda/mu * u)   where u = e^{-(mu-lambda)t}
+//     // mu.ln() cancels cleanly:
+//     let u = (-(mu - lambda) * time).exp(); // e^{-(mu-lambda)t}, in (0,1)
+//     let log_mu_beta = (-u).ln_1p() - (-(lambda / mu) * u).ln_1p(); // -ln(1 - lambda/mu * u), stable
+//
+//     // log(1 - e^{-mu*t}), stable for all mu*t > 0
+//     let log_a = log1mexp(-mu * time);
+//
+//     // log(mu*beta / (1 - e^{-mu*t})) — clamped to handle large-t numerical fluke
+//     // where both terms -> 0 and float rounding can flip the sign of a tiny negative value
+//     let log_ratio = (log_mu_beta - log_a).min(-f64::EPSILON);
+//     // print if the epsilon was actually used
+//     if log_ratio == -f64::EPSILON {
+//         println!("Clamping log_ratio to -epsilon due to numerical issues. log_mu_beta: {}, log_a: {}, time: {}", log_mu_beta, log_a, time);
+//     }
+//
+//     let term1 = log_a + log1mexp(log_ratio);
+//     // println!("my term1 exp {}", term1.exp());
+//     // let term1 = -72.584110687f64;
+//     // println!("walpah term1 exp {}", term1.exp());
+//     // println!("eta term1 = {}", term1);
+//     term1 + log_one_minus_lbeta - mu.ln() - lambda.ln() - 2.0 * ln_beta
+// }
 
 /// Given the right exclusive block borders, returns the lengths of the blocks.
 /// For example, given [3, 5, 8], the block lengths are [3, 2, 3].
