@@ -553,7 +553,12 @@ pub(super) fn u(l: f64, m: f64, _ln_beta: f64, t: f64) -> f64 {
     let critical_condition_1 = (-l * t).exp() == 1.0;
     let critical_condition_2 = (-m * t).exp() == 1.0;
     let critical_condition_3 = ((l - m) * t).exp() == 1.0;
-    let critical_condition_4 = (m - l) - m * (-l * t).exp() + l * (-m * t).exp() <= 0.0 && t < 1e-5;
+    // This was fine for the tests on mac m chip but not on linux x86
+    // let critical_condition_4 = (m - l) - m * (-l * t).exp() + l * (-m * t).exp() <= 0.0 && t < 1e-5;
+    // So using this instead
+    let critical_condition_4 =
+        ((m - l) - m * (-l * t).exp() + l * (-m * t).exp()).abs() <= 1e-11 && t < 1e-5;
+
     let critical_condition = critical_condition_1
         || critical_condition_2
         || critical_condition_3
