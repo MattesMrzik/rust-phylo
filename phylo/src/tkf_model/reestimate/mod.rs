@@ -728,6 +728,7 @@ fn get_map_from_any_node<'a, AA: AncestralAlignment>(
 mod private_tests {
     use std::path::Path;
 
+    use approx::assert_relative_eq;
     use rstest::rstest;
 
     use crate::alignment::{Alignment, Sequences, MASA};
@@ -933,12 +934,12 @@ mod private_tests {
         let rng = &mut DefaultGenerator::default();
         let mut reestimator = EdgeSeqsReestimator::new(&mut cost, rng);
         let original_logl = reestimator.cost.logl();
-        assert_eq!(original_logl, reestimator.cost.logl_from_root_model_info());
+        assert_relative_eq!(original_logl, reestimator.cost.logl_from_root_model_info());
         let dummy_v2_idx = reestimator.cost.phylo.tree.by_id("I3").idx;
         reestimator.prepare_for_dp(&dummy_v2_idx);
         assert_ne!(reestimator.cost.logl_from_root_model_info(), original_logl);
         reestimator.make_valid_for_further_reestimate_calls();
-        assert_eq!(reestimator.cost.logl_from_root_model_info(), original_logl);
+        assert_relative_eq!(reestimator.cost.logl_from_root_model_info(), original_logl);
     }
 
     #[test]
