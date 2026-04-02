@@ -269,7 +269,7 @@ mod private_tests {
     fn tkf92_param_range_invalid_index() {
         let model = TKF92IndelModel {
             params: vec![0.5, 1.0, 0.3],
-            log_r: 0.0, // cache filled with dummy since it is not needed here
+            log_r: 0.0, // cache filled with dummy, since it is not needed here
             ln_one_minus_r_over_r: 0.0, // cache filled with dummy since it is not needed here
         };
         // Use an invalid index
@@ -280,8 +280,8 @@ mod private_tests {
     fn tkf92_model_fmt() {
         let tkf_indel_model = TKF92IndelModel {
             params: vec![1.1, 2.0, 0.3],
-            log_r: 0.0,                 // cache filled with dummy since it is not printed
-            ln_one_minus_r_over_r: 0.0, // cache filled with dummy since it is not printed
+            log_r: 0.0,                 // cache filled with dummy since, it is not printed
+            ln_one_minus_r_over_r: 0.0, // cache filled with dummy since, it is not printed
         };
 
         let fmt = format!("{}", tkf_indel_model);
