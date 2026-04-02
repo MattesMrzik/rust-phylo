@@ -633,7 +633,7 @@ where
     }
 
     /// Computes the constant part of the log likelihood that is independent of the alignment and
-    /// only depends on the tree and model parameters (in log space).
+    /// only depends on the tree and model parameters.
     fn const_per_alignment(&self) -> f64 {
         let l = self.cost.model.lambda();
         let m = self.cost.model.mu();
