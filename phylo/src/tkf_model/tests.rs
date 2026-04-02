@@ -83,14 +83,14 @@ fn tkf91_indel_logl_without_aggregation<AA: AncestralAlignment>(
                 last_event_deletion[node_id_value] = false;
             } else if !parent_is_gap && current_is_gap {
                 // deletion
-                event_prob *= n0(mu, beta);
+                event_prob *= n0_naive(mu, beta);
                 last_event_deletion[node_id_value] = true;
             } else if parent_is_gap && !current_is_gap {
                 // insertion
                 if last_event_deletion[node_id_value] {
-                    prob += naive_log_n1(lambda, mu, beta, time);
+                    prob += naive_ln_n1(lambda, mu, beta, time);
                     prob -= (lambda * beta).ln();
-                    prob -= n0(mu, beta).ln();
+                    prob -= n0_naive(mu, beta).ln();
                 }
                 event_prob *= lambda * beta;
                 last_event_deletion[node_id_value] = false;
@@ -159,14 +159,14 @@ fn tkf92_indel_logl_without_aggregation<AA: AncestralAlignment>(
                 last_event_deletion[node_id_value] = false;
             } else if !parent_is_gap && current_is_gap {
                 // deletion
-                event_prob *= n0(mu, beta);
+                event_prob *= n0_naive(mu, beta);
                 last_event_deletion[node_id_value] = true;
             } else if parent_is_gap && !current_is_gap {
                 // insertion
                 if last_event_deletion[node_id_value] {
-                    prob += naive_log_n1(lambda, mu, beta, time);
+                    prob += naive_ln_n1(lambda, mu, beta, time);
                     prob -= (lambda * beta).ln();
-                    prob -= n0(mu, beta).ln();
+                    prob -= n0_naive(mu, beta).ln();
                 }
                 event_prob *= lambda * beta * (1.0 - r) / r;
                 prob += fragment_len as f64 * r.ln();
@@ -180,6 +180,7 @@ fn tkf92_indel_logl_without_aggregation<AA: AncestralAlignment>(
 }
 
 #[cfg(test)]
+/// A direct implementation of the TKF function, not numerically stable, used for testing purposes only.
 fn naive_beta(lambda: f64, mu: f64, time: f64) -> f64 {
     let exp_term = ((lambda - mu) * time).exp();
     (1.0 - exp_term) / (mu - lambda * exp_term)
@@ -192,7 +193,8 @@ fn tkf_beta_calculated_by_hand() {
 }
 
 #[cfg(test)]
-fn n0(mu: f64, beta: f64) -> f64 {
+/// A direct implementation of the TKF function, not numerically stable, used for testing purposes only.
+fn n0_naive(mu: f64, beta: f64) -> f64 {
     mu * beta
 }
 
@@ -203,11 +205,12 @@ fn tkf_ln_n0_calculated_by_hand() {
     let time = 0.5;
     let b = naive_beta(l, m, time);
     // (3(1-e^(-.5))/(3-2*e^(-.5)))
-    assert_relative_eq!(n0(m, b), 0.6605755607027574);
+    assert_relative_eq!(n0_naive(m, b), 0.6605755607027574);
     assert_relative_eq!(ln_n0(m, b.ln()), 0.6605755607027574f64.ln());
 }
 
 #[cfg(test)]
+/// A direct implementation of the TKF function, not numerically stable, used for testing purposes only.
 fn naive_h1(lambda: f64, mu: f64, beta: f64, time: f64) -> f64 {
     (-mu * time).exp() * (1.0 - lambda * beta)
 }
@@ -224,7 +227,8 @@ fn tkf_ln_h1_calculated_by_hand() {
 }
 
 #[cfg(test)]
-fn naive_log_i1(lambda: f64, beta: f64) -> f64 {
+/// A direct implementation of the TKF function, not numerically stable, used for testing purposes only.
+fn naive_ln_i1(lambda: f64, beta: f64) -> f64 {
     (1.0 - lambda * beta).ln()
 }
 
@@ -235,12 +239,13 @@ fn tkf_ln_i1_calculated_by_hand() {
     let time = 1.0;
     let b = naive_beta(l, m, time);
     // log((1-2(1-e^(-1))/(3-2*e^(-1)))
-    assert_relative_eq!(naive_log_i1(l, b), -0.8172396554020775);
+    assert_relative_eq!(naive_ln_i1(l, b), -0.8172396554020775);
     assert_relative_eq!(ln_i1(l, b.ln()), -0.8172396554020775);
 }
 
 #[cfg(test)]
-fn naive_log_n1(lambda: f64, mu: f64, beta: f64, time: f64) -> f64 {
+/// A direct implementation of the TKF function, not numerically stable, used for testing purposes only.
+fn naive_ln_n1(lambda: f64, mu: f64, beta: f64, time: f64) -> f64 {
     let term1 = 1.0 - (-mu * time).exp() - mu * beta;
     let term2 = 1.0 - lambda * beta;
     (term1 * term2).ln()
@@ -254,15 +259,16 @@ fn tkf_ln_n1_calculated_by_hand() {
     let b = naive_beta(l, m, time);
     // log((1-e^(-1.5) - 3(1-e^(-.5))/(3-2*e^(-.5)) )* (1-2(1-e^(-.5))/(3-2*e^(-.5)))   (2(1-e^(-1))/(3-2*e^(-1)))^0)
     assert_relative_eq!(
-        naive_log_n1(l, m, b, time),
+        naive_ln_n1(l, m, b, time),
         -2.732135332549935,
         epsilon = 1e-14
     );
 }
 
 #[cfg(test)]
+/// A direct implementation of the TKF function, not numerically stable, used for testing purposes only.
 fn naive_eta(lambda: f64, mu: f64, beta: f64, time: f64) -> f64 {
-    let mut e = naive_log_n1(lambda, mu, beta, time);
+    let mut e = naive_ln_n1(lambda, mu, beta, time);
     e -= lambda.ln() + beta.ln();
     e -= (mu * beta).ln();
     e
@@ -641,7 +647,7 @@ fn tkf91_indel_logl() {
         naive_beta(lambda, mu, tree.by_id("I3").blen),
         tree.by_id("I3").blen,
     );
-    x *= n0(mu, naive_beta(lambda, mu, tree.by_id("B2").blen));
+    x *= n0_naive(mu, naive_beta(lambda, mu, tree.by_id("B2").blen));
     manual_calculation += x.ln();
     // third block ([3:7], insertion at A1)
     let x = lambda * naive_beta(lambda, mu, tree.by_id("C4").blen);
@@ -649,13 +655,13 @@ fn tkf91_indel_logl() {
     // fourth block ([7:10], insertion at B2)
     let x = lambda * naive_beta(lambda, mu, tree.by_id("B2").blen);
     manual_calculation += x.ln() * 3.0;
-    manual_calculation += naive_log_n1(
+    manual_calculation += naive_ln_n1(
         lambda,
         mu,
         naive_beta(lambda, mu, tree.by_id("B2").blen),
         tree.by_id("B2").blen,
     );
-    manual_calculation -= n0(mu, naive_beta(lambda, mu, tree.by_id("B2").blen)).ln();
+    manual_calculation -= n0_naive(mu, naive_beta(lambda, mu, tree.by_id("B2").blen)).ln();
     manual_calculation -= (lambda * naive_beta(lambda, mu, tree.by_id("B2").blen)).ln();
 
     // assert
@@ -721,7 +727,7 @@ fn tkf92_indel_logl() {
         naive_beta(lambda, mu, tree.by_id("I3").blen),
         tree.by_id("I3").blen,
     );
-    x *= n0(mu, naive_beta(lambda, mu, tree.by_id("B2").blen));
+    x *= n0_naive(mu, naive_beta(lambda, mu, tree.by_id("B2").blen));
     manual_calculation += x.ln();
     // third block ([3:7], insertion at A1)
     let x = lambda * naive_beta(lambda, mu, tree.by_id("C4").blen) * (1.0 - r) / r;
@@ -729,13 +735,13 @@ fn tkf92_indel_logl() {
     // fourth block ([7:10], insertion at B2)
     let x = lambda * naive_beta(lambda, mu, tree.by_id("B2").blen) * (1.0 - r) / r;
     manual_calculation += x.ln() + 2.0 * (1.0 + x).ln();
-    manual_calculation += naive_log_n1(
+    manual_calculation += naive_ln_n1(
         lambda,
         mu,
         naive_beta(lambda, mu, tree.by_id("B2").blen),
         tree.by_id("B2").blen,
     );
-    manual_calculation -= n0(mu, naive_beta(lambda, mu, tree.by_id("B2").blen)).ln();
+    manual_calculation -= n0_naive(mu, naive_beta(lambda, mu, tree.by_id("B2").blen)).ln();
     manual_calculation -= (lambda * naive_beta(lambda, mu, tree.by_id("B2").blen)).ln();
 
     // assert
