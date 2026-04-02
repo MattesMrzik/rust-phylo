@@ -484,16 +484,16 @@ pub(crate) fn log1mexp(x: f64) -> f64 {
         Please report this at {REPORT_ISSUES_URL}."
     );
     if x < -std::f64::consts::LN_2 {
-        // x is small, therefore exp(z) is close to 0, so we can use the stable formula for small n
+        // x is small, therefore exp(x) is close to 0, so we use the stable formula for ln
         (-x.exp()).ln_1p()
     } else {
-        // x is close to 0, therefore
+        // x might be close to 0, therefore we use the stable formula for exp
         (-x.exp_m1()).ln()
     }
 }
 
 /// Returns the value of `ln(beta(t))` for a branch of length/time `t`.
-/// It is called beta(t) in the TKF papers.
+/// See the TKF papers.
 pub(super) fn ln_beta(lambda: f64, mu: f64, time: f64) -> f64 {
     let expo = (lambda - mu) * time;
     let term1 = log1mexp(expo);
