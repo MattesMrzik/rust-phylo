@@ -556,16 +556,15 @@ pub(super) fn u(l: f64, m: f64, _ln_beta: f64, t: f64) -> f64 {
     // This was fine for the tests on mac m chip but not on linux x86
     // let critical_condition_4 = (m - l) - m * (-l * t).exp() + l * (-m * t).exp() <= 0.0 && t < 1e-5;
     // So using this instead
-    let critical_condition_4 =
-        ((m - l) - m * (-l * t).exp() + l * (-m * t).exp()).abs() <= 1e-11 && t < 1e-5;
+    let critical_condition_4 = ((m - l) - m * (-l * t).exp() + l * (-m * t).exp()).abs() <= 1e-11;
 
     let critical_condition = critical_condition_1
         || critical_condition_2
         || critical_condition_3
         || critical_condition_4;
 
-    if critical_condition {
-        // using the Taylor expansion
+    if critical_condition && t < 1e-5 {
+        // using the Taylor expansion around t = 0 and for small times t
         return l.ln() + m.ln() + 2.0 * t.ln() - 2.0f64.ln() + (-(l + 4.0 * m) * t / 3.0).ln_1p();
     }
 
