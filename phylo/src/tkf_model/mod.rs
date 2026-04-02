@@ -191,4 +191,4 @@ mod tkf92_fixed_fragmentation;
 pub use tkf92_fixed_fragmentation::*;
 
 #[cfg(test)]
-mod large_mathematica_tests;
+mod tkf_numerical_tests;
