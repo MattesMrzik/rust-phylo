@@ -455,9 +455,7 @@ fn tkf92_reestimate_large_tree_for_file_iterative() {
         let max_dp = reestimator.reestimate_unchecked(node);
         // Perform brute force calculation
         let cost_for_brute_force = TKF92IndelAddBlocksCostBuilder::new(
-            lambda,
-            mu,
-            r,
+            &[lambda, mu, r],
             initial_msa_blocking.clone(),
             reestimator.phylo().clone(),
         )
@@ -473,9 +471,7 @@ fn tkf92_reestimate_large_tree_for_file_iterative() {
         );
         // Create a clean cost to compare against
         let clean_cost = TKF92IndelAddBlocksCostBuilder::new(
-            lambda,
-            mu,
-            r,
+            &[lambda, mu, r],
             initial_msa_blocking.clone(),
             reestimator.phylo().clone(),
         )

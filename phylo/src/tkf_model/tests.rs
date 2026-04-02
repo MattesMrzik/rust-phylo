@@ -511,19 +511,20 @@ fn tkf92_param_range() {
 
 #[test]
 fn tkf92_fixed_param_range() {
-    let tkf_cost =
-        TKF92FixedIndelCostBuilder::new(1.0, 2.0, 0.3, vec![], setup_test_phylo(Alphabet::dna()))
-            .build()
-            .unwrap();
+    let tkf_cost = TKF92FixedIndelCostBuilder::new(
+        &[1.0, 2.0, 0.3],
+        vec![],
+        setup_test_phylo(Alphabet::dna()),
+    )
+    .build()
+    .unwrap();
     tkf92_indel_param_range(&tkf_cost);
 }
 
 #[test]
 fn tkf92_add_param_range() {
     let tkf_cost = TKF92IndelAddBlocksCostBuilder::new(
-        1.0,
-        2.0,
-        0.3,
+        &[1.0, 2.0, 0.3],
         vec![],
         setup_test_phylo(Alphabet::dna()),
     )
@@ -703,6 +704,24 @@ fn tkf91_cost_builder_fails() {
 }
 
 #[test]
+fn tkf91_build_default() {
+    let tkf_indel_cost = TKF91IndelCostBuilder::new(&[], setup_test_phylo(Alphabet::dna()))
+        .build()
+        .unwrap();
+    assert_eq!(tkf_indel_cost.model.lambda(), DEFAULT_LAMBDA);
+    assert_eq!(tkf_indel_cost.model.mu(), DEFAULT_MU);
+}
+
+#[test]
+fn tkf91_build_default_one_param() {
+    let tkf_indel_cost = TKF91IndelCostBuilder::new(&[0.0331], setup_test_phylo(Alphabet::dna()))
+        .build()
+        .unwrap();
+    assert_eq!(tkf_indel_cost.model.lambda(), DEFAULT_LAMBDA);
+    assert_eq!(tkf_indel_cost.model.mu(), DEFAULT_MU);
+}
+
+#[test]
 fn tkf92_cost_builder_fails() {
     let phylo = setup_test_phylo(Alphabet::protein());
     let subst_model = SubstModel::<GTR>::new(&[], &[]);
@@ -713,6 +732,36 @@ fn tkf92_cost_builder_fails() {
         tkf92_err, Err(Error::Alphabet(msg)) if msg.contains(
         "alphabet mismatch between model and alignment")
     );
+}
+
+#[test]
+fn tkf92_build_default() {
+    let tkf_indel_cost = TKF92IndelCostBuilder::new(&[], setup_test_phylo(Alphabet::dna()))
+        .build()
+        .unwrap();
+    assert_eq!(tkf_indel_cost.model.lambda(), DEFAULT_LAMBDA);
+    assert_eq!(tkf_indel_cost.model.mu(), DEFAULT_MU);
+}
+
+#[test]
+fn tkf92_build_default_one_param() {
+    let tkf_indel_cost = TKF92IndelCostBuilder::new(&[0.0331], setup_test_phylo(Alphabet::dna()))
+        .build()
+        .unwrap();
+    assert_eq!(tkf_indel_cost.model.lambda(), DEFAULT_LAMBDA);
+    assert_eq!(tkf_indel_cost.model.mu(), DEFAULT_MU);
+    assert_eq!(tkf_indel_cost.model.r(), DEFAULT_R);
+}
+
+#[test]
+fn tkf92_fixed_build_default() {
+    let tkf_indel_cost =
+        TKF92FixedIndelCostBuilder::new(&[], vec![], setup_test_phylo(Alphabet::dna()))
+            .build()
+            .unwrap();
+    assert_eq!(tkf_indel_cost.model.lambda(), DEFAULT_LAMBDA);
+    assert_eq!(tkf_indel_cost.model.mu(), DEFAULT_MU);
+    assert_eq!(tkf_indel_cost.model.r(), DEFAULT_R);
 }
 
 #[test]

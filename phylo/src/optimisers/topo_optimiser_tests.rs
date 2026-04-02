@@ -974,9 +974,7 @@ fn tkf92_topo_opti() {
             tree: result.cost.tree().clone(),
         };
         let new_indel_cost = TKF92IndelAddBlocksCostBuilder::new(
-            lambda,
-            mu,
-            r,
+            &[lambda, mu, r],
             initial_msa_blocking.clone(),
             new_phylo.clone(),
         )
