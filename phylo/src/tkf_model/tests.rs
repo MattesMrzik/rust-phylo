@@ -1013,8 +1013,7 @@ fn tkf_update_tree() {
 
 #[test]
 fn tkf92_underflow_short_branches() {
-    // fails if blens smaller or equal to 1e-17
-    let tree = tree!("(((A1:1e-16,B2:2.0)I3:1e-16,C4:2.0)R5:0.0);");
+    let tree = tree!("(((A1:1e-20,B2:2.0)I3:1e-16,C4:2.0)R5:0.0);");
 
     let msa = MASA::from_aligned_with_ancestral(
         // Testing all events on short branches
@@ -1042,7 +1041,7 @@ fn tkf92_underflow_short_branches() {
 
 #[test]
 fn tkf92_underflow_short_branches_and_large_mu() {
-    let tree = tree!("(((A1:1e-16,B2:2.0)I3:1e-16,C4:2.0)R5:0.0);");
+    let tree = tree!("(((A1:1e-20,B2:2.0)I3:1e-16,C4:2.0)R5:0.0);");
 
     let msa = MASA::from_aligned_with_ancestral(
         // Testing all events on short branches
@@ -1065,6 +1064,5 @@ fn tkf92_underflow_short_branches_and_large_mu() {
         .unwrap();
     let logl = tkf92_cost.logl();
     assert!(!logl.is_nan());
-    println!("Log-likelihood: {}", logl);
     assert!(logl.is_finite());
 }
