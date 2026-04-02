@@ -124,7 +124,8 @@ impl<Q: QMatrix> EvoModel for PIPModel<Q> {
         self.freqs
             .view_mut((0, 0), self.subst_q.freqs().shape())
             .copy_from(self.subst_q.freqs());
-        pip_q(&mut self.q, self.subst_q.q(), self.params[1]);    }
+        pip_q(&mut self.q, self.subst_q.q(), self.params[1]);
+    }
 
     fn params(&self) -> &[f64] {
         &self.params
