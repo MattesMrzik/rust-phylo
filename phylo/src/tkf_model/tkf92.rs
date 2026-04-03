@@ -93,6 +93,7 @@ impl TKFModel for TKF92IndelModel {
     }
 
     fn ln_insertion_factor_at_non_root(&self, ln_beta: f64) -> f64 {
+        // TODO: this lambda.ln() could be cached, see https://github.com/acg-team/rust-phylo/issues/152
         self.lambda().ln() + ln_beta + self.ln_one_minus_r_over_r
     }
 
@@ -101,7 +102,7 @@ impl TKFModel for TKF92IndelModel {
         // - True underflow (< -745): not a concern, f64 lacks precision at that scale anyway.
         //   (when adding to the other terms)
         // - Near machine epsilon (< -36): the approximation
-        //     m * ln(1 + x) ~~ ln((1 + x)^m) ~~ ln(1 + m*x) ~~ m*x
+        //     m * ln(1 + x) approx ln((1 + x)^m) approx ln(1 + m*x) ~~ m*x
         //   recovers log(m)  bits of precision, at the cost of two linearization
         //   errors. Whether the net gain is positive requires further investigation.
         ln_tree_event_factor
@@ -268,7 +269,7 @@ mod private_tests {
     fn tkf92_param_range_invalid_index() {
         let model = TKF92IndelModel {
             params: vec![0.5, 1.0, 0.3],
-            log_r: 0.0, // cache filled with dummy since it is not needed here
+            log_r: 0.0, // cache filled with dummy, since it is not needed here
             ln_one_minus_r_over_r: 0.0, // cache filled with dummy since it is not needed here
         };
         // Use an invalid index
@@ -279,8 +280,8 @@ mod private_tests {
     fn tkf92_model_fmt() {
         let tkf_indel_model = TKF92IndelModel {
             params: vec![1.1, 2.0, 0.3],
-            log_r: 0.0,                 // cache filled with dummy since it is not printed
-            ln_one_minus_r_over_r: 0.0, // cache filled with dummy since it is not printed
+            log_r: 0.0,                 // cache filled with dummy since, it is not printed
+            ln_one_minus_r_over_r: 0.0, // cache filled with dummy since, it is not printed
         };
 
         let fmt = format!("{}", tkf_indel_model);

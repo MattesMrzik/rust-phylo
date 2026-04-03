@@ -15,6 +15,7 @@ use crate::substitution_models::FreqVector;
 use crate::tkf_model::reestimate::EdgeSeqsReestimator;
 use crate::tree::NodeIdx::{self, Internal, Leaf};
 use crate::tree::Tree;
+use crate::REPORT_ISSUES_URL;
 
 lazy_static! {
     pub(super) static ref DUMMY_FREQS: DVector<f64> = DVector::<f64>::zeros(0);
@@ -211,7 +212,7 @@ impl<T: TKFModel, AA: AncestralAlignment> TKFIndelCost<T, AA> {
         let model_info = self.model_info.borrow();
         // for every node except the root
         for node in self.phylo.tree.preorder().iter().skip(1) {
-            logl += log_i1(lambda, model_info.ln_beta[usize::from(node)]);
+            logl += ln_i1(lambda, model_info.ln_beta[usize::from(node)]);
         }
         for block_id in 0..model_info.blocks.len() {
             let block_len = model_info.block_lengths[block_id];
@@ -289,16 +290,18 @@ impl<T: TKFModel, AA: AncestralAlignment> TKFIndelCost<T, AA> {
         let blen = self.phylo.tree.node(node_idx).blen;
         let ln_beta = ln_beta(lambda, mu, blen);
         let mut model_info = self.model_info.borrow_mut();
-        model_info.ln_beta[node_id] = ln_beta;
-        model_info.ln_n0[node_id] = ln_n0(mu, ln_beta);
-        model_info.ln_h1[node_id] = ln_h1(lambda, mu, ln_beta, blen);
         model_info.ln_insertion[node_id] = if node_idx == &self.phylo.tree.root {
             self.model.ln_insertion_factor_at_root()
         } else {
+            // these four don't need to be set for the root, since these events cannot happen at the root
+            model_info.ln_beta[node_id] = ln_beta;
+            model_info.ln_n0[node_id] = ln_n0(mu, ln_beta);
+            model_info.ln_h1[node_id] = ln_h1(lambda, mu, ln_beta, blen);
+            model_info.eta[node_id] = eta(lambda, mu, ln_beta, blen);
+            // returning the actual value
             self.model.ln_insertion_factor_at_non_root(ln_beta)
         };
         model_info.previous_event_deletion.set(node_id, false);
-        model_info.eta[node_id] = eta(lambda, mu, ln_beta, model_info.ln_n0[node_id], blen);
         model_info.valid.set(node_id, false);
     }
 
@@ -475,25 +478,28 @@ impl<T: TKFModel, AA: AncestralAlignment> TreeSearchCost for TKFIndelCost<T, AA>
 /// # Arguments
 /// * `x` - A log-probability value, must be non-positive (`x <= 0.0`).
 pub(crate) fn log1mexp(x: f64) -> f64 {
-    debug_assert!(x <= 0.0, "log1mexp is only defined for x <= 0");
-
+    assert!(
+        x <= 0.0,
+        "log1mexp is only defined for x <= 0 but is {x}. \
+        Please report this at {REPORT_ISSUES_URL}."
+    );
     if x < -std::f64::consts::LN_2 {
-        // Safe: exp(x) is small
+        // x is small, therefore exp(x) is close to 0, so we use the stable formula for ln
         (-x.exp()).ln_1p()
     } else {
-        // Dangerous region: x approx 0
+        // x might be close to 0, therefore we use the stable formula for exp
         (-x.exp_m1()).ln()
     }
 }
 
 /// Returns the value of `ln(beta(t))` for a branch of length/time `t`.
-/// It is called beta(t) in the TKF papers.
+/// See the TKF papers.
 pub(super) fn ln_beta(lambda: f64, mu: f64, time: f64) -> f64 {
-    let exponent = (lambda - mu) * time;
-    let beta = -exponent.exp_m1() / (mu - lambda * exponent.exp());
-    // TODO: alternatively to using the taylor via exp_m1, we could use the taylor of the whole beta
-    // directly (but only call this if exponent is small)
-    beta.ln()
+    let expo = (lambda - mu) * time;
+    let term1 = log1mexp(expo);
+    let log_ratio = expo + lambda.ln() - mu.ln();
+    let term2 = mu.ln() + log1mexp(log_ratio);
+    term1 - term2
 }
 
 /// Returns the log probability factor of a character being inserted to the right of the immortal link
@@ -501,7 +507,7 @@ pub(super) fn ln_beta(lambda: f64, mu: f64, time: f64) -> f64 {
 /// The `time` is also implicitly included in `beta`.
 /// It is called `p''_1` in the TKF papers.
 #[inline]
-pub(super) fn log_i1(lambda: f64, ln_beta: f64) -> f64 {
+pub(super) fn ln_i1(lambda: f64, ln_beta: f64) -> f64 {
     let x = ln_beta + lambda.ln(); // ln(lambda * beta)
     log1mexp(x)
 }
@@ -511,8 +517,7 @@ pub(super) fn log_i1(lambda: f64, ln_beta: f64) -> f64 {
 /// It is called `p_1` in the TKF papers.
 #[inline]
 pub(super) fn ln_h1(lambda: f64, mu: f64, ln_beta: f64, time: f64) -> f64 {
-    let x = ln_beta + lambda.ln(); // ln(lambda * beta)
-    -mu * time + log1mexp(x)
+    -mu * time + ln_i1(lambda, ln_beta)
 }
 
 /// Returns the log probability factor of a character being deleted along a branch of length `time`.
@@ -520,26 +525,18 @@ pub(super) fn ln_h1(lambda: f64, mu: f64, ln_beta: f64, time: f64) -> f64 {
 /// The `time` is implicitly included in `beta`.
 #[inline]
 pub(super) fn ln_n0(mu: f64, ln_beta: f64) -> f64 {
-    mu.ln() + ln_beta
-}
-
-/// Returns the log probability factor of a new character being inserted right of a character that is
-/// deleted along a branch of length `time`.
-/// The `time` is also implicitly included in beta.
-/// It is called `p'_1` in the TKF papers.
-#[inline]
-pub(super) fn log_n1(lambda: f64, mu: f64, ln_beta: f64, time: f64) -> f64 {
-    // Using some tricks to ensure numerical stability
-    let log_sum_exp1 = -mu * time;
-    let log_sum_exp2 = ln_beta + mu.ln();
-    let log_sum_exp_max = log_sum_exp1.max(log_sum_exp2);
-    let log_sum_exp = log_sum_exp_max
-        + ((log_sum_exp1 - log_sum_exp_max).exp() + (log_sum_exp2 - log_sum_exp_max).exp()).ln();
-    let term1 = log1mexp(log_sum_exp);
-
-    let term2_x = ln_beta + lambda.ln(); // ln(lambda * beta)
-    let term2 = log1mexp(term2_x);
-    term1 + term2
+    let x = mu.ln() + ln_beta;
+    if x > 0.0 {
+        debug_assert!(
+            x < 1e-12,
+            "ln_n0 ({}) is much larger than 0 but should at \
+            most be slightly larger due to numerical issues",
+            x
+        );
+        0.0
+    } else {
+        x
+    }
 }
 
 /// Returns the log of the `n1 / (n0 * lambda * beta)`.
@@ -547,13 +544,34 @@ pub(super) fn log_n1(lambda: f64, mu: f64, ln_beta: f64, time: f64) -> f64 {
 /// since the event factors included `n0` for the deletion and `lambda * beta` for the insertion
 /// but under the TKF model they are not independent and instead `n1` should be used.
 /// `Eta` corrects for that.
-/// The `time` is also implicitly included in `beta` and `n0`.
-#[inline]
-pub(super) fn eta(lambda: f64, mu: f64, ln_beta: f64, ln_n0: f64, time: f64) -> f64 {
-    let mut eta = log_n1(lambda, mu, ln_beta, time);
-    eta -= lambda.ln() + ln_beta;
-    eta -= ln_n0;
-    eta
+pub(super) fn eta(l: f64, m: f64, _ln_beta: f64, t: f64) -> f64 {
+    u(l, m, _ln_beta, t) + ln_i1(l, _ln_beta) - ln_n0(m, _ln_beta) - l.ln() - _ln_beta
+}
+
+/// Returns ln(1 - e^{-m*t} - m*beta), is used in [`crate::tkf_model::tkf_indel::eta`]
+pub(super) fn u(l: f64, m: f64, _ln_beta: f64, t: f64) -> f64 {
+    let critical_condition_1 = (-l * t).exp() == 1.0;
+    let critical_condition_2 = (-m * t).exp() == 1.0;
+    let critical_condition_3 = ((l - m) * t).exp() == 1.0;
+    // This was fine for the tests on mac m chip but not on linux x86
+    // let critical_condition_4 = (m - l) - m * (-l * t).exp() + l * (-m * t).exp() <= 0.0 && t < 1e-5;
+    // So using this instead
+    let critical_condition_4 = ((m - l) - m * (-l * t).exp() + l * (-m * t).exp()).abs() <= 1e-11;
+
+    let critical_condition = critical_condition_1
+        || critical_condition_2
+        || critical_condition_3
+        || critical_condition_4;
+
+    if critical_condition && t < 1e-5 {
+        // using the Taylor expansion around t = 0 and for small times t
+        return l.ln() + m.ln() + 2.0 * t.ln() - 2.0f64.ln() + (-(l + 4.0 * m) * t / 3.0).ln_1p();
+    }
+
+    let term1 = (l - m) * t;
+    let term2 = ((m - l) - m * (-l * t).exp() + l * (-m * t).exp()).ln();
+    let term3 = -(m - l * ((l - m) * t).exp()).ln();
+    term1 + term2 + term3
 }
 
 /// Given the right exclusive block borders, returns the lengths of the blocks.

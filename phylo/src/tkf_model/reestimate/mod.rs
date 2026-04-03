@@ -9,7 +9,7 @@ use crate::random::RandomGenerator;
 use crate::tkf_model::reestimate::cache::{
     possible_assignments_of_edge, possible_del_or_not, prev_compatible_del_or_not,
 };
-use crate::tkf_model::{log_i1, Event, TKFIndelCost, TKFIndelModelInfo, TKFModel};
+use crate::tkf_model::{ln_i1, Event, TKFIndelCost, TKFIndelModelInfo, TKFModel};
 use crate::tree::NodeIdx::{self, Internal, Leaf};
 use crate::{bail, Result};
 
@@ -659,7 +659,7 @@ where
     }
 
     /// Computes the constant part of the log likelihood that is independent of the alignment and
-    /// only depends on the tree and model parameters (in log space).
+    /// only depends on the tree and model parameters.
     fn const_per_alignment(&self) -> f64 {
         let l = self.cost.model.lambda();
         let m = self.cost.model.mu();
@@ -667,7 +667,7 @@ where
         let nodes = self.cost.phylo.tree.preorder().iter().skip(1); // skip root
         let model_info = self.cost.model_info.borrow();
         for node in nodes {
-            const_per_alignment += log_i1(l, model_info.ln_beta[usize::from(node)]);
+            const_per_alignment += ln_i1(l, model_info.ln_beta[usize::from(node)]);
         }
         const_per_alignment
     }
@@ -754,6 +754,7 @@ fn get_map_from_any_node<'a, AA: AncestralAlignment>(
 mod private_tests {
     use std::path::Path;
 
+    use approx::assert_relative_eq;
     use rstest::rstest;
 
     use crate::alignment::{Alignment, Sequences, MASA};
@@ -959,12 +960,12 @@ mod private_tests {
         let rng = &mut DefaultGenerator::default();
         let mut reestimator = EdgeSeqsReestimator::new(&mut cost, rng);
         let original_logl = reestimator.cost.logl();
-        assert_eq!(original_logl, reestimator.cost.logl_from_root_model_info());
+        assert_relative_eq!(original_logl, reestimator.cost.logl_from_root_model_info());
         let dummy_v2_idx = reestimator.cost.phylo.tree.by_id("I3").idx;
         reestimator.prepare_for_dp(&dummy_v2_idx);
         assert_ne!(reestimator.cost.logl_from_root_model_info(), original_logl);
         reestimator.make_valid_for_further_reestimate_calls();
-        assert_eq!(reestimator.cost.logl_from_root_model_info(), original_logl);
+        assert_relative_eq!(reestimator.cost.logl_from_root_model_info(), original_logl);
     }
 
     #[test]

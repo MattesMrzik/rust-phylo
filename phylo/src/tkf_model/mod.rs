@@ -189,3 +189,6 @@ mod tkf92_fixed_fragmentation;
 
 #[cfg(test)]
 pub use tkf92_fixed_fragmentation::*;
+
+#[cfg(test)]
+mod tkf_numerical_tests;
