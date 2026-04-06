@@ -225,6 +225,7 @@ where
                     } else {
                         let remaining_len = max_len - current_total_root_len;
                         root_links.push(TKFLink::new(self.tree.root, remaining_len));
+                        break;
                     }
                 }
                 _ => {
