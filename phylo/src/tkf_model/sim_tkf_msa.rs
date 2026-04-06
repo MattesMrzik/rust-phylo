@@ -52,8 +52,9 @@ where
     }
 
     /// Sets a defined root length for the simulation. If `None`, the root length is sampled.
-    pub fn root_length(&mut self, root_length: Option<usize>) {
+    pub fn root_length(&mut self, root_length: Option<usize>) -> &mut Self {
         self.indel_sim.root_length(root_length);
+        self
     }
 }
 
