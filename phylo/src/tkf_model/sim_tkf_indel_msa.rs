@@ -209,14 +209,28 @@ where
     /// Builds the links associated with the root of the tree. This includes one immortal
     /// link and a number of mortal links either sampled or defined.
     fn build_root_links(&self) -> Vec<TKFLink> {
-        let num_root_links = self
-            .root_length
-            .unwrap_or_else(|| self.sample_num_root_links());
+        let max_root_seq_len = self.root_length;
+        // if we have a max_root_seq_len set then we need at most max_root_seq_len root links
+        let num_root_links = max_root_seq_len.unwrap_or_else(|| self.sample_num_root_links());
         let mut root_links = Vec::with_capacity(num_root_links + 1); // +1 for the immortal link
         root_links.push(TKFLink::new_immortal(self.tree.root));
+        let mut current_total_root_len = 0;
         for _ in 0..num_root_links {
             let length = self.sample_fragment_length();
-            root_links.push(TKFLink::new(self.tree.root, length));
+            match max_root_seq_len {
+                Some(max_len) => {
+                    if current_total_root_len + length <= max_len {
+                        root_links.push(TKFLink::new(self.tree.root, length));
+                        current_total_root_len += length;
+                    } else {
+                        let remaining_len = max_len - current_total_root_len;
+                        root_links.push(TKFLink::new(self.tree.root, remaining_len));
+                    }
+                }
+                _ => {
+                    root_links.push(TKFLink::new(self.tree.root, length));
+                }
+            }
         }
         root_links
     }
