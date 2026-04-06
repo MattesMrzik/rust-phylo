@@ -50,6 +50,12 @@ where
             subst_sim,
         }
     }
+
+    /// Sets a defined root length for the simulation. If `None`, the root length is sampled.
+    pub fn root_length(&mut self, root_length: Option<usize>) -> &mut Self {
+        self.indel_sim.root_length(root_length);
+        self
+    }
 }
 
 impl<T, R> AlignmentSimulation for TKFMSASimulator<T, R>
@@ -214,5 +220,27 @@ mod private_tests {
             phylo.check_dollos_constraint().is_ok(),
             "Simulated alignment must satisfy Dollo's constraint (no re-gain of characters)"
         );
+    }
+
+    #[test]
+    fn tkf92_simulation_fixed_root_length() {
+        use crate::tkf_model::TKF91IndelModel;
+        let tree = tree!("(A:1.0,B:1.0)R;");
+        let subst_model = SubstModel::<GTR>::new(&[0.25; 4], &[1.0; 6]);
+        let tkf_model = TKF91IndelModel::new(0.1, 0.2);
+
+        let mut simulator = TKFMSASimulator::new(
+            tkf_model,
+            subst_model,
+            tree.clone(),
+            DefaultGenerator::new(123),
+            50,
+        );
+        // root_length(10) means total of 10 characters at the root
+        simulator.root_length(Some(10));
+
+        let msa = simulator.simulate_ancestral_alignment::<MASA>();
+        let root_map = msa.ancestral_map(&tree.root);
+        assert_eq!(root_map.iter().filter(|s| s.is_some()).count(), 10);
     }
 }

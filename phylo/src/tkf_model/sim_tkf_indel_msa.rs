@@ -38,6 +38,7 @@ pub struct TKFIndelMSASimulator<T: TKFModel + FragmentSampler, R: Rng + Seedable
     cumulative_logl: RefCell<f64>,
     rng: RefCell<RandomGenerator<R>>,
     max_insertion_length: usize,
+    root_length: Option<usize>,
 }
 
 impl<T, R> AlignmentSimulation for TKFIndelMSASimulator<T, R>
@@ -159,7 +160,14 @@ where
             cumulative_logl: RefCell::new(0.0),
             rng: RefCell::new(rng),
             max_insertion_length,
+            root_length: None,
         }
+    }
+
+    /// Sets a defined root length for the simulation. If `None`, the root length is sampled.
+    pub fn root_length(&mut self, root_length: Option<usize>) -> &mut Self {
+        self.root_length = root_length;
+        self
     }
 
     pub(super) fn tree(&self) -> &Tree {
@@ -199,9 +207,11 @@ where
     }
 
     /// Builds the links associated with the root of the tree. This includes one immortal
-    /// link and a number of mortal links sampled from the model.
+    /// link and a number of mortal links either sampled or defined.
     fn build_root_links(&self) -> Vec<TKFLink> {
-        let num_root_links = self.sample_num_root_links();
+        let num_root_links = self
+            .root_length
+            .unwrap_or_else(|| self.sample_num_root_links());
         let mut root_links = Vec::with_capacity(num_root_links + 1); // +1 for the immortal link
         root_links.push(TKFLink::new_immortal(self.tree.root));
         for _ in 0..num_root_links {
