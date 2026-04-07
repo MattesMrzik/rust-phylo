@@ -129,7 +129,7 @@ mod private_tests {
     use crate::phylo_info::PhyloInfo;
     use crate::random::DefaultGenerator;
     use crate::substitution_models::{dna_models::GTR, SubstModel};
-    use crate::tkf_model::TKF92IndelModel;
+    use crate::tkf_model::{TKF91IndelModel, TKF92IndelModel};
     use crate::tree;
 
     use super::*;
@@ -223,8 +223,7 @@ mod private_tests {
     }
 
     #[test]
-    fn tkf92_simulation_fixed_root_length() {
-        use crate::tkf_model::TKF91IndelModel;
+    fn tkf91_simulation_fixed_root_length() {
         let tree = tree!("(A:1.0,B:1.0)R;");
         let subst_model = SubstModel::<GTR>::new(&[0.25; 4], &[1.0; 6]);
         let tkf_model = TKF91IndelModel::new(0.1, 0.2);
@@ -236,11 +235,30 @@ mod private_tests {
             DefaultGenerator::new(123),
             50,
         );
-        // root_length(10) means total of 10 characters at the root
-        simulator.root_length(Some(10));
+        simulator.root_length(Some(100));
 
         let msa = simulator.simulate_ancestral_alignment::<MASA>();
         let root_map = msa.ancestral_map(&tree.root);
-        assert_eq!(root_map.iter().filter(|s| s.is_some()).count(), 10);
+        assert_eq!(root_map.iter().filter(|s| s.is_some()).count(), 100);
+    }
+
+    #[test]
+    fn tkf92_simulation_fixed_root_length() {
+        let tree = tree!("(A:1.0,B:1.0)R;");
+        let subst_model = SubstModel::<GTR>::new(&[0.25; 4], &[1.0; 6]);
+        let tkf_model = TKF92IndelModel::new(0.1, 0.2, 0.8);
+
+        let mut simulator = TKFMSASimulator::new(
+            tkf_model,
+            subst_model,
+            tree.clone(),
+            DefaultGenerator::new(123),
+            50,
+        );
+        simulator.root_length(Some(100));
+
+        let msa = simulator.simulate_ancestral_alignment::<MASA>();
+        let root_map = msa.ancestral_map(&tree.root);
+        assert_eq!(root_map.iter().filter(|s| s.is_some()).count(), 100);
     }
 }
