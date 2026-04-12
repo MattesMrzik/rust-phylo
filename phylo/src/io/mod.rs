@@ -112,7 +112,7 @@ pub fn read_sequences(path: impl AsRef<Path> + Debug) -> Result<Vec<Record>> {
 pub fn write_sequences_to_file(sequences: &[Record], path: impl AsRef<Path>) -> Result<()> {
     info!("Writing sequences/MSA to file {}", path.as_ref().display());
     if path.as_ref().exists() {
-         bail!(Io, "file ({}) already exists", path.as_ref().display())
+        bail!(Io, "file ({}) already exists", path.as_ref().display())
     }
     let mut writer = Writer::to_file(path)?;
     for rec in sequences {
