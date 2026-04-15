@@ -12,7 +12,7 @@ use crate::tkf_model::{
     TKFCost, TKFIndelCost, TKFIndelModelInfo, TKFModel, DEFAULT_LAMBDA, DEFAULT_LAMBDA_MU_RATIO,
     DEFAULT_MU,
 };
-use crate::{bail, Result};
+use crate::Result;
 
 #[derive(Debug, Eq, PartialEq, FromPrimitive, IntoPrimitive)]
 #[repr(usize)]
@@ -95,46 +95,65 @@ impl Display for TKF91IndelModel {
 /// Validates the TKF indel parameters lambda and mu. If they are not valid, they are set to
 /// default values and a warning is logged.
 /// Returns valid (lambda, mu).
-pub(super) fn validate_lambda_and_mu(lambda: f64, mu: f64) -> (f64, f64) {
-    let mut valid_lambda = lambda;
-    let mut valid_mu = mu;
+pub(super) fn validate_lambda_mu(params: &mut [f64]) {
+    let lambda_id = usize::from(TKF91Parameters::Lambda);
+    let mu_id = usize::from(TKF91Parameters::Mu);
+    let lambda = params[lambda_id];
+    let mu = params[mu_id];
+
     if lambda <= 0.0 && mu <= 0.0 {
         warn!(
             "Both lambda and mu must be positive. Setting lambda to {DEFAULT_LAMBDA} and mu to {DEFAULT_MU}."
         );
-        valid_lambda = DEFAULT_LAMBDA;
-        valid_mu = DEFAULT_MU;
+        params[lambda_id] = DEFAULT_LAMBDA;
+        params[mu_id] = DEFAULT_MU;
     } else if lambda <= 0.0 {
-        valid_lambda = DEFAULT_LAMBDA_MU_RATIO * mu;
+        params[lambda_id] = DEFAULT_LAMBDA_MU_RATIO * mu;
         warn!(
-            "Tried to set lambda to invalid value {lambda}. It must be in (0, mu) with mu = {mu}. Setting lambda to {DEFAULT_LAMBDA_MU_RATIO}*mu = {valid_lambda}",
+            "Tried to set lambda to invalid value {lambda}. \
+            It must be in (0, mu) with mu = {mu}. \
+            Setting lambda to {DEFAULT_LAMBDA_MU_RATIO}*mu = {}",
+            params[lambda_id]
         );
     } else if mu <= lambda {
-        valid_mu = lambda / DEFAULT_LAMBDA_MU_RATIO;
+        params[mu_id] = lambda / DEFAULT_LAMBDA_MU_RATIO;
         warn!(
-            "Tried to set mu to invalid value {mu}. It must be in (lambda, infinity) with lambda = {lambda}. Setting mu to lambda/{DEFAULT_LAMBDA_MU_RATIO} = {valid_mu}"
+            "Tried to set mu to invalid value {mu}. \
+            It must be in (lambda, infinity) with lambda = {lambda}. \
+            Setting mu to lambda/{DEFAULT_LAMBDA_MU_RATIO} = {}",
+            params[mu_id]
         );
     }
-    (valid_lambda, valid_mu)
 }
 
 /// Builder for the cost using the [`TKF91IndelModel`], i.e., without a substitution model.
 pub struct TKF91IndelCostBuilder<AA: AncestralAlignment> {
-    lambda: f64,
-    mu: f64,
+    params: Vec<f64>,
     phylo: PhyloInfo<AA>,
 }
 
 impl<AA: AncestralAlignment> TKF91IndelCostBuilder<AA> {
-    pub fn new(lambda: f64, mu: f64, phylo: PhyloInfo<AA>) -> Self {
-        Self { lambda, mu, phylo }
+    pub fn new(params: &[f64], phylo: PhyloInfo<AA>) -> Self {
+        Self {
+            params: params.to_vec(),
+            phylo,
+        }
     }
 
     pub fn build(self) -> Result<TKFIndelCost<TKF91IndelModel, AA>> {
-        let (lambda, mu) = validate_lambda_and_mu(self.lambda, self.mu);
-        let model = TKF91IndelModel {
-            params: vec![lambda, mu],
-        };
+        let mut params = self.params;
+        if params.len() != 2 {
+            warn!(
+                "Expected 2 parameters for TKF91 model (lambda, mu), but got {}",
+                params.len()
+            );
+            warn!("Falling back to default values");
+            params.resize(2, 0.0);
+            params[usize::from(TKF91Parameters::Lambda)] = DEFAULT_LAMBDA;
+            params[usize::from(TKF91Parameters::Mu)] = DEFAULT_MU;
+        }
+        validate_lambda_mu(&mut params);
+        let model = TKF91IndelModel { params };
         let info = TKFIndelModelInfo::new(&model, &self.phylo);
         Ok(TKFIndelCost {
             model,
@@ -146,40 +165,26 @@ impl<AA: AncestralAlignment> TKF91IndelCostBuilder<AA> {
 
 /// Builder for the TKF91 cost, i.e., with a substitution model.
 pub struct TKF91CostBuilder<Q: QMatrix, AA: AncestralAlignment> {
-    lambda: f64,
-    mu: f64,
+    params: Vec<f64>,
     subst_model: SubstModel<Q>,
     phylo: PhyloInfo<AA>,
 }
 
 impl<Q: QMatrix, AA: AncestralAlignment> TKF91CostBuilder<Q, AA> {
-    pub fn new(lambda: f64, mu: f64, subst_model: SubstModel<Q>, phylo: PhyloInfo<AA>) -> Self {
+    pub fn new(params: &[f64], subst_model: SubstModel<Q>, phylo: PhyloInfo<AA>) -> Self {
         Self {
-            lambda,
-            mu,
+            params: params.to_vec(),
             subst_model,
             phylo,
         }
     }
 
     pub fn build(self) -> Result<TKFCost<Q, TKF91IndelModel, AA>> {
-        if self.phylo.msa.alphabet() != Q::alphabet() {
-            bail!(Alphabet, "alphabet mismatch between model and alignment");
-        }
-
-        let (lambda, mu) = validate_lambda_and_mu(self.lambda, self.mu);
-        let model = TKF91IndelModel {
-            params: vec![lambda, mu],
-        };
-        let info = TKFIndelModelInfo::new(&model, &self.phylo);
-        let tkf_cost = TKFIndelCost {
-            model,
-            phylo: self.phylo.clone(),
-            model_info: RefCell::new(info),
-        };
+        let indel_cost = TKF91IndelCostBuilder::new(&self.params, self.phylo.clone()).build()?;
+        let subst_cost = SCB::new(self.subst_model, self.phylo.clone()).build()?;
         Ok(TKFCost {
-            indel_cost: tkf_cost,
-            subst_cost: SCB::new(self.subst_model, self.phylo).build().unwrap(),
+            indel_cost,
+            subst_cost,
         })
     }
 }

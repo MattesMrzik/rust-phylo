@@ -10,10 +10,10 @@ use crate::likelihood::{ParamRange, PARAM_RANGE_UNIT_INTERVAL_EXCLUSIVE};
 use crate::phylo_info::PhyloInfo;
 use crate::substitution_models::{QMatrix, SubstModel, SubstitutionCostBuilder as SCB};
 use crate::tkf_model::{
-    validate_lambda_and_mu, TKFCost, TKFIndelCost, TKFIndelModelInfo, TKFModel, DEFAULT_LAMBDA,
+    validate_lambda_mu, TKFCost, TKFIndelCost, TKFIndelModelInfo, TKFModel, DEFAULT_LAMBDA,
     DEFAULT_MU, DEFAULT_R,
 };
-use crate::{bail, Result};
+use crate::Result;
 
 #[derive(Debug, Eq, PartialEq, FromPrimitive, IntoPrimitive)]
 #[repr(usize)]
@@ -130,43 +130,60 @@ impl Display for TKF92IndelModel {
 /// Validates the TKF92 parameter `r`. If it is not valid, it is set to
 /// its default value and a warning is logged.
 /// Returns valid `r`.
-pub(super) fn validate_r(r: f64) -> f64 {
-    let mut valid_r = r;
+pub(super) fn validate_r(params: &mut [f64]) {
+    let r_id = usize::from(TKF92Parameters::R);
+    let r = params[r_id];
     if r == 0.0 {
-        valid_r = DEFAULT_R;
+        params[r_id] = DEFAULT_R;
         warn!(
-            "Tried to set r to invalid value 0. It must be in (0, 1). Setting r to {valid_r}. Hint: r = 0 yields special case: TKF91 model, consider using that instead."
+            "Tried to set r to invalid value 0. \
+            It must be in (0, 1). Setting r to {}. \
+            Hint: r = 0 yields special case: TKF91 model, consider using that instead.",
+            params[r_id]
         );
     } else if r <= 0.0 || r >= 1.0 {
-        valid_r = DEFAULT_R;
-        warn!("Tried to set r to invalid value {r}. It must be in (0, 1). Setting r to {valid_r}.");
+        params[r_id] = DEFAULT_R;
+        warn!(
+            "Tried to set r to invalid value {r}. \
+            It must be in (0, 1). Setting r to {}.",
+            params[r_id]
+        );
     }
-    valid_r
 }
 
 /// Builder for the cost using the [`TKF92IndelModel`], i.e., without a substitution model.
 pub struct TKF92IndelCostBuilder<AA: AncestralAlignment> {
-    lambda: f64,
-    mu: f64,
-    r: f64,
+    params: Vec<f64>,
     phylo: PhyloInfo<AA>,
 }
 
 impl<AA: AncestralAlignment> TKF92IndelCostBuilder<AA> {
-    pub fn new(lambda: f64, mu: f64, r: f64, phylo: PhyloInfo<AA>) -> Self {
+    pub fn new(params: &[f64], phylo: PhyloInfo<AA>) -> Self {
         Self {
-            lambda,
-            mu,
-            r,
+            params: params.to_vec(),
             phylo,
         }
     }
 
     pub fn build(self) -> Result<TKFIndelCost<TKF92IndelModel, AA>> {
-        let (lambda, mu) = validate_lambda_and_mu(self.lambda, self.mu);
-        let r = validate_r(self.r);
+        let mut params = self.params;
+        if params.len() != 3 {
+            warn!(
+                "Expected 3 parameters for TKF92 model (lambda, mu, r), but got {}",
+                params.len()
+            );
+            warn!("Falling back to default values");
+            params.resize(3, 0.0);
+            params[usize::from(TKF92Parameters::Lambda)] = DEFAULT_LAMBDA;
+            params[usize::from(TKF92Parameters::Mu)] = DEFAULT_MU;
+            params[usize::from(TKF92Parameters::R)] = DEFAULT_R;
+        } else {
+            validate_lambda_mu(&mut params);
+            validate_r(&mut params);
+        }
+        let r = params[usize::from(TKF92Parameters::R)];
         let model = TKF92IndelModel {
-            params: vec![lambda, mu, r],
+            params,
             log_r: r.ln(),
             ln_one_minus_r_over_r: ((1.0 - r) / r).ln(),
         };
@@ -181,51 +198,26 @@ impl<AA: AncestralAlignment> TKF92IndelCostBuilder<AA> {
 
 /// Builder for the TKF92 cost, i.e., with a substitution model.
 pub struct TKF92CostBuilder<Q: QMatrix, AA: AncestralAlignment> {
-    lambda: f64,
-    mu: f64,
-    r: f64,
+    params: Vec<f64>,
     subst_model: SubstModel<Q>,
     phylo: PhyloInfo<AA>,
 }
 
 impl<Q: QMatrix, AA: AncestralAlignment> TKF92CostBuilder<Q, AA> {
-    pub fn new(
-        lambda: f64,
-        mu: f64,
-        r: f64,
-        subst_model: SubstModel<Q>,
-        phylo: PhyloInfo<AA>,
-    ) -> Self {
+    pub fn new(params: &[f64], subst_model: SubstModel<Q>, phylo: PhyloInfo<AA>) -> Self {
         Self {
-            lambda,
-            mu,
-            r,
+            params: params.to_vec(),
             subst_model,
             phylo,
         }
     }
 
     pub fn build(self) -> Result<TKFCost<Q, TKF92IndelModel, AA>> {
-        if self.phylo.msa.alphabet() != Q::alphabet() {
-            bail!(Alphabet, "alphabet mismatch between model and alignment");
-        }
-
-        let (lambda, mu) = validate_lambda_and_mu(self.lambda, self.mu);
-        let r = validate_r(self.r);
-        let model = TKF92IndelModel {
-            params: vec![lambda, mu, r],
-            log_r: r.ln(),
-            ln_one_minus_r_over_r: ((1.0 - r) / r).ln(),
-        };
-        let info = TKFIndelModelInfo::new(&model, &self.phylo);
-        let tkf_cost = TKFIndelCost {
-            model,
-            phylo: self.phylo.clone(),
-            model_info: RefCell::new(info),
-        };
+        let indel_cost = TKF92IndelCostBuilder::new(&self.params, self.phylo.clone()).build()?;
+        let subst_cost = SCB::new(self.subst_model, self.phylo).build()?;
         Ok(TKFCost {
-            indel_cost: tkf_cost,
-            subst_cost: SCB::new(self.subst_model, self.phylo).build().unwrap(),
+            indel_cost,
+            subst_cost,
         })
     }
 }
