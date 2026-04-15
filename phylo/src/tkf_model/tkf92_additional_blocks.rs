@@ -21,7 +21,7 @@ pub struct TKF92IndelModelAddBlocks {
     params: Vec<f64>,
     /// precomputed r.ln()
     log_r: f64,
-    /// precomputed (1 - r)/r
+    /// precomputed ln((1 - r)/r)
     ln_one_minus_r_over_r: f64,
     /// Blocks to be used in addition to those determined from the alignment
     additional_blocks: Vec<usize>,

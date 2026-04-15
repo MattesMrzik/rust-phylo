@@ -295,6 +295,9 @@ mod private_tests {
         model.set_param(usize::from(TKF92Parameters::R), 0.4);
         assert_eq!(model.r(), 0.4);
         assert_eq!(model.log_r, 0.4f64.ln());
-        assert_eq!(model.ln_one_minus_r_over_r, ((1.0f64 - 0.4) / 0.4).ln());
+        assert_eq!(
+            model.ln_one_minus_r_over_r,
+            (-0.4f64).ln_1p() - (0.4f64).ln()
+        );
     }
 }
