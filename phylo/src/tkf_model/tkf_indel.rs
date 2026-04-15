@@ -26,6 +26,13 @@ pub(super) static DEFAULT_MU: f64 = 1.1;
 pub(super) static DEFAULT_LAMBDA_MU_RATIO: f64 = 0.9;
 pub(super) static DEFAULT_R: f64 = 0.5;
 
+/// For the function [u]: only if the time is shorter than this threshold, we use the Taylor approximation.
+static SHORT_TIME_U: f64 = 1e-5;
+/// For the function [u]: the critical threshold used for condition 4. Only necessary for x86 CPUs.
+static X86_CRITICAL_THRESHOLD_U: f64 = 1e-11;
+/// For the function [ln_n0]: threshold for numerical issues
+static NUMERICAL_ISSUE_N0_THRESHOLD: f64 = 1e-12;
+
 /// Events that can happen on a branch in the TKF model.
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub(super) enum Event {
@@ -83,7 +90,7 @@ pub(super) struct TKFIndelModelInfo {
     /// See [`TKFIndelCost::set_node_values`].
     pub(super) ln_subtree_event_factor: DMatrix<f64>,
 
-    /// node_eta[(node, block)] = node_eta[(node, block)] = eta if the current event is an
+    /// node_eta[(node, block)] = eta if the current event is an
     /// insertion and the previous one was a deletion, 0 otherwise.
     /// See [`TKFIndelCost::eta_for_non_root`].
     pub(super) node_eta: DMatrix<f64>,
@@ -92,7 +99,7 @@ pub(super) struct TKFIndelModelInfo {
     /// node in the subtree can contribute to this sum.
     pub(super) subtree_eta: DMatrix<f64>,
 
-    /// ln_beta[node] = ln(beta(node.blen))), precomputed for each node.
+    /// ln_beta[node] = ln(beta(node.blen)), precomputed for each node.
     /// See [`ln_beta`] function.
     pub(super) ln_beta: Vec<f64>,
     /// ln_n0[node] = ln(n0(node.blen)), precomputed for each node.
@@ -372,8 +379,7 @@ impl<T: TKFModel, AA: AncestralAlignment> TKFIndelCost<T, AA> {
         }
     }
 
-    /// Returns eta if the current event is an insertion and the previous one was a deletion, 0
-    /// otherwise.
+    /// Returns eta if the current event is an insertion and the previous one was a deletion, 0 otherwise.
     /// See [`eta`] function.
     /// Since there can't be a deletion at the root (it has no parent),
     /// this function is only for non-root nodes.
@@ -530,8 +536,8 @@ pub(super) fn ln_h1(lambda: f64, mu: f64, ln_beta: f64, time: f64) -> f64 {
 pub(super) fn ln_n0(mu: f64, ln_beta: f64) -> f64 {
     let x = mu.ln() + ln_beta;
     if x > 0.0 {
-        debug_assert!(
-            x < 1e-12,
+        assert!(
+            x < NUMERICAL_ISSUE_N0_THRESHOLD,
             "ln_n0 ({}) is much larger than 0 but should be \
             at most slightly larger than 0 which may happen due to numerical issues. \
             Please report this at {REPORT_ISSUES_URL}.",
@@ -562,17 +568,17 @@ pub(super) fn u(l: f64, m: f64, t: f64) -> f64 {
     let critical_condition_1 = (-l * t).exp() == 1.0;
     let critical_condition_2 = (-m * t).exp() == 1.0;
     let critical_condition_3 = ((l - m) * t).exp() == 1.0;
-    // The line below was fine for the tests on mac m chip but not on linux x86
-    // let critical_condition_4 = (m - l) - m * (-l * t).exp() + l * (-m * t).exp() <= 0.0;
-    // So using this instead
-    let critical_condition_4 = ((m - l) - m * (-l * t).exp() + l * (-m * t).exp()).abs() <= 1e-11;
+    // The threshold of 0 was fine for the tests on mac m chip but not on linux x86.
+    // So using this instead.
+    let critical_condition_4 =
+        ((m - l) - m * (-l * t).exp() + l * (-m * t).exp()).abs() <= X86_CRITICAL_THRESHOLD_U;
 
     let critical_condition = critical_condition_1
         || critical_condition_2
         || critical_condition_3
         || critical_condition_4;
 
-    if critical_condition && t < 1e-5 {
+    if critical_condition && t < SHORT_TIME_U {
         // using the Taylor expansion around t = 0 and for small times t
         return l.ln() + m.ln() + 2.0 * t.ln() - 2.0f64.ln() + (-(l + 4.0 * m) * t / 3.0).ln_1p();
     }
