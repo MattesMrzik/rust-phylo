@@ -545,16 +545,21 @@ pub(super) fn ln_n0(mu: f64, ln_beta: f64) -> f64 {
 /// but under the TKF model they are not independent and instead `n1` should be used.
 /// `Eta` corrects for that.
 pub(super) fn eta(l: f64, m: f64, _ln_beta: f64, t: f64) -> f64 {
+    if t == 0.0 {
+        // in the limit of t -> 0 eta approaches -ln(2)
+        return -std::f64::consts::LN_2;
+    }
     u(l, m, _ln_beta, t) + ln_i1(l, _ln_beta) - ln_n0(m, _ln_beta) - l.ln() - _ln_beta
 }
 
 /// Returns ln(1 - e^{-m*t} - m*beta), is used in [`crate::tkf_model::tkf_indel::eta`]
 pub(super) fn u(l: f64, m: f64, _ln_beta: f64, t: f64) -> f64 {
+    // See https://github.com/MattesMrzik/tkf_mathematica for how this was found.
     let critical_condition_1 = (-l * t).exp() == 1.0;
     let critical_condition_2 = (-m * t).exp() == 1.0;
     let critical_condition_3 = ((l - m) * t).exp() == 1.0;
-    // This was fine for the tests on mac m chip but not on linux x86
-    // let critical_condition_4 = (m - l) - m * (-l * t).exp() + l * (-m * t).exp() <= 0.0 && t < 1e-5;
+    // The line below was fine for the tests on mac m chip but not on linux x86
+    // let critical_condition_4 = (m - l) - m * (-l * t).exp() + l * (-m * t).exp() <= 0.0;
     // So using this instead
     let critical_condition_4 = ((m - l) - m * (-l * t).exp() + l * (-m * t).exp()).abs() <= 1e-11;
 

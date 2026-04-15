@@ -190,6 +190,7 @@ fn naive_beta(lambda: f64, mu: f64, time: f64) -> f64 {
 fn tkf_beta_calculated_by_hand() {
     assert_relative_eq!(naive_beta(0.3, 0.5, 0.7), 0.5461782813185221);
     assert_relative_eq!(ln_beta(0.3, 0.5, 0.7), 0.5461782813185221f64.ln());
+    assert_eq!(ln_beta(0.3, 0.5, 0.0), f64::NEG_INFINITY);
 }
 
 #[cfg(test)]
@@ -207,6 +208,7 @@ fn tkf_ln_n0_calculated_by_hand() {
     // (3(1-e^(-.5))/(3-2*e^(-.5)))
     assert_relative_eq!(n0_naive(m, b), 0.6605755607027574);
     assert_relative_eq!(ln_n0(m, b.ln()), 0.6605755607027574f64.ln());
+    assert_eq!(ln_n0(m, f64::NEG_INFINITY), f64::NEG_INFINITY);
 }
 
 #[cfg(test)]
@@ -224,6 +226,7 @@ fn tkf_ln_h1_calculated_by_hand() {
     // e^(-4.5) * (1-2(1-e^(-1.5))/(3-2*e^(-1.5)))
     assert_relative_eq!(naive_h1(l, m, b, time), 0.004350089645603061);
     assert_relative_eq!(ln_h1(l, m, b.ln(), time), 0.004350089645603061f64.ln());
+    assert_eq!(ln_h1(l, m, f64::NEG_INFINITY, 0.0), 0.0);
 }
 
 #[cfg(test)]
@@ -241,6 +244,7 @@ fn tkf_ln_i1_calculated_by_hand() {
     // log((1-2(1-e^(-1))/(3-2*e^(-1)))
     assert_relative_eq!(naive_ln_i1(l, b), -0.8172396554020775);
     assert_relative_eq!(ln_i1(l, b.ln()), -0.8172396554020775);
+    assert_eq!(ln_i1(l, f64::NEG_INFINITY), 0.0);
 }
 
 #[cfg(test)]
@@ -290,6 +294,7 @@ fn tkf_eta_calculated_by_hand() {
         epsilon = 1e-14
     );
     assert_relative_eq!(eta(l, m, b.ln(), time), -2.922778333826742, epsilon = 1e-14);
+    assert_eq!(eta(l, m, -f64::NEG_INFINITY, 0.0), -std::f64::consts::LN_2);
 }
 
 #[test]

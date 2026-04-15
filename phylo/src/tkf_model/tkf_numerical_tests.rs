@@ -3,7 +3,9 @@ use rstest::rstest;
 
 use crate::tkf_model::tkf_indel::{eta, ln_beta, ln_h1, ln_i1, ln_n0};
 
-// see https://github.com/MattesMrzik/tkf_mathematica
+// See https://github.com/MattesMrzik/tkf_mathematica
+
+// This test file here runs for about 0.01 seconds
 
 #[rstest]
 #[case::short_t_tiny_l_m(1.0000e-16, 1.0000000e-4, 1.0010000e-4, -36.841361487904734)]
