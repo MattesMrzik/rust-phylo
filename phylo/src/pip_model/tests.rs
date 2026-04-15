@@ -9,9 +9,7 @@ use crate::evolutionary_models::EvoModel;
 use crate::io::read_sequences;
 use crate::likelihood::ModelSearchCost;
 use crate::phylo_info::{PhyloInfo, PhyloInfoBuilder as PIB};
-#[cfg(test)]
-use crate::pip_model::PIPCost;
-use crate::pip_model::{PIPCostBuilder as PIPB, PIPModel, PIPModelInfo};
+use crate::pip_model::{PIPCost, PIPCostBuilder as PIPB, PIPModel, PIPModelInfo};
 use crate::substitution_models::{
     dna_models::*, protein_models::*, FreqVector, QMatrix, QMatrixMaker, SubstMatrix, SubstModel,
 };
