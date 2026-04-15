@@ -741,6 +741,7 @@ fn tkf92_build_default() {
         .unwrap();
     assert_eq!(tkf_indel_cost.model.lambda(), DEFAULT_LAMBDA);
     assert_eq!(tkf_indel_cost.model.mu(), DEFAULT_MU);
+    assert_eq!(tkf_indel_cost.model.r(), DEFAULT_R);
 }
 
 #[test]

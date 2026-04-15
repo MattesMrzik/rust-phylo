@@ -194,8 +194,11 @@ impl<AA: AncestralAlignment> TKF92FixedIndelCostBuilder<AA> {
         let lambda_id = usize::from(TKF92Parameters::Lambda);
         let mu_id = usize::from(TKF92Parameters::Mu);
         let r_id = usize::from(TKF92Parameters::R);
-        if params.len() < 3 {
-            warn!("Too few values provided for TKF92, 3 values required, lambda, mu and r");
+        if params.len() != 3 {
+            warn!(
+                "Expected 3 parameters for TKF92 model (lambda, mu, r), but got {}",
+                params.len()
+            );
             warn!("Falling back to default values");
             params.resize(3, 0.0);
             params[lambda_id] = DEFAULT_LAMBDA;
