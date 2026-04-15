@@ -294,7 +294,7 @@ fn tkf_eta_calculated_by_hand() {
         epsilon = 1e-14
     );
     assert_relative_eq!(eta(l, m, b.ln(), time), -2.922778333826742, epsilon = 1e-14);
-    assert_eq!(eta(l, m, -f64::NEG_INFINITY, 0.0), -std::f64::consts::LN_2);
+    assert_eq!(eta(l, m, f64::NEG_INFINITY, 0.0), -std::f64::consts::LN_2);
 }
 
 #[test]
@@ -1061,10 +1061,9 @@ fn tkf_update_tree() {
     assert_eq!(new_logl, clean_logl);
 }
 
-#[test]
-fn tkf92_underflow_short_branches() {
+#[cfg(test)]
+fn setup_short_branches_phylo() -> PhyloInfo<MASA> {
     let tree = tree!("(((A1:1e-20,B2:2.0)I3:1e-16,C4:2.0)R5:0.0);");
-
     let msa = MASA::from_aligned_with_ancestral(
         // Testing all events on short branches
         Sequences::new(vec![
@@ -1077,7 +1076,12 @@ fn tkf92_underflow_short_branches() {
         &tree,
     )
     .unwrap();
-    let phylo = PhyloInfo { msa, tree };
+    PhyloInfo { msa, tree }
+}
+
+#[test]
+fn tkf92_underflow_short_branches() {
+    let phylo = setup_short_branches_phylo();
     let lambda = 1.0;
     let mu = 4.1;
     let r = 0.8;
@@ -1091,21 +1095,7 @@ fn tkf92_underflow_short_branches() {
 
 #[test]
 fn tkf92_underflow_short_branches_large_mu() {
-    let tree = tree!("(((A1:1e-20,B2:2.0)I3:1e-16,C4:2.0)R5:0.0);");
-
-    let msa = MASA::from_aligned_with_ancestral(
-        // Testing all events on short branches
-        Sequences::new(vec![
-            record!("A1", b"-AA-AA"),
-            record!("B2", b"A-A--A"),
-            record!("I3", b"AAAA-A"),
-            record!("C4", b"-----A"),
-            record!("R5", b"-----A"),
-        ]),
-        &tree,
-    )
-    .unwrap();
-    let phylo = PhyloInfo { msa, tree };
+    let phylo = setup_short_branches_phylo();
     let lambda = 1.0;
     let mu = 10000.0;
     let r = 0.8;

@@ -75,7 +75,7 @@ pub(super) struct TKFIndelModelInfo {
     /// ln_node_event_factor[(node, block)] = the log probability factor for the event
     /// on the edge above <node> for the block with id <block>.
     /// See [`TKFIndelCost`] and
-    /// [`TKFIndelCost::event_factor`].
+    /// [`TKFIndelCost::ln_event_factor`].
     pub(super) ln_node_event_factor: DMatrix<f64>,
     /// ln_subtree_event_factor[(node, block)] = the log product of the event probability factors
     /// for all edges in the subtree rooted in <node> for the block with id <block>,
@@ -290,15 +290,18 @@ impl<T: TKFModel, AA: AncestralAlignment> TKFIndelCost<T, AA> {
         let blen = self.phylo.tree.node(node_idx).blen;
         let ln_beta = ln_beta(lambda, mu, blen);
         let mut model_info = self.model_info.borrow_mut();
-        model_info.ln_insertion[node_id] = if node_idx == &self.phylo.tree.root {
-            self.model.ln_insertion_factor_at_root()
-        } else {
+
+        if node_idx != &self.phylo.tree.root {
             // these four don't need to be set for the root, since these events cannot happen at the root
             model_info.ln_beta[node_id] = ln_beta;
             model_info.ln_n0[node_id] = ln_n0(mu, ln_beta);
             model_info.ln_h1[node_id] = ln_h1(lambda, mu, ln_beta, blen);
             model_info.eta[node_id] = eta(lambda, mu, ln_beta, blen);
-            // returning the actual value
+        }
+
+        model_info.ln_insertion[node_id] = if node_idx == &self.phylo.tree.root {
+            self.model.ln_insertion_factor_at_root()
+        } else {
             self.model.ln_insertion_factor_at_non_root(ln_beta)
         };
         model_info.previous_event_deletion.set(node_id, false);
@@ -473,7 +476,7 @@ impl<T: TKFModel, AA: AncestralAlignment> TreeSearchCost for TKFIndelCost<T, AA>
 ///
 /// This function handles two regions to avoid precision loss or overflow:
 /// 1. For `x < -ln(2)`, it uses `ln(1 - exp(x))` via `f64::ln_1p(-exp(x))`.
-/// 2. For `x >= -ln(2)`, it uses `ln(-(exp(x) - 1))` via `f64::exp_m1(x).abs().ln()`.
+/// 2. For `x >= -ln(2)`, it uses `ln(-(exp(x) - 1))` via `ln(-exp_m1(x))`.
 ///
 /// # Arguments
 /// * `x` - A log-probability value, must be non-positive (`x <= 0.0`).
@@ -529,8 +532,9 @@ pub(super) fn ln_n0(mu: f64, ln_beta: f64) -> f64 {
     if x > 0.0 {
         debug_assert!(
             x < 1e-12,
-            "ln_n0 ({}) is much larger than 0 but should at \
-            most be slightly larger due to numerical issues",
+            "ln_n0 ({}) is much larger than 0 but should be \
+            at most slightly larger than 0 which may happen due to numerical issues. \
+            Please report this at {REPORT_ISSUES_URL}.",
             x
         );
         0.0
@@ -544,16 +548,16 @@ pub(super) fn ln_n0(mu: f64, ln_beta: f64) -> f64 {
 /// since the event factors included `n0` for the deletion and `lambda * beta` for the insertion
 /// but under the TKF model they are not independent and instead `n1` should be used.
 /// `Eta` corrects for that.
-pub(super) fn eta(l: f64, m: f64, _ln_beta: f64, t: f64) -> f64 {
+pub(super) fn eta(l: f64, m: f64, ln_beta: f64, t: f64) -> f64 {
     if t == 0.0 {
         // in the limit of t -> 0 eta approaches -ln(2)
         return -std::f64::consts::LN_2;
     }
-    u(l, m, _ln_beta, t) + ln_i1(l, _ln_beta) - ln_n0(m, _ln_beta) - l.ln() - _ln_beta
+    u(l, m, t) + ln_i1(l, ln_beta) - ln_n0(m, ln_beta) - l.ln() - ln_beta
 }
 
 /// Returns ln(1 - e^{-m*t} - m*beta), is used in [`crate::tkf_model::tkf_indel::eta`]
-pub(super) fn u(l: f64, m: f64, _ln_beta: f64, t: f64) -> f64 {
+pub(super) fn u(l: f64, m: f64, t: f64) -> f64 {
     // See https://github.com/MattesMrzik/tkf_mathematica for how this was found.
     let critical_condition_1 = (-l * t).exp() == 1.0;
     let critical_condition_2 = (-m * t).exp() == 1.0;

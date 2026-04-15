@@ -30,7 +30,7 @@ pub struct TKF92IndelModel {
     params: Vec<f64>,
     /// precomputed r.ln()
     log_r: f64,
-    /// precomputed (1 - r)/r
+    /// precomputed ((1 - r)/r).ln()
     ln_one_minus_r_over_r: f64,
 }
 
@@ -46,7 +46,7 @@ impl Default for TKF92IndelModel {
         Self {
             params: vec![DEFAULT_LAMBDA, DEFAULT_MU, r],
             log_r: r.ln(),
-            ln_one_minus_r_over_r: ((1.0 - r) / r).ln(),
+            ln_one_minus_r_over_r: (-r).ln_1p() - r.ln(),
         }
     }
 }
@@ -70,7 +70,7 @@ impl TKFModel for TKF92IndelModel {
             TKF92Parameters::R => {
                 self.params[usize::from(TKF92Parameters::R)] = value;
                 self.log_r = value.ln();
-                self.ln_one_minus_r_over_r = ((1.0 - value) / value).ln();
+                self.ln_one_minus_r_over_r = (-value).ln_1p() - value.ln();
             }
             _ => {
                 self.params[idx] = value;
@@ -102,7 +102,7 @@ impl TKFModel for TKF92IndelModel {
         // - True underflow (< -745): not a concern, f64 lacks precision at that scale anyway.
         //   (when adding to the other terms)
         // - Near machine epsilon (< -36): the approximation
-        //     m * ln(1 + x) approx ln((1 + x)^m) approx ln(1 + m*x) ~~ m*x
+        //     m * ln(1 + x) approx ln((1 + x)^m) approx ln(1 + m*x) approx m*x
         //   recovers log(m)  bits of precision, at the cost of two linearization
         //   errors. Whether the net gain is positive requires further investigation.
         ln_tree_event_factor
