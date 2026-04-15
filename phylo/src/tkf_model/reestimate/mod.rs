@@ -165,7 +165,7 @@ struct BackTrackingResult {
 /// let lambda = 0.9;
 /// let mu = 1.0;
 /// let r = 0.5;
-/// let mut tkf92_indel_cost = TKF92IndelCostBuilder::new(lambda, mu, r, phylo)
+/// let mut tkf92_indel_cost = TKF92IndelCostBuilder::new(&[lambda, mu, r], phylo)
 ///     .build()?;
 /// let mut rng = DefaultGenerator::default();
 /// let mut reestimator = EdgeSeqsReestimator::new(&mut tkf92_indel_cost, &mut rng);
@@ -819,7 +819,7 @@ mod private_tests {
         #[case] expected_events: QuartetEvents,
     ) {
         let phylo = setup_test_phylo(Alphabet::dna());
-        let mut cost = TKF92IndelCostBuilder::new(0.4, 0.5, 0.8, phylo)
+        let mut cost = TKF92IndelCostBuilder::new(&[0.4, 0.5, 0.8], phylo)
             .build()
             .unwrap();
         let rng = &mut FakeGenerator::default();
@@ -835,7 +835,7 @@ mod private_tests {
     fn tkf_backtrack() {
         let phylo = setup_test_phylo(Alphabet::dna());
         // the parameters here do not matter for the backtracking test
-        let mut cost = TKF92IndelCostBuilder::new(0.4, 0.5, 0.8, phylo)
+        let mut cost = TKF92IndelCostBuilder::new(&[0.4, 0.5, 0.8], phylo)
             .build()
             .unwrap();
         // FakeRng such that we can test tie-breaking (max value in last column) in backtracking
@@ -912,7 +912,7 @@ mod private_tests {
         )
         .unwrap();
         let phylo = PhyloInfo { msa, tree };
-        let mut cost = TKF92IndelCostBuilder::new(0.4, 0.5, 0.8, phylo)
+        let mut cost = TKF92IndelCostBuilder::new(&[0.4, 0.5, 0.8], phylo)
             .build()
             .unwrap();
         let logl = cost.logl(); // must be called to initialize the model_info, which is
@@ -925,7 +925,7 @@ mod private_tests {
     #[test]
     fn tkf_remove_and_add_back_quartet() {
         let phylo = setup_test_phylo(Alphabet::dna());
-        let mut cost = TKF92IndelCostBuilder::new(0.4, 0.5, 0.8, phylo)
+        let mut cost = TKF92IndelCostBuilder::new(&[0.4, 0.5, 0.8], phylo)
             .build()
             .unwrap();
 
@@ -950,7 +950,7 @@ mod private_tests {
             .build_with_ancestors()
             .unwrap();
 
-        let mut cost = TKF92IndelCostBuilder::new(1.0, 2.0, 0.3, phylo)
+        let mut cost = TKF92IndelCostBuilder::new(&[1.0, 2.0, 0.3], phylo)
             .build()
             .unwrap();
         let rng = &mut DefaultGenerator::default();
@@ -982,7 +982,7 @@ mod private_tests {
             .build_with_ancestors()
             .unwrap();
 
-        let mut cost = TKF92IndelCostBuilder::new(1.0, 2.0, 0.3, phylo)
+        let mut cost = TKF92IndelCostBuilder::new(&[1.0, 2.0, 0.3], phylo)
             .build()
             .unwrap();
         let rng = &mut DefaultGenerator::default();

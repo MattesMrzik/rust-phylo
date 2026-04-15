@@ -549,12 +549,12 @@ mod private_tests {
 
     #[cfg(test)]
     fn validate_lambda_mu(l: f64, m: f64, l_expected: f64, m_expected: f64) {
-        let cost = TKF91IndelCostBuilder::new(l, m, setup_test_phylo(Alphabet::dna()))
+        let cost = TKF91IndelCostBuilder::new(&[l, m], setup_test_phylo(Alphabet::dna()))
             .build()
             .unwrap();
         assert_eq!(cost.model.lambda(), l_expected);
         assert_eq!(cost.model.mu(), m_expected);
-        let cost = TKF92IndelCostBuilder::new(l, m, 0.1, setup_test_phylo(Alphabet::dna()))
+        let cost = TKF92IndelCostBuilder::new(&[l, m, 0.1], setup_test_phylo(Alphabet::dna()))
             .build()
             .unwrap();
         assert_eq!(cost.model.lambda(), l_expected);
@@ -563,7 +563,7 @@ mod private_tests {
 
     #[cfg(test)]
     fn validate_r(r: f64, r_expected: f64) {
-        let cost = TKF92IndelCostBuilder::new(1.0, 2.0, r, setup_test_phylo(Alphabet::dna()))
+        let cost = TKF92IndelCostBuilder::new(&[1.0, 2.0, r], setup_test_phylo(Alphabet::dna()))
             .build()
             .unwrap();
         assert_eq!(cost.model.r(), r_expected);

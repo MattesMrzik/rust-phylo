@@ -951,7 +951,7 @@ fn tkf92_topo_opti() {
     let lambda = 0.1;
     let mu = 0.2;
     let r = 0.3;
-    let tkf_cost = TKF92CostBuilder::new(lambda, mu, r, subst_model.clone(), phylo.clone())
+    let tkf_cost = TKF92CostBuilder::new(&[lambda, mu, r], subst_model.clone(), phylo.clone())
         .build()
         .unwrap();
     let unopt_cost = tkf_cost.cost();
@@ -974,9 +974,7 @@ fn tkf92_topo_opti() {
             tree: result.cost.tree().clone(),
         };
         let new_indel_cost = TKF92IndelAddBlocksCostBuilder::new(
-            lambda,
-            mu,
-            r,
+            &[lambda, mu, r],
             initial_msa_blocking.clone(),
             new_phylo.clone(),
         )

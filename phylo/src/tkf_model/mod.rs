@@ -127,7 +127,7 @@ impl<Q: QMatrix, T: TKFModel, AA: AncestralAlignment> TKFCost<Q, T, AA> {
     /// )?;
     /// let phylo = PhyloInfo { msa, tree };
     /// let subst_model = SubstModel::<GTR>::new(&[], &[]);
-    /// let cost = TKF92CostBuilder::new(0.4, 0.5, 0.8, subst_model, phylo).build()?;
+    /// let cost = TKF92CostBuilder::new(&[0.4, 0.5, 0.8], subst_model, phylo).build()?;
     /// assert_eq!(cost.masa().seqs().len(), 3);
     /// assert_eq!(cost.masa().ancestral_seqs().len(), 2);
     /// # Ok(()) }
@@ -161,7 +161,7 @@ impl<Q: QMatrix, T: TKFModel, AA: AncestralAlignment> TKFCost<Q, T, AA> {
     /// )?;
     /// let phylo = PhyloInfo { msa, tree };
     /// let subst_model = SubstModel::<GTR>::new(&[], &[]);
-    /// let cost = TKF92CostBuilder::new(0.4, 0.5, 0.8, subst_model, phylo).build()?;
+    /// let cost = TKF92CostBuilder::new(&[0.4, 0.5, 0.8], subst_model, phylo).build()?;
     /// // under the TKF92 model the blocks are the positions in the alignment where there is
     /// // a sequence that changes from gap to non-gap or vice versa (always including the last
     /// // position of the alignment).
