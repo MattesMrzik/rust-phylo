@@ -23,7 +23,7 @@ use crate::Result;
 pub struct TKF92FixedIndelModel {
     pub(super) params: Vec<f64>,
     /// precomputed r.ln()
-    pub(super) log_r: f64,
+    pub(super) ln_r: f64,
     /// The fixed fragmentation to be used
     pub(super) fragmentation: Vec<usize>,
 }
@@ -54,7 +54,7 @@ impl TKFModel for TKF92FixedIndelModel {
         match param {
             TKF92Parameters::R => {
                 self.params[usize::from(TKF92Parameters::R)] = value;
-                self.log_r = value.ln();
+                self.ln_r = value.ln();
             }
             _ => {
                 self.params[idx] = value;
@@ -81,7 +81,7 @@ impl TKFModel for TKF92FixedIndelModel {
     }
 
     fn block_prob(&self, ln_tree_event_factor: f64, block_len: usize) -> f64 {
-        ln_tree_event_factor + (block_len as f64 - 1.0) * self.log_r + (1.0 - self.r()).ln()
+        ln_tree_event_factor + (block_len as f64 - 1.0) * self.ln_r + (1.0 - self.r()).ln()
     }
 
     fn get_blocks<AA: AncestralAlignment>(&self, msa: &AA) -> Vec<usize> {
@@ -208,7 +208,7 @@ impl<AA: AncestralAlignment> TKF92FixedIndelCostBuilder<AA> {
         let r = params[r_id];
         let model = TKF92FixedIndelModel {
             params,
-            log_r: r.ln(),
+            ln_r: r.ln(),
             fragmentation,
         };
         let info = TKFIndelModelInfo::new(&model, &self.phylo);
@@ -367,7 +367,7 @@ mod private_tests {
     fn tkf92_param_range_invalid_index() {
         let model = TKF92FixedIndelModel {
             params: vec![0.5, 1.0, 0.3],
-            log_r: 0.0, // cache filled with dummy since it is not needed here
+            ln_r: 0.0, // cache filled with dummy since it is not needed here
             fragmentation: vec![],
         };
         // Use an invalid index
@@ -378,7 +378,7 @@ mod private_tests {
     fn tkf92_fixed_model_fmt() {
         let tkf_indel_model = TKF92FixedIndelModel {
             params: vec![1.1, 2.0, 0.3],
-            log_r: 0.0, // cache filled with dummy since it is not printed
+            ln_r: 0.0, // cache filled with dummy since it is not printed
             fragmentation: vec![1, 2],
         };
 
@@ -394,8 +394,8 @@ mod private_tests {
     #[cfg_attr(feature = "ci_coverage", ignore)]
     fn tkf_compare_to_simulation() {
         // This uses the MASA from a simulation under the TKF92 model given a tree and parameters.
-        // Since it is a simulation, we know the true fragmentation. So we compute the log-likelihood
-        // using the fixed fragmentation and compare it to the log-likelihood obtained from the
+        // Since it is a simulation, we know the true fragmentation. So we compute the ln-likelihood
+        // using the fixed fragmentation and compare it to the ln-likelihood obtained from the
         // simulation. Note that, we do not remove non-emitting columns from the alignment,
         // since the simulation probability includes them.
         let dir = Path::new("data/tkf/fixed_fragments/");

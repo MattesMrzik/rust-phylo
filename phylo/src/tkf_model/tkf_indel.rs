@@ -64,27 +64,27 @@ pub trait TKFModel: Clone + Display {
     /// Returns the factor corresponding to an insertion event at a non-root node.
     fn ln_insertion_factor_at_non_root(&self, ln_beta: f64) -> f64;
     /// Given the subtree event factor for the root (i.e., the tree event factor)
-    /// and the block length, returns the log probability of the [block](`TKFModel::get_blocks`) under the model.
+    /// and the block length, returns the ln probability of the [block](`TKFModel::get_blocks`) under the model.
     fn block_prob(&self, ln_tree_event_factor: f64, block_len: usize) -> f64;
     /// For every block (i.e., an alignment slice) as determined by this method and factors
     /// corresponding to the evolutionary events in this block [`TKFModel::block_prob`] computes
-    /// the log probability of the block under the model.
+    /// the ln probability of the block under the model.
     fn get_blocks<AA: AncestralAlignment>(&self, msa: &AA) -> Vec<usize>;
 }
 
 // TODO: link our paper once it is published. For now see original TKF92 paper: https://doi.org/10.1007/bf00163848
-/// This struct holds intermediate values for the computation of the log likelihood
+/// This struct holds intermediate values for the computation of the ln likelihood
 /// of an ancestral alignment and tree under a TKF indel model, i.e., without substitutions.
 /// The intermediate values are needed for re-alignment, which is not implemented yet.
 /// See issue #150 https://github.com/acg-team/rust-phylo/issues/150
 #[derive(Clone, Debug)]
 pub(super) struct TKFIndelModelInfo {
-    /// ln_node_event_factor[(node, block)] = the log probability factor for the event
+    /// ln_node_event_factor[(node, block)] = the ln probability factor for the event
     /// on the edge above <node> for the block with id <block>.
     /// See [`TKFIndelCost`] and
     /// [`TKFIndelCost::ln_event_factor`].
     pub(super) ln_node_event_factor: DMatrix<f64>,
-    /// ln_subtree_event_factor[(node, block)] = the log product of the event probability factors
+    /// ln_subtree_event_factor[(node, block)] = the ln product of the event probability factors
     /// for all edges in the subtree rooted in <node> for the block with id <block>,
     /// including the edge above <node>.
     /// See [`TKFIndelCost::set_node_values`].
@@ -163,7 +163,7 @@ impl TKFIndelModelInfo {
     }
 }
 
-/// Computes the log likelihood of an [ancestral alignment](`AncestralAlignment`)
+/// Computes the ln likelihood of an [ancestral alignment](`AncestralAlignment`)
 /// and tree under a [TKF](`TKFModel`) indel model, i.e., without substitutions.
 #[derive(Debug)]
 pub struct TKFIndelCost<T: TKFModel, AA: AncestralAlignment> {
@@ -480,16 +480,16 @@ impl<T: TKFModel, AA: AncestralAlignment> TreeSearchCost for TKFIndelCost<T, AA>
 
 /// Returns `ln(1 - exp(x))` in a numerically stable way.
 ///
-/// This function handles two regions to avoid precision loss or overflow:
+/// This function handles two regions to avoid precision loss or underflow:
 /// 1. For `x < -ln(2)`, it uses `ln(1 - exp(x))` via `f64::ln_1p(-exp(x))`.
 /// 2. For `x >= -ln(2)`, it uses `ln(-(exp(x) - 1))` via `ln(-exp_m1(x))`.
 ///
 /// # Arguments
-/// * `x` - A log-probability value, must be non-positive (`x <= 0.0`).
-pub(crate) fn log1mexp(x: f64) -> f64 {
+/// * `x` - must be non-positive (`x <= 0.0`). Usually a ln-probability value.
+pub(crate) fn ln1mexp(x: f64) -> f64 {
     assert!(
         x <= 0.0,
-        "log1mexp is only defined for x <= 0 but is {x}. \
+        "ln1mexp is only defined for x <= 0 but x is {x}. \
         Please report this at {REPORT_ISSUES_URL}."
     );
     if x < -std::f64::consts::LN_2 {
@@ -505,23 +505,23 @@ pub(crate) fn log1mexp(x: f64) -> f64 {
 /// See the TKF papers.
 pub(super) fn ln_beta(lambda: f64, mu: f64, time: f64) -> f64 {
     let expo = (lambda - mu) * time;
-    let term1 = log1mexp(expo);
-    let log_ratio = expo + lambda.ln() - mu.ln();
-    let term2 = mu.ln() + log1mexp(log_ratio);
+    let term1 = ln1mexp(expo);
+    let ln_ratio = expo + lambda.ln() - mu.ln();
+    let term2 = mu.ln() + ln1mexp(ln_ratio);
     term1 - term2
 }
 
-/// Returns the log probability factor of a character being inserted to the right of the immortal link
+/// Returns the ln probability factor of a character being inserted to the right of the immortal link
 /// along a branch of length `time`, i.e., at the very left of the sequence.
 /// The `time` is also implicitly included in `beta`.
 /// It is called `p''_1` in the TKF papers.
 #[inline]
 pub(super) fn ln_i1(lambda: f64, ln_beta: f64) -> f64 {
     let x = ln_beta + lambda.ln(); // ln(lambda * beta)
-    log1mexp(x)
+    ln1mexp(x)
 }
 
-/// Returns the log probability factor of a homologous character surviving along a branch of length `time`.
+/// Returns the ln probability factor of a homologous character surviving along a branch of length `time`.
 /// The `time` is also implicitly included in `beta`.
 /// It is called `p_1` in the TKF papers.
 #[inline]
@@ -529,7 +529,7 @@ pub(super) fn ln_h1(lambda: f64, mu: f64, ln_beta: f64, time: f64) -> f64 {
     -mu * time + ln_i1(lambda, ln_beta)
 }
 
-/// Returns the log probability factor of a character being deleted along a branch of length `time`.
+/// Returns the ln probability factor of a character being deleted along a branch of length `time`.
 /// It is called `p'_0` in the TKF papers.
 /// The `time` is implicitly included in `beta`.
 #[inline]
@@ -549,27 +549,29 @@ pub(super) fn ln_n0(mu: f64, ln_beta: f64) -> f64 {
     }
 }
 
-/// Returns the log of the `n1 / (n0 * lambda * beta)`.
+/// Returns the ln of the `n1 / (n0 * lambda * beta)`.
 /// This is used in the case where an insertion follows a deletion,
 /// since the event factors included `n0` for the deletion and `lambda * beta` for the insertion
 /// but under the TKF model they are not independent and instead `n1` should be used.
 /// `Eta` corrects for that.
 pub(super) fn eta(l: f64, m: f64, ln_beta: f64, t: f64) -> f64 {
     if t == 0.0 {
-        // in the limit of t -> 0 eta approaches -ln(2)
+        // In the limit of t -> 0 eta approaches -ln(2).
+        // Even for very small t the calculation below is stable, just not for exactly t = 0
         return -std::f64::consts::LN_2;
     }
     u(l, m, t) + ln_i1(l, ln_beta) - ln_n0(m, ln_beta) - l.ln() - ln_beta
 }
 
-/// Returns ln(1 - e^{-m*t} - m*beta), is used in [`crate::tkf_model::tkf_indel::eta`]
+/// Returns ln(1 - e^{-m*t} - m*beta).
+/// Is only used in [`crate::tkf_model::tkf_indel::eta`] and was just extracted to make the code cleaner.
 pub(super) fn u(l: f64, m: f64, t: f64) -> f64 {
     // See https://github.com/MattesMrzik/tkf_mathematica for how this was found.
     let critical_condition_1 = (-l * t).exp() == 1.0;
     let critical_condition_2 = (-m * t).exp() == 1.0;
     let critical_condition_3 = ((l - m) * t).exp() == 1.0;
-    // The threshold of 0 was fine for the tests on mac m chip but not on linux x86.
-    // So using this instead.
+    // The tkf_numerical_test passed on macOS (M-series) with a threshold of 0.
+    // However, the same tests failed on Linux x86. Using this threshold ensures they pass on both platforms.
     let critical_condition_4 =
         ((m - l) - m * (-l * t).exp() + l * (-m * t).exp()).abs() <= X86_CRITICAL_THRESHOLD_U;
 

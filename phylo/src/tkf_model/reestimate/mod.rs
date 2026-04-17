@@ -236,7 +236,7 @@ where
     /// Accordingly, this method will return an error if this is not the case.
     ///
     /// # Returns
-    /// On success, returns the resulting log likelihood of the MASA given the tree after reestimation.
+    /// On success, returns the resulting ln likelihood of the MASA given the tree after reestimation.
     pub fn reestimate(&mut self, v2_idx: &NodeIdx) -> Result<f64> {
         let v2_id = self.cost.phylo.tree.node(v2_idx).id.clone();
         if v2_idx == &self.cost.phylo.tree.root {
@@ -267,7 +267,7 @@ where
     /// a sibling. If this condition is violated, this method panics.
     ///
     /// # Returns
-    /// Returns the resulting log likelihood of the MASA given the tree after reestimation.
+    /// Returns the resulting ln likelihood of the MASA given the tree after reestimation.
     pub fn reestimate_unchecked(&mut self, v2_idx: &NodeIdx) -> f64 {
         if !self
             .cost
@@ -529,7 +529,7 @@ where
         self.cost.model.block_prob(x, block_len)
     }
 
-    /// Computes the sum of log event factor values for the nodes in the quartet for the provided events
+    /// Computes the sum of ln event factor values for the nodes in the quartet for the provided events
     /// which correspond to an assignment of characters at `v1` and `v2` that is currently considered
     /// in the dynamic programming.
     fn ln_quartet_event_factor(&self, events: &QuartetEvents) -> f64 {
