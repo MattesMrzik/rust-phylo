@@ -84,7 +84,7 @@ pub(super) struct TKFIndelModelInfo {
     /// See [`TKFIndelCost`] and
     /// [`TKFIndelCost::ln_event_factor`].
     pub(super) ln_node_event_factor: DMatrix<f64>,
-    /// ln_subtree_event_factor[(node, block)] = the ln product of the event probability factors
+    /// ln_subtree_event_factor[(node, block)] = the sum of the ln event probability factors
     /// for all edges in the subtree rooted in <node> for the block with id <block>,
     /// including the edge above <node>.
     /// See [`TKFIndelCost::set_node_values`].
