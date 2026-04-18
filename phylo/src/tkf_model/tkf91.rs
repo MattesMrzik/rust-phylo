@@ -62,20 +62,17 @@ impl TKFModel for TKF91IndelModel {
         }
     }
 
-    fn insertion_factor_at_root(&self) -> f64 {
-        self.lambda() / self.mu()
+    fn ln_insertion_factor_at_root(&self) -> f64 {
+        // TODO: this lambda.ln() and mu.ln() could be cached, see issue #152 https://github.com/acg-team/rust-phylo/issues/152
+        self.lambda().ln() - self.mu().ln()
     }
 
-    fn insertion_factor_at_non_root(&self, beta: f64) -> f64 {
-        self.lambda() * beta
+    fn ln_insertion_factor_at_non_root(&self, ln_beta: f64) -> f64 {
+        self.lambda().ln() + ln_beta
     }
 
-    fn block_prob(&self, tree_event_factor: f64, block_len: usize) -> f64 {
-        if tree_event_factor == 1.0 {
-            0.0
-        } else {
-            (block_len as f64) * tree_event_factor.ln()
-        }
+    fn block_prob(&self, ln_tree_event_factor: f64, block_len: usize) -> f64 {
+        (block_len as f64) * ln_tree_event_factor
     }
 
     /// Since TKF91 is a single-residue indel model, each position is its own block.
@@ -222,9 +219,11 @@ mod private_tests {
         let mut model = TKF91IndelModel {
             params: vec![1.0, 2.0],
         };
-        model.set_param(usize::from(TKF91Parameters::Lambda), 1.1);
-        assert_eq!(model.lambda(), 1.1);
-        model.set_param(usize::from(TKF91Parameters::Mu), 2.1);
-        assert_eq!(model.mu(), 2.1);
+        let new_lambda = 1.1;
+        model.set_param(usize::from(TKF91Parameters::Lambda), new_lambda);
+        assert_eq!(model.lambda(), new_lambda);
+        let new_mu = 2.1;
+        model.set_param(usize::from(TKF91Parameters::Mu), new_mu);
+        assert_eq!(model.mu(), new_mu);
     }
 }
