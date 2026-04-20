@@ -45,7 +45,6 @@ impl<C: ModelSearchCost + Display + Clone> ModelOptimiser<C> {
         info!("Initial cost: {init_cost}");
 
         let mut curr_cost = self.optimise_frequencies();
-
         // Set previous cost to negative infinity to ensure at least one iteration if frequency optimisation did not change the cost
         let mut prev_cost = f64::NEG_INFINITY;
         let mut iterations = 0;

@@ -165,7 +165,7 @@ struct BackTrackingResult {
 /// let lambda = 0.9;
 /// let mu = 1.0;
 /// let r = 0.5;
-/// let mut tkf92_indel_cost = TKF92IndelCostBuilder::new(lambda, mu, r, phylo)
+/// let mut tkf92_indel_cost = TKF92IndelCostBuilder::new(&[lambda, mu, r], phylo)
 ///     .build()?;
 /// let mut rng = DefaultGenerator::default();
 /// let mut reestimator = EdgeSeqsReestimator::new(&mut tkf92_indel_cost, &mut rng);
@@ -236,7 +236,7 @@ where
     /// Accordingly, this method will return an error if this is not the case.
     ///
     /// # Returns
-    /// On success, returns the resulting log likelihood of the MASA given the tree after reestimation.
+    /// On success, returns the resulting ln likelihood of the MASA given the tree after reestimation.
     pub fn reestimate(&mut self, v2_idx: &NodeIdx) -> Result<f64> {
         let v2_id = self.cost.phylo.tree.node(v2_idx).id.clone();
         if v2_idx == &self.cost.phylo.tree.root {
@@ -267,7 +267,7 @@ where
     /// a sibling. If this condition is violated, this method panics.
     ///
     /// # Returns
-    /// Returns the resulting log likelihood of the MASA given the tree after reestimation.
+    /// Returns the resulting ln likelihood of the MASA given the tree after reestimation.
     pub fn reestimate_unchecked(&mut self, v2_idx: &NodeIdx) -> f64 {
         if !self
             .cost
@@ -555,7 +555,7 @@ where
         self.cost.model.block_prob(x, block_len)
     }
 
-    /// Computes the sum of log event factor values for the nodes in the quartet for the provided events
+    /// Computes the sum of ln event factor values for the nodes in the quartet for the provided events
     /// which correspond to an assignment of characters at `v1` and `v2` that is currently considered
     /// in the dynamic programming.
     fn ln_quartet_event_factor(&self, events: &QuartetEvents) -> f64 {
@@ -847,7 +847,7 @@ mod private_tests {
         #[case] expected_events: QuartetEvents,
     ) {
         let phylo = setup_test_phylo(Alphabet::dna());
-        let mut cost = TKF92IndelCostBuilder::new(0.4, 0.5, 0.8, phylo)
+        let mut cost = TKF92IndelCostBuilder::new(&[0.4, 0.5, 0.8], phylo)
             .build()
             .unwrap();
         let rng = &mut FakeGenerator::default();
@@ -863,7 +863,7 @@ mod private_tests {
     fn tkf_backtrack() {
         let phylo = setup_test_phylo(Alphabet::dna());
         // the parameters here do not matter for the backtracking test
-        let mut cost = TKF92IndelCostBuilder::new(0.4, 0.5, 0.8, phylo)
+        let mut cost = TKF92IndelCostBuilder::new(&[0.4, 0.5, 0.8], phylo)
             .build()
             .unwrap();
         // FakeRng such that we can test tie-breaking (max value in last column) in backtracking
@@ -940,7 +940,7 @@ mod private_tests {
         )
         .unwrap();
         let phylo = PhyloInfo { msa, tree };
-        let mut cost = TKF92IndelCostBuilder::new(0.4, 0.5, 0.8, phylo)
+        let mut cost = TKF92IndelCostBuilder::new(&[0.4, 0.5, 0.8], phylo)
             .build()
             .unwrap();
         let logl = cost.logl(); // must be called to initialize the model_info, which is
@@ -953,7 +953,7 @@ mod private_tests {
     #[test]
     fn tkf_remove_and_add_back_quartet() {
         let phylo = setup_test_phylo(Alphabet::dna());
-        let mut cost = TKF92IndelCostBuilder::new(0.4, 0.5, 0.8, phylo)
+        let mut cost = TKF92IndelCostBuilder::new(&[0.4, 0.5, 0.8], phylo)
             .build()
             .unwrap();
 
@@ -978,7 +978,7 @@ mod private_tests {
             .build_with_ancestors()
             .unwrap();
 
-        let mut cost = TKF92IndelCostBuilder::new(1.0, 2.0, 0.3, phylo)
+        let mut cost = TKF92IndelCostBuilder::new(&[1.0, 2.0, 0.3], phylo)
             .build()
             .unwrap();
         let rng = &mut DefaultGenerator::default();
@@ -1010,7 +1010,7 @@ mod private_tests {
             .build_with_ancestors()
             .unwrap();
 
-        let mut cost = TKF92IndelCostBuilder::new(1.0, 2.0, 0.3, phylo)
+        let mut cost = TKF92IndelCostBuilder::new(&[1.0, 2.0, 0.3], phylo)
             .build()
             .unwrap();
         let rng = &mut DefaultGenerator::default();
