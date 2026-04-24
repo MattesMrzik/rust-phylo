@@ -6,7 +6,8 @@ use crate::alphabets::GAP;
 use crate::random::RandomGenerator;
 use crate::record_wo_desc as record;
 use crate::substitution_models::{QMatrix, SubstModel, SubstitutionSimulator};
-use crate::tkf_model::sim_tkf_indel_msa::{FragmentSampler, TKFIndelMSASimulator};
+use crate::tkf_model::simulate_msa::sim_tkf_indel_msa::{FragmentSampler, TKFIndelMSASimulator};
+use crate::tkf_model::simulate_msa::{ExpectedRootLength, RootLength};
 use crate::tkf_model::TKFModel;
 use crate::tree::{NodeIdx::Internal, NodeIdx::Leaf, Tree};
 
@@ -18,7 +19,7 @@ use crate::tree::{NodeIdx::Internal, NodeIdx::Leaf, Tree};
 /// as a mask to place gaps.
 pub struct TKFMSASimulator<T, R>
 where
-    T: TKFModel + FragmentSampler,
+    T: TKFModel + FragmentSampler + ExpectedRootLength,
     R: Rng + SeedableRng + RngCore,
 {
     indel_sim: TKFIndelMSASimulator<T, R>,
@@ -27,7 +28,7 @@ where
 
 impl<T, R> TKFMSASimulator<T, R>
 where
-    T: TKFModel + FragmentSampler,
+    T: TKFModel + FragmentSampler + ExpectedRootLength,
     R: Rng + SeedableRng + RngCore + Clone,
 {
     /// Create a new TKFMSASimulator with the given indel model, substitution model, tree, RNG and
@@ -52,7 +53,7 @@ where
     }
 
     /// Sets a defined root length for the simulation. If `None`, the root length is sampled.
-    pub fn root_length(&mut self, root_length: Option<usize>) -> &mut Self {
+    pub fn root_length(&mut self, root_length: RootLength) -> &mut Self {
         self.indel_sim.root_length(root_length);
         self
     }
@@ -60,7 +61,7 @@ where
 
 impl<T, R> AlignmentSimulation for TKFMSASimulator<T, R>
 where
-    T: TKFModel + FragmentSampler,
+    T: TKFModel + FragmentSampler + ExpectedRootLength,
     R: Rng + SeedableRng + RngCore + Clone,
 {
     fn simulate_ancestral_alignment<AA: AncestralAlignment>(&self) -> AA {
@@ -235,7 +236,7 @@ mod private_tests {
             DefaultGenerator::new(123),
             50,
         );
-        simulator.root_length(Some(100));
+        simulator.root_length(RootLength::Defined(100));
 
         let msa = simulator.simulate_ancestral_alignment::<MASA>();
         let root_map = msa.ancestral_map(&tree.root);
@@ -255,7 +256,7 @@ mod private_tests {
             DefaultGenerator::new(123),
             50,
         );
-        simulator.root_length(Some(100));
+        simulator.root_length(RootLength::Defined(100));
 
         let msa = simulator.simulate_ancestral_alignment::<MASA>();
         let root_map = msa.ancestral_map(&tree.root);

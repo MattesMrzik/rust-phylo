@@ -10,7 +10,7 @@ use crate::alignment::AncestralAlignment;
 use crate::likelihood::{ParamRange, PARAM_RANGE_UNIT_INTERVAL_EXCLUSIVE};
 use crate::phylo_info::PhyloInfo;
 use crate::substitution_models::{QMatrix, SubstModel, SubstitutionCostBuilder as SCB};
-use crate::tkf_model::sim_tkf_indel_msa::FragmentSampler;
+use crate::tkf_model::simulate_msa::{ExpectedRootLength, FragmentSampler};
 use crate::tkf_model::{
     validate_lambda_and_mu, TKFCost, TKFIndelCost, TKFIndelModelInfo, TKFModel, DEFAULT_LAMBDA,
     DEFAULT_MU, DEFAULT_R,
@@ -147,6 +147,12 @@ impl FragmentSampler for TKF92IndelModel {
         // Geometric PMF: (1-p)^k * p  where k = number of failures before first success
         let log_prob = (choice as f64) * (1.0 - prob_of_success).ln() + prob_of_success.ln();
         (choice as usize + 1, log_prob) // +1: every fragment has at least one character
+    }
+}
+
+impl ExpectedRootLength for TKF92IndelModel {
+    fn expected_root_length(&self) -> f64 {
+        (self.lambda() / self.mu()) / ((1.0 - self.lambda() / self.mu()) * (1.0 - self.r()))
     }
 }
 

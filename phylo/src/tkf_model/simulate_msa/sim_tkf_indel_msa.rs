@@ -24,26 +24,40 @@ pub trait FragmentSampler {
     fn sample_fragment_length<R: Rng>(&self, rng: &mut R) -> (usize, f64);
 }
 
+/// Computes the expected length of the root sequence (number of characters)
+/// under the TKF model if the process has reached stationarity.
+pub trait ExpectedRootLength {
+    fn expected_root_length(&self) -> f64;
+}
+
 /// Since these sequences are built incrementally, we can't use the [`Sequences`] which hold immutable [records](`record`).
-// TODO rename this type
 type Seqs = HashMap<NodeIdx, Vec<u8>>;
+
+pub enum RootLength {
+    Sampled,
+    Defined(usize),
+    Expected,
+}
 
 /// Simulates the indel process under a [TKFModel](crate::tkf_model::TKFModel) to produce an MSA
 /// containing only [`GAP`]s and [`AMB_CHAR`]s, representing the indel history.
 /// The `max_insertion_length` parameter controls the maximum number of inserted links (=fragments)
 /// that can be produced in a single insertion event.
-pub struct TKFIndelMSASimulator<T: TKFModel + FragmentSampler, R: Rng + SeedableRng + RngCore> {
+pub struct TKFIndelMSASimulator<
+    T: TKFModel + FragmentSampler + ExpectedRootLength,
+    R: Rng + SeedableRng + RngCore,
+> {
     indel_model: T,
     tree: Tree,
     cumulative_logl: RefCell<f64>,
     rng: RefCell<RandomGenerator<R>>,
     max_insertion_length: usize,
-    root_length: Option<usize>,
+    root_length: RootLength,
 }
 
 impl<T, R> AlignmentSimulation for TKFIndelMSASimulator<T, R>
 where
-    T: TKFModel + FragmentSampler,
+    T: TKFModel + FragmentSampler + ExpectedRootLength,
     R: Rng + SeedableRng + RngCore,
 {
     fn simulate_ancestral_alignment<AA: AncestralAlignment>(&self) -> AA {
@@ -145,7 +159,7 @@ impl<AA: AncestralAlignment> TKFIndelMSASimulationResult<AA> {
 
 impl<T, R> TKFIndelMSASimulator<T, R>
 where
-    T: TKFModel + FragmentSampler,
+    T: TKFModel + FragmentSampler + ExpectedRootLength,
     R: Rng + SeedableRng + RngCore,
 {
     pub fn new(
@@ -160,12 +174,12 @@ where
             cumulative_logl: RefCell::new(0.0),
             rng: RefCell::new(rng),
             max_insertion_length,
-            root_length: None,
+            root_length: RootLength::Sampled,
         }
     }
 
     /// Sets a defined root length for the simulation. If `None`, the root length is sampled.
-    pub fn root_length(&mut self, root_length: Option<usize>) -> &mut Self {
+    pub fn root_length(&mut self, root_length: RootLength) -> &mut Self {
         self.root_length = root_length;
         self
     }
@@ -209,19 +223,27 @@ where
     /// Builds the links associated with the root of the tree. This includes one immortal
     /// link and a number of mortal links either sampled or defined.
     fn build_root_links(&self) -> Vec<TKFLink> {
-        let max_root_seq_len = self.root_length;
-        // if we have a max_root_seq_len set then we need at most max_root_seq_len root links
-        let num_root_links = max_root_seq_len.unwrap_or_else(|| self.sample_num_root_links());
-        let mut root_links = Vec::with_capacity(num_root_links + 1); // +1 for the immortal link
+        let min_needed_links = match self.root_length {
+            RootLength::Sampled => self.sample_num_root_links(),
+            RootLength::Defined(len) => len,
+            RootLength::Expected => self.indel_model.expected_root_length().round() as usize,
+        };
+        let max_root_seq_len = match self.root_length {
+            RootLength::Defined(len) => Some(len),
+            RootLength::Expected => Some(self.indel_model.expected_root_length().round() as usize),
+            RootLength::Sampled => None,
+        };
+        let mut root_links = Vec::with_capacity(min_needed_links + 1); // +1 for the immortal link
         root_links.push(TKFLink::new_immortal(self.tree.root));
+
         let mut current_total_root_len = 0;
-        for _ in 0..num_root_links {
-            let length = self.sample_fragment_length();
+        for _ in 0..min_needed_links {
+            let frag_length = self.sample_fragment_length();
             match max_root_seq_len {
                 Some(max_len) => {
-                    if current_total_root_len + length <= max_len {
-                        root_links.push(TKFLink::new(self.tree.root, length));
-                        current_total_root_len += length;
+                    if current_total_root_len + frag_length <= max_len {
+                        root_links.push(TKFLink::new(self.tree.root, frag_length));
+                        current_total_root_len += frag_length;
                     } else {
                         let remaining_len = max_len - current_total_root_len;
                         root_links.push(TKFLink::new(self.tree.root, remaining_len));
@@ -229,7 +251,7 @@ where
                     }
                 }
                 _ => {
-                    root_links.push(TKFLink::new(self.tree.root, length));
+                    root_links.push(TKFLink::new(self.tree.root, frag_length));
                 }
             }
         }
