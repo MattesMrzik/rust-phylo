@@ -33,6 +33,7 @@ pub trait ExpectedRootLength {
 /// Since these sequences are built incrementally, we can't use the [`Sequences`] which hold immutable [records](`record`).
 type Seqs = HashMap<NodeIdx, Vec<u8>>;
 
+#[derive(Clone, Copy, Debug)]
 pub enum RootLength {
     Sampled,
     Defined(usize),
