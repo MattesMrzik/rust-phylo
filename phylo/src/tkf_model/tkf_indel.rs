@@ -21,10 +21,10 @@ lazy_static! {
     pub(super) static ref DUMMY_FREQS: DVector<f64> = DVector::<f64>::zeros(0);
 }
 
-pub(super) static DEFAULT_LAMBDA: f64 = 1.0;
-pub(super) static DEFAULT_MU: f64 = 1.1;
-pub(super) static DEFAULT_LAMBDA_MU_RATIO: f64 = 0.9;
-pub(super) static DEFAULT_R: f64 = 0.5;
+pub(super) static DEFAULT_LAMBDA: f64 = 0.01;
+pub(super) static DEFAULT_MU: f64 = 0.011;
+pub(super) static DEFAULT_LAMBDA_MU_RATIO: f64 = DEFAULT_LAMBDA / DEFAULT_MU;
+pub(super) static DEFAULT_R: f64 = 0.8;
 
 /// For the function [u]: only if the time is shorter than this threshold, we use the Taylor approximation.
 static SHORT_TIME_U: f64 = 1e-5;
