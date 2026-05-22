@@ -21,6 +21,8 @@ pub(crate) enum TKF92Parameters {
     Lambda = 0,
     Mu = 1,
     R = 2,
+    Ratio = 3,
+    Rate = 4,
     #[num_enum(catch_all)]
     Invalid(usize),
 }
@@ -72,8 +74,29 @@ impl TKFModel for TKF92IndelModel {
                 self.ln_r = value.ln();
                 self.ln_one_minus_r_over_r = (-value).ln_1p() - value.ln();
             }
-            _ => {
+            // _ => {
+            //     self.params[idx] = value;
+            // }
+            TKF92Parameters::Lambda | TKF92Parameters::Mu => {
                 self.params[idx] = value;
+            }
+            TKF92Parameters::Rate => {
+                let lambda = self.lambda();
+                let mu = self.mu();
+                self.params[usize::from(TKF92Parameters::Lambda)] =
+                    2.0 * value / (mu / lambda + 1.0);
+                self.params[usize::from(TKF92Parameters::Mu)] = 2.0 * value / (lambda / mu + 1.0);
+            }
+            TKF92Parameters::Ratio => {
+                let lambda = self.lambda();
+                let mu = self.mu();
+                let x = (lambda + mu) / 2.0;
+                let y = (x * (1.0 - value)) / (1.0 + value);
+                self.params[usize::from(TKF92Parameters::Lambda)] = x - y;
+                self.params[usize::from(TKF92Parameters::Mu)] = x + y;
+            }
+            TKF92Parameters::Invalid(_) => {
+                panic!("Invalid parameter index for TKF model: {param:?}")
             }
         };
     }
@@ -84,6 +107,8 @@ impl TKFModel for TKF92IndelModel {
             TKF92Parameters::Lambda => (f64::EPSILON, self.mu() - f64::EPSILON),
             TKF92Parameters::Mu => (self.lambda() + f64::EPSILON, f64::MAX),
             TKF92Parameters::R => PARAM_RANGE_UNIT_INTERVAL_EXCLUSIVE,
+            TKF92Parameters::Ratio => (f64::EPSILON, 1.0 - f64::EPSILON),
+            TKF92Parameters::Rate => (f64::EPSILON, f64::MAX),
             _ => panic!("Invalid parameter index for TKF model: {param:?}"),
         }
     }

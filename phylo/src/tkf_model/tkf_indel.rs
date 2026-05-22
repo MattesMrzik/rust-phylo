@@ -401,11 +401,20 @@ impl<T: TKFModel, AA: AncestralAlignment> ModelSearchCost for TKFIndelCost<T, AA
     }
 
     fn param_count(&self) -> usize {
-        self.model.params().len()
+        // self.model.params().len()
+        5
     }
 
     fn param(&self, idx: usize) -> f64 {
-        self.model.params()[idx]
+        match idx {
+            0 => self.model.lambda(),
+            1 => self.model.mu(),
+            2 => self.model.params().get(2).cloned().unwrap_or(DEFAULT_R),
+            3 => self.model.lambda() / self.model.mu(),
+            4 => (self.model.lambda() + self.model.mu())/2.0,
+            _ => panic!("Invalid parameter index {idx} for TKFIndelCost. Valid indices are 0 for lambda, 1 for mu and 2 for r. Please report this at {REPORT_ISSUES_URL}."),
+        }
+        // self.model.params()[idx]
     }
 
     fn set_param(&mut self, idx: usize, value: f64) {
