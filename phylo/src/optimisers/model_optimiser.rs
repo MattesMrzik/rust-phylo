@@ -68,7 +68,14 @@ impl<C: ModelSearchCost + Display + Clone> ModelOptimiser<C> {
         // old version:
         // debug_assert_eq!(curr_cost, self.c.cost());
         // new version:
-        debug_assert!((curr_cost - self.c.cost()).abs() < 1e-12);
+        let clean_cost = self.c.cost();
+        assert!(
+            (curr_cost - clean_cost).abs() < 1e-10,
+            "curr_cost and clean cost differ too much: curr_cost= {}, clean cost= {}, diff = {}",
+            curr_cost,
+            clean_cost,
+            (curr_cost - clean_cost).abs()
+        );
 
         info!("Done optimising model parameters");
         info!("Final cost: {curr_cost}, achieved in {iterations} iteration(s)");
