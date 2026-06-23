@@ -62,7 +62,14 @@ impl<C: ModelSearchCost + Display + Clone> ModelOptimiser<C> {
             costs.push(curr_cost);
         }
 
-        debug_assert_eq!(curr_cost, self.c.cost());
+        // TODO: since i am setting the params like ratio by multiplying and perhaps by setting it
+        // back to the start value if the cost has not increased it might yield small numerical
+        // differences
+        // old version:
+        // debug_assert_eq!(curr_cost, self.c.cost());
+        // new version:
+        debug_assert!((curr_cost - self.c.cost()).abs() < 1e-12);
+
         info!("Done optimising model parameters");
         info!("Final cost: {curr_cost}, achieved in {iterations} iteration(s)");
 
