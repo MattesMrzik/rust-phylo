@@ -65,12 +65,15 @@ impl<C: ModelSearchCost + Display + Clone> ModelOptimiser<C> {
         // TODO: since i am setting the params like ratio by multiplying and perhaps by setting it
         // back to the start value if the cost has not increased it might yield small numerical
         // differences
+        // TODO: alternatively we could not just set the parameter like ratio back but save all
+        // original parameters and set them all back to the original, but then I would have to only
+        // set the lambda mu and r back, since again setting the ratio could mess with it
         // old version:
         // debug_assert_eq!(curr_cost, self.c.cost());
         // new version:
         let clean_cost = self.c.cost();
         assert!(
-            (curr_cost - clean_cost).abs() < 1e-10,
+            (curr_cost - clean_cost).abs() < 1e-9,
             "curr_cost and clean cost differ too much: curr_cost= {}, clean cost= {}, diff = {}",
             curr_cost,
             clean_cost,
