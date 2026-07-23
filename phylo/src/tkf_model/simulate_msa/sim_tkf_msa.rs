@@ -17,6 +17,10 @@ use crate::tree::{NodeIdx::Internal, NodeIdx::Leaf, Tree};
 /// that represents homology paths of character presence, then simulates substitutions along the same
 /// tree for the number of columns produced by the indel simulation and finally uses the indel MSA
 /// as a mask to place gaps.
+/// Note, that the MASA might contain columns where the character goes extinct, i.e., all leaf
+/// sequences have a gap in that column. You may want to call
+/// [`remove_extinct_columns`](`crate::alignment::AncestralAlignment::remove_extinct_columns`) on the
+/// resulting alignment to remove those.
 pub struct TKFMSASimulator<T, R>
 where
     T: TKFModel + FragmentSampler + ExpectedRootLength,

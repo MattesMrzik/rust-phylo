@@ -40,10 +40,14 @@ pub enum RootLength {
     Expected,
 }
 
-/// Simulates the indel process under a [TKFModel](crate::tkf_model::TKFModel) to produce an MSA
-/// containing only [`GAP`]s and [`AMB_CHAR`]s, representing the indel history.
+/// Simulates the indel process under a [TKFModel](crate::tkf_model::TKFModel) to produce an MASA
+/// (= multiple ancestral sequence alignment) containing only [`GAP`]s and [`AMB_CHAR`]s, representing the indel history.
 /// The `max_insertion_length` parameter controls the maximum number of inserted links (=fragments)
 /// that can be produced in a single insertion event.
+/// Note that, the MASA might contain columns where the character goes extinct, i.e., all leaf
+/// sequences have a gap in that column. You may want to call
+/// [`remove_extinct_columns`](`crate::alignment::AncestralAlignment::remove_extinct_columns`) on the
+/// resulting alignment to remove those.
 pub struct TKFIndelMSASimulator<
     T: TKFModel + FragmentSampler + ExpectedRootLength,
     R: Rng + SeedableRng + RngCore,
@@ -201,7 +205,7 @@ where
         }
     }
 
-    /// Samples the number of root links from a geometric distribution.
+    /// Samples the number of root links from a geometric distribution. Can be zero.
     fn sample_num_root_links(&self) -> usize {
         let prob_of_success = 1.0 - self.indel_model.lambda() / self.indel_model.mu(); // ie stopping the links
         let geom = Geometric::new(prob_of_success).unwrap();
