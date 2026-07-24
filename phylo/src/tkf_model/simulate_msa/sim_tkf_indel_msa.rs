@@ -66,8 +66,7 @@ where
     R: Rng + SeedableRng + RngCore,
 {
     fn simulate_ancestral_alignment<AA: AncestralAlignment>(&self) -> AA {
-        let TKFIndelMSASimulationResult { masa: msa, .. } =
-            self.simulate_with_fragments();
+        let TKFIndelMSASimulationResult { masa: msa, .. } = self.simulate_with_fragments();
         msa
     }
 
@@ -184,7 +183,10 @@ where
         let links = self.build_msa_links();
         let (msa, fragmentation) = self.links_to_msa(&links);
         let logl = *self.cumulative_logl.borrow();
-        let result = TKFIndelMSASimulationResult { masa: msa, fragmentation };
+        let result = TKFIndelMSASimulationResult {
+            masa: msa,
+            fragmentation,
+        };
         (result, logl)
     }
 
