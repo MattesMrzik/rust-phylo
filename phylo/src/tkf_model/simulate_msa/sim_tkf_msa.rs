@@ -6,7 +6,9 @@ use crate::alphabets::GAP;
 use crate::random::RandomGenerator;
 use crate::record_wo_desc as record;
 use crate::substitution_models::{QMatrix, SubstModel, SubstitutionSimulator};
-use crate::tkf_model::simulate_msa::sim_tkf_indel_msa::{FragmentSampler, TKFIndelMSASimulator};
+use crate::tkf_model::simulate_msa::sim_tkf_indel_msa::{
+    FragmentSampler, TKFIndelMSASimulationResult, TKFIndelMSASimulator,
+};
 use crate::tkf_model::simulate_msa::{ExpectedRootLength, RootLength};
 use crate::tkf_model::TKFModel;
 use crate::tree::{NodeIdx::Internal, NodeIdx::Leaf, Tree};
@@ -61,16 +63,15 @@ where
         self.indel_sim.root_length(root_length);
         self
     }
-}
 
-impl<T, R> AlignmentSimulation for TKFMSASimulator<T, R>
-where
-    T: TKFModel + FragmentSampler + ExpectedRootLength,
-    R: Rng + SeedableRng + RngCore + Clone,
-{
-    fn simulate_ancestral_alignment<AA: AncestralAlignment>(&self) -> AA {
-        // First, simulate indels
-        let indel_msa = self.indel_sim.simulate_ancestral_alignment::<AA>();
+    /// Simulates the full TKF process (indels then substitutions) and returns both
+    /// the MSA and the fragmentation (right-exclusive boundaries of fragments).
+    pub fn simulate_with_fragments<AA: AncestralAlignment>(&self) -> TKFMSASimulationResult<AA> {
+        // First, indel simulation
+        let TKFIndelMSASimulationResult {
+            masa: indel_msa,
+            fragmentation,
+        } = self.indel_sim.simulate_with_fragments::<AA>();
 
         // Second, substitution simulation
         let aln_len = indel_msa.len();
@@ -116,7 +117,24 @@ where
 
         // Lastly, construct the final ancestral MSA from the combined records
         let seqs = Sequences::new(combined_records);
-        AA::from_aligned_with_ancestral(seqs, self.indel_sim.tree()).unwrap()
+        let msa = AA::from_aligned_with_ancestral(seqs, self.indel_sim.tree()).unwrap();
+        TKFMSASimulationResult { msa, fragmentation }
+    }
+}
+
+/// Result of a full TKF simulation (indels + substitutions) including fragmentation.
+pub struct TKFMSASimulationResult<AA: AncestralAlignment> {
+    pub msa: AA,
+    pub fragmentation: Vec<usize>,
+}
+
+impl<T, R> AlignmentSimulation for TKFMSASimulator<T, R>
+where
+    T: TKFModel + FragmentSampler + ExpectedRootLength,
+    R: Rng + SeedableRng + RngCore + Clone,
+{
+    fn simulate_ancestral_alignment<AA: AncestralAlignment>(&self) -> AA {
+        self.simulate_with_fragments::<AA>().msa
     }
 
     fn simulate_alignment<A: Alignment>(&self) -> A {

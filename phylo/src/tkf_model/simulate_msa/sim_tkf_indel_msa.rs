@@ -66,12 +66,8 @@ where
     R: Rng + SeedableRng + RngCore,
 {
     fn simulate_ancestral_alignment<AA: AncestralAlignment>(&self) -> AA {
-        let result = self.simulate_with_fragments();
-        let TKFIndelMSASimulationResult {
-            msa,
-            fragmentation: _,
-            _logl: _,
-        } = result;
+        let TKFIndelMSASimulationResult { masa: msa, .. } =
+            self.simulate_with_fragments();
         msa
     }
 
@@ -144,22 +140,8 @@ enum LinkFate {
 }
 
 pub struct TKFIndelMSASimulationResult<AA: AncestralAlignment> {
-    msa: AA,
-    fragmentation: Vec<usize>,
-    // This is only used for testing purposes. It contains the log-likelihood of the simulated MSA
-    // under the model, which is accumulated during the simulation.
-    _logl: f64,
-}
-
-impl<AA: AncestralAlignment> TKFIndelMSASimulationResult<AA> {
-    pub fn msa(&self) -> &AA {
-        &self.msa
-    }
-
-    /// Returns the right exclusive boundaries of the fragments in the MSA.
-    pub fn fragmentation(&self) -> &Vec<usize> {
-        &self.fragmentation
-    }
+    pub masa: AA,
+    pub fragmentation: Vec<usize>,
 }
 
 impl<T, R> TKFIndelMSASimulator<T, R>
@@ -193,16 +175,24 @@ where
         &self.tree
     }
 
-    /// Simulates the indel process and produces the corresponding ancestral alignment and fragmentation.
-    fn simulate_with_fragments<AA: AncestralAlignment>(&self) -> TKFIndelMSASimulationResult<AA> {
+    /// Simulates the indel process and returns the alignment, fragmentation, and log-likelihood of the simulated MSA
+    /// under the model, which is accumulated during the simulation.
+    fn simulate_with_fragments_and_logl<AA: AncestralAlignment>(
+        &self,
+    ) -> (TKFIndelMSASimulationResult<AA>, f64) {
         *self.cumulative_logl.borrow_mut() = 0.0;
         let links = self.build_msa_links();
         let (msa, fragmentation) = self.links_to_msa(&links);
-        TKFIndelMSASimulationResult {
-            msa,
-            fragmentation,
-            _logl: *self.cumulative_logl.borrow(),
-        }
+        let logl = *self.cumulative_logl.borrow();
+        let result = TKFIndelMSASimulationResult { masa: msa, fragmentation };
+        (result, logl)
+    }
+
+    /// Simulates the indel process and produces the corresponding ancestral alignment and fragmentation.
+    pub fn simulate_with_fragments<AA: AncestralAlignment>(
+        &self,
+    ) -> TKFIndelMSASimulationResult<AA> {
+        self.simulate_with_fragments_and_logl().0
     }
 
     /// Samples the number of root links from a geometric distribution. Can be zero.
@@ -749,8 +739,9 @@ mod private_tests {
                 DefaultGenerator::new(seed),
                 max_insertion_length,
             );
-            let result: TKFIndelMSASimulationResult<MASA> = simulator.simulate_with_fragments();
-            let alignment = result.msa();
+            let (result, logl): (TKFIndelMSASimulationResult<MASA>, f64) =
+                simulator.simulate_with_fragments_and_logl();
+            let alignment = result.masa;
             assert_eq!(alignment.seq_count() + alignment.ancestral_seqs().len(), 19);
             let phylo = PhyloInfo {
                 msa: alignment.clone(),
@@ -760,17 +751,12 @@ mod private_tests {
                 phylo.check_dollos_constraint().is_ok(),
                 "Simulated alignment must satisfy Dollo's constraint (no re-gain of characters)"
             );
-            let cost = TKF92FixedIndelCostBuilder::new(
-                lambda,
-                mu,
-                r,
-                result.fragmentation().clone(),
-                phylo,
-            )
-            .build()
-            .unwrap()
-            .logl();
-            assert_relative_eq!(result._logl, cost, epsilon = 1e-10);
+            let cost =
+                TKF92FixedIndelCostBuilder::new(lambda, mu, r, result.fragmentation.clone(), phylo)
+                    .build()
+                    .unwrap()
+                    .logl();
+            assert_relative_eq!(logl, cost, epsilon = 1e-10);
         }
     }
 
@@ -793,17 +779,17 @@ mod private_tests {
                 DefaultGenerator::new(seed),
                 max_insertion_length,
             );
-            let result: TKFIndelMSASimulationResult<MASA> = simulator.simulate_with_fragments();
-            let alignment = result.msa();
+            let (result, logl): (TKFIndelMSASimulationResult<MASA>, f64) =
+                simulator.simulate_with_fragments_and_logl();
+            let alignment = result.masa;
             assert_eq!(alignment.seq_count() + alignment.ancestral_seqs().len(), 19);
 
             // In TKF91 every residue is its own independent link (fragment length == 1), so the
             // fragmentation must be exactly [1, 2, 3, ..., n_cols].
-            let n_cols = result.fragmentation().len();
+            let n_cols = result.fragmentation.len();
             let expected_fragmentation: Vec<usize> = (1..=n_cols).collect();
             assert_eq!(
-                result.fragmentation(),
-                &expected_fragmentation,
+                result.fragmentation, expected_fragmentation,
                 "TKF91 fragmentation must have every column as its own block"
             );
 
@@ -820,7 +806,7 @@ mod private_tests {
                 .build()
                 .unwrap()
                 .logl();
-            assert_relative_eq!(result._logl, cost, epsilon = 1e-10);
+            assert_relative_eq!(logl, cost, epsilon = 1e-10);
         }
     }
 
@@ -843,7 +829,7 @@ mod private_tests {
             TKFIndelMSASimulator::new(tkf_model, tree, DefaultGenerator::new(seed), max_len);
         let result1 = simulator1.simulate_with_fragments::<MASA>();
         let msa2: MASA = simulator2.simulate_ancestral_alignment();
-        assert_eq!(result1.msa().to_string(), msa2.to_string());
+        assert_eq!(result1.masa.to_string(), msa2.to_string());
     }
 
     #[test]
@@ -857,7 +843,7 @@ mod private_tests {
         let simulator =
             TKFIndelMSASimulator::new(tkf_model, tree.clone(), DefaultGenerator::new(123), max_len);
         let result = simulator.simulate_with_fragments::<MASA>();
-        let msa = result.msa();
+        let msa = result.masa;
         // With max_len = 0, no insertions can happen on branches.
         // Thus, every column in the MSA must have a char at the root.
         let root_map = msa.ancestral_map(&tree.root);
