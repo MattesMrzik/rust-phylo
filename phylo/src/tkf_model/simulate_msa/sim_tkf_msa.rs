@@ -117,14 +117,17 @@ where
 
         // Lastly, construct the final ancestral MSA from the combined records
         let seqs = Sequences::new(combined_records);
-        let msa = AA::from_aligned_with_ancestral(seqs, self.indel_sim.tree()).unwrap();
-        TKFMSASimulationResult { msa, fragmentation }
+        let masa = AA::from_aligned_with_ancestral(seqs, self.indel_sim.tree()).unwrap();
+        TKFMSASimulationResult {
+            masa,
+            fragmentation,
+        }
     }
 }
 
 /// Result of a full TKF simulation (indels + substitutions) including fragmentation.
 pub struct TKFMSASimulationResult<AA: AncestralAlignment> {
-    pub msa: AA,
+    pub masa: AA,
     pub fragmentation: Vec<usize>,
 }
 
@@ -134,7 +137,7 @@ where
     R: Rng + SeedableRng + RngCore + Clone,
 {
     fn simulate_ancestral_alignment<AA: AncestralAlignment>(&self) -> AA {
-        self.simulate_with_fragments::<AA>().msa
+        self.simulate_with_fragments::<AA>().masa
     }
 
     fn simulate_alignment<A: Alignment>(&self) -> A {
