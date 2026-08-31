@@ -4,14 +4,14 @@ use rand::{Rng, RngCore, SeedableRng};
 use crate::alignment::{Alignment, AlignmentSimulation, AncestralAlignment, Sequences, MASA};
 use crate::alphabets::GAP;
 use crate::random::RandomGenerator;
-use crate::record_wo_desc as record;
 use crate::substitution_models::{QMatrix, SubstModel, SubstitutionSimulator};
 use crate::tkf_model::simulate_msa::sim_tkf_indel_msa::{
     FragmentSampler, TKFIndelMSASimulationResult, TKFIndelMSASimulator,
 };
-use crate::tkf_model::simulate_msa::{ExpectedRootLength, RootLength};
+use crate::tkf_model::simulate_msa::{ExpectedRootLength, Fragmentation, RootLength};
 use crate::tkf_model::TKFModel;
 use crate::tree::{NodeIdx::Internal, NodeIdx::Leaf, Tree};
+use crate::{record_wo_desc as record, Result};
 
 /// Simulates a full TKF process: first indels then substitutions.
 ///
@@ -21,8 +21,10 @@ use crate::tree::{NodeIdx::Internal, NodeIdx::Leaf, Tree};
 /// as a mask to place gaps.
 /// Note, that the MASA might contain columns where the character goes extinct, i.e., all leaf
 /// sequences have a gap in that column. You may want to call
-/// [`remove_extinct_columns`](`crate::alignment::AncestralAlignment::remove_extinct_columns`) on the
-/// resulting alignment to remove those.
+/// [`AncestralAlignment::remove_extinct_columns`](`crate::alignment::AncestralAlignment::remove_extinct_columns`) on the
+/// resulting alignment or
+/// [`TKFMSASimulationResult::remove_extinct_columns`](`TKFMSASimulationResult::remove_extinct_columns`) on the
+/// simulation result if you also care about the fragmentation and want to remove those.
 pub struct TKFMSASimulator<T, R>
 where
     T: TKFModel + FragmentSampler + ExpectedRootLength,
@@ -128,7 +130,14 @@ where
 /// Result of a full TKF simulation (indels + substitutions) including fragmentation.
 pub struct TKFMSASimulationResult<AA: AncestralAlignment> {
     pub masa: AA,
-    pub fragmentation: Vec<usize>,
+    pub fragmentation: Fragmentation,
+}
+
+impl<AA: AncestralAlignment> TKFMSASimulationResult<AA> {
+    pub fn remove_extinct_columns(&mut self) -> Result<()> {
+        let keep_col_mask = self.masa.remove_extinct_columns();
+        self.fragmentation.remove_cols(&keep_col_mask)
+    }
 }
 
 impl<T, R> AlignmentSimulation for TKFMSASimulator<T, R>

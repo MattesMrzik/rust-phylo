@@ -146,8 +146,9 @@ pub trait AncestralAlignment: Alignment {
     /// by the default implementation of [`Self::from_aligned_with_ancestral`].
     fn from_aligned_with_ancestral_unchecked(all_seqs: Sequences, tree: &Tree) -> Self;
     /// Removes columns from the alignment where the ancestral character goes extinct, i.e. columns
-    /// where all leaf sequences have a gap.
-    fn remove_extinct_columns(&mut self);
+    /// where all leaf sequences have a gap and returns a boolean mask indicating which columns were
+    /// removed, ie `true` for columns that were kept and `false` for columns that were removed.
+    fn remove_extinct_columns(&mut self) -> Vec<bool>;
     /// Transforms self into a regular alignment, i.e., without ancestral sequences.
     fn into_alignment<A: Alignment>(self, tree: &Tree) -> A {
         let mut leaf_records = Vec::with_capacity(self.leaf_maps().len());
@@ -623,12 +624,12 @@ impl AncestralAlignment for MASA {
         }
     }
 
-    fn remove_extinct_columns(&mut self) {
+    fn remove_extinct_columns(&mut self) -> Vec<bool> {
         // Determine columns where the ancestral character did not go extinct
         let keep_cols = surviving_columns_mask(self);
         // If no character goes extinct, we don't have to update the alignment
         if keep_cols.iter().all(|b| *b) {
-            return;
+            return keep_cols;
         }
         if keep_cols.iter().all(|b| !*b) {
             warn!(
@@ -680,6 +681,8 @@ impl AncestralAlignment for MASA {
                 )
             });
         }
+
+        keep_cols
     }
 }
 

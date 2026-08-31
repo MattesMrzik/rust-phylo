@@ -9,9 +9,10 @@ use rand_distr::{Distribution, Geometric};
 use crate::alignment::{Alignment, AlignmentSimulation, AncestralAlignment, Sequences, MASA};
 use crate::alphabets::{AMB_CHAR, GAP};
 use crate::random::RandomGenerator;
-use crate::record_wo_desc as record;
+use crate::tkf_model::simulate_msa::Fragmentation;
 use crate::tkf_model::{beta, h1, n0, TKFModel};
 use crate::tree::{NodeIdx, Tree};
+use crate::{record_wo_desc as record, Result};
 
 /// Abstracts over how a single fragment's length is sampled.
 ///
@@ -46,8 +47,10 @@ pub enum RootLength {
 /// that can be produced in a single insertion event.
 /// Note that, the MASA might contain columns where the character goes extinct, i.e., all leaf
 /// sequences have a gap in that column. You may want to call
-/// [`remove_extinct_columns`](`crate::alignment::AncestralAlignment::remove_extinct_columns`) on the
-/// resulting alignment to remove those.
+/// [`AncestralAlignment::remove_extinct_columns`](`crate::alignment::AncestralAlignment::remove_extinct_columns`) on the
+/// resulting alignment or
+/// [`TKFIndelMSASimulationResult::remove_extinct_columns`](`TKFIndelMSASimulationResult::remove_extinct_columns`) on the
+/// simulation result if you also care about the fragmentation and want to remove those.
 pub struct TKFIndelMSASimulator<
     T: TKFModel + FragmentSampler + ExpectedRootLength,
     R: Rng + SeedableRng + RngCore,
@@ -140,7 +143,14 @@ enum LinkFate {
 
 pub struct TKFIndelMSASimulationResult<AA: AncestralAlignment> {
     pub masa: AA,
-    pub fragmentation: Vec<usize>,
+    pub fragmentation: Fragmentation,
+}
+
+impl<AA: AncestralAlignment> TKFIndelMSASimulationResult<AA> {
+    pub fn remove_extinct_columns(&mut self) -> Result<()> {
+        let keep_col_mask = self.masa.remove_extinct_columns();
+        self.fragmentation.remove_cols(&keep_col_mask)
+    }
 }
 
 impl<T, R> TKFIndelMSASimulator<T, R>
@@ -181,10 +191,10 @@ where
     ) -> (TKFIndelMSASimulationResult<AA>, f64) {
         *self.cumulative_logl.borrow_mut() = 0.0;
         let links = self.build_msa_links();
-        let (msa, fragmentation) = self.links_to_msa(&links);
+        let (masa, fragmentation) = self.links_to_msa(&links);
         let logl = *self.cumulative_logl.borrow();
         let result = TKFIndelMSASimulationResult {
-            masa: msa,
+            masa,
             fragmentation,
         };
         (result, logl)
@@ -424,7 +434,7 @@ where
 
     /// After [simulation of the links](`Self::build_msa_links`) is complete, this function
     /// calls [`Self::append_link_to_msa`] for every root link to build the final MSA and fragmentation.
-    fn links_to_msa<AA: AncestralAlignment>(&self, links: &Vec<TKFLink>) -> (AA, Vec<usize>) {
+    fn links_to_msa<AA: AncestralAlignment>(&self, links: &Vec<TKFLink>) -> (AA, Fragmentation) {
         let mut msa: Seqs = HashMap::new();
         for node in self.tree.preorder() {
             msa.insert(*node, Vec::new());
@@ -433,6 +443,7 @@ where
         for link in links {
             self.append_link_to_msa(link, &mut msa, &mut fragmentation);
         }
+
         let records = msa
             .iter()
             .map(|(node, seq)| record!(&self.tree.node(node).id, seq))
@@ -440,6 +451,10 @@ where
 
         let seqs = Sequences::new(records);
         let msa = AA::from_aligned_with_ancestral(seqs, &self.tree).unwrap();
+
+        let fragmentation = Fragmentation::new(fragmentation)
+            .expect("fragmentation should be valid since it was built from the links");
+        fragmentation.fragmentation_works_with_ancestral_alignment(&msa).expect("fragmentation should work with ancestral alignment since it was built from the links");
         (msa, fragmentation)
     }
 
@@ -753,11 +768,16 @@ mod private_tests {
                 phylo.check_dollos_constraint().is_ok(),
                 "Simulated alignment must satisfy Dollo's constraint (no re-gain of characters)"
             );
-            let cost =
-                TKF92FixedIndelCostBuilder::new(lambda, mu, r, result.fragmentation.clone(), phylo)
-                    .build()
-                    .unwrap()
-                    .logl();
+            let cost = TKF92FixedIndelCostBuilder::new(
+                lambda,
+                mu,
+                r,
+                result.fragmentation.right_exclusive_boundaries().to_vec(),
+                phylo,
+            )
+            .build()
+            .unwrap()
+            .logl();
             assert_relative_eq!(logl, cost, epsilon = 1e-10);
         }
     }
@@ -791,7 +811,8 @@ mod private_tests {
             let n_cols = result.fragmentation.len();
             let expected_fragmentation: Vec<usize> = (1..=n_cols).collect();
             assert_eq!(
-                result.fragmentation, expected_fragmentation,
+                result.fragmentation.right_exclusive_boundaries(),
+                expected_fragmentation,
                 "TKF91 fragmentation must have every column as its own block"
             );
 
