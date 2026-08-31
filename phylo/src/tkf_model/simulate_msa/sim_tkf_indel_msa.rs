@@ -453,8 +453,8 @@ where
         let msa = AA::from_aligned_with_ancestral(seqs, &self.tree).unwrap();
 
         let fragmentation = Fragmentation::new(fragmentation)
-            .expect("fragmentation should be valid since it was built from the links");
-        fragmentation.fragmentation_works_with_ancestral_alignment(&msa).expect("fragmentation should work with ancestral alignment since it was built from the links");
+            .expect("fragmentation should be valid since it was built from the links, pls report this at...");
+        fragmentation.fragmentation_works_with_ancestral_alignment(&msa).expect("fragmentation should work with ancestral alignment since it was built from the links, pls report this at...");
         (msa, fragmentation)
     }
 
