@@ -207,7 +207,7 @@ mod private_tests {
     #[case(vec![false, false, true, true, true, true, true, false, true])]
     fn remove_cols_from_fragmentation_mask_does_not_match(#[case] keep_cols_mask: Vec<bool>) {
         let mut fragmentation = Fragmentation::new(vec![3, 6, 9]).unwrap();
-        let err = fragmentation.remove_cols( &keep_cols_mask);
+        let err = fragmentation.remove_cols(&keep_cols_mask);
         assert_matches!(err.unwrap_err(), Tkf(msg) if msg.contains("mask does not match fragmentation"));
     }
 }
